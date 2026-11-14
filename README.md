@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+## Table of Contents
+
+- [Qbal](#qbal)
+  - [Install](#install)
+  - [Use](#use)
+  - [Documentation](#documentation)
+  - [Credits](#credits)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Qbal
 
 A fast [Qobuz](https://www.qobuz.com) player for the Linux terminal, written in Rust.
