@@ -49,7 +49,7 @@ pub struct AudioAnalyzer {
   /// Raw engine output: [left 0..bpc][right bpc..2bpc], each bass to treble.
   output: Box<[f64]>,
   spectrum: SpectrumData,
-  /// The newest tenth of a second as a mono mix, read by `recent_audio`.
+  /// The newest tenth of a second as a mono mix, thinned into the waveform.
   recent: VecDeque<f32>,
   written: u64,
 }
@@ -86,6 +86,17 @@ impl AudioAnalyzer {
 
   /// A new cavacore plan for a new display bar count (a resize or a style
   /// switch), as cava does on resize. The capture ring is not the plan's and stays.
+  /// Adopt the rate the audio server actually negotiated. Only the PipeWire
+  /// backend renegotiates after construction, so cpal-only builds never call this.
+  #[cfg_attr(not(all(feature = "audio-viz", target_os = "linux")), allow(dead_code))]
+  pub fn set_sample_rate(&mut self, sample_rate: u32) {
+    let sample_rate = clamp_sample_rate(sample_rate);
+    if sample_rate != self.sample_rate {
+      let bars_per_channel = clamp_bars_per_channel(sample_rate, self.bars_per_channel);
+      *self = Self::with_plan(sample_rate, bars_per_channel);
+    }
+  }
+
   pub fn set_bars(&mut self, display_bars: usize) {
     let bars_per_channel = clamp_bars_per_channel(self.sample_rate, display_bars / 2);
     if bars_per_channel != self.bars_per_channel {

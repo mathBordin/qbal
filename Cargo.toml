@@ -95,19 +95,14 @@ rodio = { version = "0.22" }
 # `librespot-*/feature` refs unchanged; `=`-pinned so all seven crates upgrade in
 # lockstep. See SPOTATUI_FORK.md in the fork repo for the carried patches.
 # No default features: the TLS stack is chosen per target below.
-# Google Cast speakers on the local network: the mDNS browse and the CASTV2 TLS link.
 futures = "0.3.32"
-tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 url = "2.5"
 
-# librespot's TLS: native-tls on desktops, rustls on Android, where native-tls
-# would mean an OpenSSL build with the NDK. The two are mutually exclusive.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Android has no backend; there the media session's foreground service keeps playback alive.
 keepawake = "0.6"
 
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
-arboard = { version = "3.4", features = ["wayland-data-control"] }
 pipewire = { version = "0.10", optional = true }
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]

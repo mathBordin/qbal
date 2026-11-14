@@ -33,11 +33,12 @@ cargo test
 
 These commands are the *fast local gate*, not the full picture. GitHub Actions
 (`.github/workflows/ci.yml`) runs `check`, `test`, and `clippy` on `ubuntu-latest`
-across a two-leg feature matrix (Linux only):
+across a three-leg feature matrix (Linux only):
 
 | Leg | Features |
 |-----|----------|
 | `default` | a plain `cargo test`: `tui` + audio-viz-cpal + scripting + OS integrations |
+| `all-features` | `--features cover-art,audio-viz`: the default set plus terminal cover art and PipeWire visualizer capture. The only leg that compiles the PipeWire backend, so verify capture changes with this exact command |
 | `headless` | no features at all - the only leg without `tui`. `mod tui` is feature-gated, so this leg turns any `crate::tui` import from core/infra/cli into a compile error - what keeps a second frontend from silently re-coupling to the terminal one |
 
 - Every CI leg passes `--locked`; the local commands do not. Regenerate

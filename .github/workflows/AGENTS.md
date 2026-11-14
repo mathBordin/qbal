@@ -1,7 +1,9 @@
 ## CI Checks (run before opening a PR)
 
-- `ci.yml` runs `check`, `test` and `clippy -D warnings` on two Linux legs:
-  `default` (`--locked`) and `headless` (`--locked --no-default-features`).
+- `ci.yml` runs `check`, `test` and `clippy -D warnings` on three Linux legs:
+  `default` (`--locked`), `all-features` (`--locked --features
+  cover-art,audio-viz`, which needs `libpipewire-0.3-dev libspa-0.2-dev clang`)
+  and `headless` (`--locked --no-default-features`).
   Reproduce them locally with `cargo test` / `cargo clippy -- -D warnings` and
   the same commands with `--no-default-features`.
 - CI runs on Linux only. The `#[cfg(target_os = "macos")]` and

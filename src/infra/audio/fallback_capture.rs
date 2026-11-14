@@ -4,7 +4,7 @@
 // in a proot container on Android. The fallback never opens the default input,
 // which can be a microphone.
 
-use super::analyzer::{RecentAudio, SpectrumData};
+use super::analyzer::SpectrumData;
 use super::capture::AudioCaptureManager as CpalCapture;
 use super::pipewire_capture::PipeWireCapture;
 
@@ -34,13 +34,6 @@ impl AudioCaptureManager {
     match self {
       Self::PipeWire(capture) => capture.get_spectrum(desired_bars),
       Self::Cpal(capture) => capture.get_spectrum(desired_bars),
-    }
-  }
-
-  pub fn recent_audio(&self) -> Option<RecentAudio> {
-    match self {
-      Self::PipeWire(capture) => capture.recent_audio(),
-      Self::Cpal(capture) => capture.recent_audio(),
     }
   }
 

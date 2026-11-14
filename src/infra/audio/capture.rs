@@ -16,8 +16,17 @@ pub struct AudioCaptureManager {
 impl AudioCaptureManager {
   /// Create a new audio capture manager sized for `display_bars`
   /// Returns None if no suitable audio device is found
+  // The PipeWire build opens cpal only through `new_monitor_only`.
+  #[cfg_attr(all(feature = "audio-viz", target_os = "linux"), allow(dead_code))]
   pub fn new(display_bars: usize) -> Option<Self> {
     Self::open(display_bars, true)
+  }
+
+  /// Like `new`, but on Linux it never falls back to the default input, which
+  /// can be a microphone. The PipeWire build's fallback uses it.
+  #[cfg_attr(not(all(feature = "audio-viz", target_os = "linux")), allow(dead_code))]
+  pub fn new_monitor_only(display_bars: usize) -> Option<Self> {
+    Self::open(display_bars, false)
   }
 
   fn open(display_bars: usize, allow_default_input: bool) -> Option<Self> {

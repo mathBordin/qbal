@@ -44,6 +44,10 @@ jobs:
           # re-coupling to the terminal one.
           - name: headless
             args: "--locked --no-default-features"
+          # Every optional feature: cover art and the PipeWire visualizer
+          # capture, which the default build leaves out.
+          - name: all-features
+            args: "--locked --features cover-art,audio-viz"
     env:
       RUSTFLAGS: "-C linker-features=-lld"
     steps:
@@ -54,7 +58,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev
+          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev libpipewire-0.3-dev libspa-0.2-dev clang
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check $ARGS
         env:
@@ -73,6 +77,10 @@ jobs:
           # See the check job for why the headless leg exists.
           - name: headless
             args: "--locked --no-default-features"
+          # Every optional feature: cover art and the PipeWire visualizer
+          # capture, which the default build leaves out.
+          - name: all-features
+            args: "--locked --features cover-art,audio-viz"
     env:
       RUSTFLAGS: "-C linker-features=-lld"
     steps:
@@ -83,7 +91,7 @@ jobs:
       # These dependencies are required for the audio backend.
       - run: |
           sudo apt-get update
-          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev
+          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev libpipewire-0.3-dev libspa-0.2-dev clang
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test $ARGS
         env:
@@ -109,7 +117,7 @@ jobs:
           components: llvm-tools-preview
       - run: |
           sudo apt-get update
-          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev
+          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev libpipewire-0.3-dev libspa-0.2-dev clang
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@db07720855ab1f9adf78d37929621da20c5775a4 # cargo-llvm-cov
         with:
@@ -149,6 +157,10 @@ jobs:
           # See the check job for why the headless leg exists.
           - name: headless
             args: "--locked --no-default-features"
+          # Every optional feature: cover art and the PipeWire visualizer
+          # capture, which the default build leaves out.
+          - name: all-features
+            args: "--locked --features cover-art,audio-viz"
     env:
       RUSTFLAGS: "-C linker-features=-lld"
     steps:
@@ -160,7 +172,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev
+          sudo apt-get install -y -qq pkg-config libssl-dev libasound2-dev libpipewire-0.3-dev libspa-0.2-dev clang
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy $ARGS -- -D warnings
         env:
