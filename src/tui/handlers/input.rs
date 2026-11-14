@@ -120,12 +120,6 @@ fn process_input(app: &mut App, input: String) {
   // On searching for a track, clear the playlist selection
   app.view.selected_playlist_index = Some(0);
 
-  if attempt_process_uri(app, &input, "https://open.spotify.com/", "/")
-    || attempt_process_uri(app, &input, "spotify:", ":")
-  {
-    return;
-  }
-
   // Default fallback behavior: treat the input as a raw search phrase, routed
   // to the active source's catalog.
   app.apply(Action::SearchActiveSource(input));
@@ -163,48 +157,6 @@ fn process_saved_track_search(app: &mut App, input: String) {
   if !app.try_search_saved_tracks_from_cached_pages(&query) {
     app.set_status_message(app.strings().status.app.liked_loading, 3);
   }
-}
-
-fn spotify_resource_id(base: &str, uri: &str, sep: &str, resource_type: &str) -> (String, bool) {
-  let uri_prefix = format!("{}{}{}", base, resource_type, sep);
-  let id_string_with_query_params = uri.trim_start_matches(&uri_prefix);
-  let query_idx = id_string_with_query_params
-    .find('?')
-    .unwrap_or(id_string_with_query_params.len());
-  let id_string = id_string_with_query_params[0..query_idx].to_string();
-  // If the lengths aren't equal, we must have found a match.
-  let matched = id_string_with_query_params.len() != uri.len() && id_string.len() != uri.len();
-  (id_string, matched)
-}
-
-// Returns true if the input was successfully processed as a Spotify URI.
-fn attempt_process_uri(_app: &mut App, input: &str, base: &str, sep: &str) -> bool {
-  let (_album_id, matched) = spotify_resource_id(base, input, sep, "album");
-  if matched {
-    return true;
-  }
-
-  let (_artist_id, matched) = spotify_resource_id(base, input, sep, "artist");
-  if matched {
-    return true;
-  }
-
-  let (_track_id, matched) = spotify_resource_id(base, input, sep, "track");
-  if matched {
-    return true;
-  }
-
-  let (_playlist_id, matched) = spotify_resource_id(base, input, sep, "playlist");
-  if matched {
-    return true;
-  }
-
-  let (_show_id, matched) = spotify_resource_id(base, input, sep, "show");
-  if matched {
-    return true;
-  }
-
-  false
 }
 
 fn compute_character_width(character: char) -> u16 {
@@ -468,110 +420,5 @@ mod tests {
     assert_eq!(app.view.input, str_to_vec_char("你好"));
     assert_eq!(app.view.input_idx, 2);
     assert_eq!(app.view.input_cursor_position, 4);
-  }
-
-  mod test_uri_parsing {
-    use super::*;
-
-    const URI_BASE: &str = "spotify:";
-    const URL_BASE: &str = "https://open.spotify.com/";
-
-    fn check_uri_parse(expected_id: &str, parsed: (String, bool)) {
-      assert!(parsed.1);
-      assert_eq!(parsed.0, expected_id);
-    }
-
-    fn run_test_for_id_and_resource_type(id: &str, resource_type: &str) {
-      check_uri_parse(
-        id,
-        spotify_resource_id(
-          URI_BASE,
-          &format!("spotify:{}:{}", resource_type, id),
-          ":",
-          resource_type,
-        ),
-      );
-      check_uri_parse(
-        id,
-        spotify_resource_id(
-          URL_BASE,
-          &format!("https://open.spotify.com/{}/{}", resource_type, id),
-          "/",
-          resource_type,
-        ),
-      )
-    }
-
-    #[test]
-    fn artist() {
-      let expected_artist_id = "2ye2Wgw4gimLv2eAKyk1NB";
-      run_test_for_id_and_resource_type(expected_artist_id, "artist");
-    }
-
-    #[test]
-    fn album() {
-      let expected_album_id = "5gzLOflH95LkKYE6XSXE9k";
-      run_test_for_id_and_resource_type(expected_album_id, "album");
-    }
-
-    #[test]
-    fn playlist() {
-      let expected_playlist_id = "1cJ6lPBYj2fscs0kqBHsVV";
-      run_test_for_id_and_resource_type(expected_playlist_id, "playlist");
-    }
-
-    #[test]
-    fn show() {
-      let expected_show_id = "3aNsrV6lkzmcU1w8u8kA7N";
-      run_test_for_id_and_resource_type(expected_show_id, "show");
-    }
-
-    #[test]
-    fn track() {
-      let expected_track_id = "10igKaIKsSB6ZnWxPxPvKO";
-      run_test_for_id_and_resource_type(expected_track_id, "track");
-    }
-
-    #[test]
-    fn invalid_format_doesnt_match() {
-      let swapped = "show:spotify:3aNsrV6lkzmcU1w8u8kA7N";
-      let totally_wrong = "hehe-haha-3aNsrV6lkzmcU1w8u8kA7N";
-      let random = "random string";
-      let (_, matched) = spotify_resource_id(URI_BASE, swapped, ":", "track");
-      assert!(!matched);
-      let (_, matched) = spotify_resource_id(URI_BASE, totally_wrong, ":", "track");
-      assert!(!matched);
-      let (_, matched) = spotify_resource_id(URL_BASE, totally_wrong, "/", "track");
-      assert!(!matched);
-      let (_, matched) = spotify_resource_id(URL_BASE, random, "/", "track");
-      assert!(!matched);
-    }
-
-    #[test]
-    fn parse_with_query_parameters() {
-      // If this test ever fails due to some change to the parsing logic, it is likely a sign we
-      // should just integrate the url crate instead of trying to do things ourselves.
-      let playlist_url_with_query =
-        "https://open.spotify.com/playlist/1cJ6lPBYj2fscs0kqBHsVV?si=OdwuJsbsSeuUAOadehng3A";
-      let playlist_url = "https://open.spotify.com/playlist/1cJ6lPBYj2fscs0kqBHsVV";
-      let expected_id = "1cJ6lPBYj2fscs0kqBHsVV";
-
-      let (actual_id, matched) = spotify_resource_id(URL_BASE, playlist_url, "/", "playlist");
-      assert!(matched);
-      assert_eq!(actual_id, expected_id);
-
-      let (actual_id, matched) =
-        spotify_resource_id(URL_BASE, playlist_url_with_query, "/", "playlist");
-      assert!(matched);
-      assert_eq!(actual_id, expected_id);
-    }
-
-    #[test]
-    fn mismatched_resource_types_do_not_match() {
-      let playlist_url =
-        "https://open.spotify.com/playlist/1cJ6lPBYj2fscs0kqBHsVV?si=OdwuJsbsSeuUAOadehng3A";
-      let (_, matched) = spotify_resource_id(URL_BASE, playlist_url, "/", "album");
-      assert!(!matched);
-    }
   }
 }

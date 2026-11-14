@@ -539,17 +539,9 @@ fn playbar_controls_available(app: &App) -> bool {
   non_spotify_source_playback_active(app)
 }
 
-/// True when a non-Spotify source (local/subsonic/radio/youtube) currently
-/// owns playback. Each source's playback field is gated behind its own
-/// feature flag, so every access here is guarded to match — this must
-/// compile in the slim build (no source features) as well as any single- or
-/// all-sources build.
+/// True when a Qobuz session owns playback.
 fn non_spotify_source_playback_active(app: &App) -> bool {
-  if app.qobuz_playback.is_some() {
-    return true;
-  }
-
-  false
+  app.qobuz_playback.is_some()
 }
 
 pub(crate) fn playbar_control_at(

@@ -3,9 +3,9 @@ name: Gates floor
 # Raises the two adoption floors in tools/gates.count (test_attribute_total,
 # action_refs_in_tui_handlers) to the measured values after each push to main,
 # so a PR that adds tests never edits the file. The build runs with no write
-# token in reach; the commit job mints the spotatui[bot] token only after a
-# fresh checkout. The app needs Contents write access and a bypass entry on the
-# "Protect main" ruleset.
+# token in reach; only the commit job, after a fresh checkout, gets
+# contents:write and pushes with the repository's own GITHUB_TOKEN (a push made
+# with that token starts no further workflow runs).
 
 on:
   push:
@@ -58,6 +58,8 @@ jobs:
     needs: measure
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -77,24 +79,14 @@ jobs:
           git diff
           bash tools/check_gates_ratchet.sh HEAD
           echo "changed=true" >> "$GITHUB_OUTPUT"
-      - name: Mint spotatui[bot] token (contents:write only)
-        if: steps.apply.outputs.changed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.SPOTATUI_APP_ID }}
-          private-key: ${{ secrets.SPOTATUI_APP_KEY }}
-          permission-contents: write
       - name: Commit and push
         if: steps.apply.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          bot_id=$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)
-          git config user.name "${SLUG}[bot]"
-          git config user.email "${bot_id}+${SLUG}[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(gates): raise the adoption floors [skip ci]" -- tools/gates.count
           # A non-fast-forward rejection means main moved during the run: the
           # run for the newer commit raises the floors instead.
