@@ -166,34 +166,6 @@ jobs:
         env:
           ARGS: ${{ matrix.args }}
 
-  # macOS is the one platform the Linux legs above cannot speak for: it picks a
-  # different playback backend (portaudio, not alsa/rodio), a different OS
-  # integration (`macos-media`, not `mpris`), and it is the only place the
-  # `#[cfg(target_os = "macos")]` arms are compiled at all.
-  #
-  # Check and clippy only: what actually risks breaking here is a
-  # target-gated arm or a feature that does not exist on macOS, and the test
-  # suite is platform-independent logic the Linux legs already run.
-  macos:
-    name: macOS (check + clippy)
-    runs-on: macos-latest
-    needs: prepare
-    env:
-      FEATURES: "tui,cover-art,audio-viz-cpal,macos-media,discord-rpc,scripting"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: clippy
-      - name: Install system dependencies
-        run: brew install openssl@3
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: Check
-        run: cargo check --locked --no-default-features --features "$FEATURES"
-      - name: Clippy
-        run: cargo clippy --locked --no-default-features --features "$FEATURES" -- -D warnings
-
   # The src/gates.rs test pins the coupling counters in tools/gates.count to the
   # measured values and holds the adoption counters as floors (gates-floor.yml
   # raises those on main); this

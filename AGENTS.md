@@ -33,7 +33,7 @@ cargo test
 
 These commands are the *fast local gate*, not the full picture. GitHub Actions
 (`.github/workflows/ci.yml`) runs `check`, `test`, and `clippy` on `ubuntu-latest`
-across a two-leg feature matrix, plus one `macos-latest` job:
+across a two-leg feature matrix (Linux only):
 
 | Leg | Features |
 |-----|----------|
@@ -46,12 +46,8 @@ across a two-leg feature matrix, plus one `macos-latest` job:
   `#[cfg(test)]` code are not gated. Run `cargo test` to compile test code. A
   test-only helper whose production caller is compiled out on the headless leg
   needs `#[allow(dead_code)]`.
-- One further job, `macos`, runs `check` + `clippy` (no `test`) on
-  `macos-latest` with the macOS feature set (`tui,cover-art,audio-viz-cpal,
-  macos-media,discord-rpc,scripting`). It is the only leg that compiles the
-  `#[cfg(target_os = "macos")]` arms and `macos-media` - neither of which the
-  Linux legs can speak for. No `test`: the suite is platform-independent logic
-  the Linux legs already run.
+- CI runs on Linux only: no job compiles the `#[cfg(target_os = "macos")]` or
+  `#[cfg(target_os = "windows")]` arms.
 - A pull_request-only `Gates ratchet` job diffs `tools/gates.count` against the
   merge-base (`tools/check_gates_ratchet.sh`): coupling counters may only fall;
   the two adoption counters (`test_attribute_total`,
