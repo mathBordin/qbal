@@ -2,7 +2,7 @@
 //! the playing item. Enter on the playbar opens and closes it; the layout
 //! leaves it out while searching and when the content would get too narrow.
 
-use crate::core::app::{App, PlayingTrackDetails};
+use crate::core::app::App;
 use crate::core::format::millis_to_minutes;
 use crate::core::plugin_api::PlayableInfo;
 use crate::infra::media_metadata::{current_playback_snapshot, PlaybackSnapshot};
@@ -40,50 +40,24 @@ impl NowPlayingView {
   /// The panel's values for the playing item, or `None` when nothing plays.
   pub(crate) fn from_app(app: &App) -> Option<Self> {
     let snapshot = current_playback_snapshot(app)?;
-    Some(Self::build(
-      &snapshot,
-      app.playing_track_details(),
-      |id| app.liked_song_ids_set().contains(id),
-      queued_after(app, snapshot.item_uri.as_deref()),
-    ))
+    let up_next = queued_after(app, snapshot.item_uri.as_deref());
+    Some(Self::build(&snapshot, up_next))
   }
 
   /// The pure half of [`Self::from_app`].
-  fn build(
-    snapshot: &PlaybackSnapshot,
-    details: Option<PlayingTrackDetails>,
-    is_liked: impl Fn(&str) -> bool,
-    up_next: Vec<String>,
-  ) -> Self {
-    // The cached context lags the native player after a skip: its details
-    // count only while they name the item the snapshot names.
-    let details = details.filter(|details| {
-      details.id.is_some() && details.id.as_deref() == snapshot.item_id.as_deref()
-    });
+  fn build(snapshot: &PlaybackSnapshot, up_next: Vec<String>) -> Self {
     let metadata = &snapshot.metadata;
-    let track_number = details
-      .as_ref()
-      .filter(|details| details.track_number > 0)
-      .map(|details| {
-        if details.disc_number > 1 {
-          format!("{} · disc {}", details.track_number, details.disc_number)
-        } else {
-          details.track_number.to_string()
-        }
-      });
     Self {
       title: metadata.title.clone(),
       artists: snapshot.primary_artist(),
       album: metadata.album.clone(),
-      year: details.as_ref().and_then(|details| {
-        super::util::release_year(details.release_date.as_deref()).map(str::to_string)
-      }),
-      track_number,
+      year: None,
+      track_number: None,
       length: (!snapshot.is_live && metadata.duration_ms > 0)
         .then(|| millis_to_minutes(u128::from(metadata.duration_ms))),
-      device: details.as_ref().and_then(|details| details.device.clone()),
-      liked: snapshot.item_id.as_deref().is_some_and(is_liked),
-      explicit: details.as_ref().is_some_and(|details| details.explicit),
+      device: None,
+      liked: false,
+      explicit: false,
       up_next,
     }
   }
@@ -303,16 +277,7 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
   }
 
   let mut badges = Vec::new();
-  if view.liked {
-    badges.push(Span::styled(
-      format!(
-        " {}{}",
-        app.user_config.padded_liked_icon(),
-        strings.now_playing_liked
-      ),
-      Style::default().fg(theme.active.into()),
-    ));
-  }
+
   if view.explicit {
     badges.push(Span::styled(
       format!(" [{}]", strings.now_playing_explicit),
@@ -347,98 +312,6 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::infra::media_metadata::{PlaybackItemKind, PlaybackMetadata, PlaybackSource};
-
-  fn snapshot(item_id: Option<&str>, duration_ms: u32, is_live: bool) -> PlaybackSnapshot {
-    PlaybackSnapshot {
-      metadata: PlaybackMetadata {
-        title: "Fire in These Hills".to_string(),
-        artists: vec!["Imagine Dragons".to_string()],
-        album: "LOOM".to_string(),
-        image_url: None,
-        duration_ms,
-      },
-      item_kind: PlaybackItemKind::Track,
-      item_id: item_id.map(str::to_string),
-      item_uri: item_id.map(|id| format!("spotify:track:{id}")),
-      context_uri: None,
-      source: PlaybackSource::NativeContext,
-      progress_ms: 0,
-      is_playing: true,
-      is_live,
-      shuffle: false,
-      repeat: None,
-    }
-  }
-
-  fn details(id: &str) -> PlayingTrackDetails {
-    PlayingTrackDetails {
-      id: Some(id.to_string()),
-      release_date: Some("2024-06-28".to_string()),
-      track_number: 3,
-      disc_number: 1,
-      explicit: true,
-      device: Some("spotatui".to_string()),
-    }
-  }
-
-  #[test]
-  fn details_of_the_playing_track_fill_year_track_and_device() {
-    let view = NowPlayingView::build(
-      &snapshot(Some("abc"), 219_000, false),
-      Some(details("abc")),
-      |id| id == "abc",
-      vec!["Thunder".to_string()],
-    );
-
-    assert_eq!(view.title, "Fire in These Hills");
-    assert_eq!(view.artists, "Imagine Dragons");
-    assert_eq!(view.year.as_deref(), Some("2024"));
-    assert_eq!(view.track_number.as_deref(), Some("3"));
-    assert_eq!(view.length.as_deref(), Some("3:39"));
-    assert_eq!(view.device.as_deref(), Some("spotatui"));
-    assert!(view.liked);
-    assert!(view.explicit);
-    assert_eq!(view.up_next, vec!["Thunder".to_string()]);
-  }
-
-  #[test]
-  fn details_of_a_previous_track_are_ignored_after_a_skip() {
-    let view = NowPlayingView::build(
-      &snapshot(Some("new"), 219_000, false),
-      Some(details("old")),
-      |_| false,
-      Vec::new(),
-    );
-
-    assert_eq!(view.year, None);
-    assert_eq!(view.track_number, None);
-    assert_eq!(view.device, None);
-    assert!(!view.explicit);
-    assert_eq!(view.title, "Fire in These Hills");
-  }
-
-  #[test]
-  fn a_second_disc_is_named_beside_the_track_number() {
-    let mut on_disc_two = details("abc");
-    on_disc_two.disc_number = 2;
-    let view = NowPlayingView::build(
-      &snapshot(Some("abc"), 1, false),
-      Some(on_disc_two),
-      |_| false,
-      Vec::new(),
-    );
-
-    assert_eq!(view.track_number.as_deref(), Some("3 · disc 2"));
-  }
-
-  #[test]
-  fn a_live_stream_has_no_length() {
-    let view = NowPlayingView::build(&snapshot(None, 0, true), None, |_| true, Vec::new());
-
-    assert_eq!(view.length, None);
-    assert!(!view.liked, "an item with no id is never liked");
-  }
 
   #[test]
   fn up_next_lists_spotatuis_queue_before_spotifys() {

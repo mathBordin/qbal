@@ -6,18 +6,13 @@ use super::util::get_percentage_width;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TableColumnSet {
   Songs,
-  AlbumTracks,
   Albums,
-  Podcasts,
-  Episodes,
-  RecentlyPlayed,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum WidthSpec {
   Fixed(u16),
   Percent(f32),
-  PercentMinus(f32, u16),
 }
 
 #[derive(Clone, Copy)]
@@ -86,12 +81,8 @@ fn localized_header<'a>(
 ) -> &'a str {
   match def.id {
     "title" => match table {
-      TableColumnSet::Albums | TableColumnSet::Podcasts | TableColumnSet::Episodes => {
-        strings.column_name
-      }
-      TableColumnSet::Songs | TableColumnSet::AlbumTracks | TableColumnSet::RecentlyPlayed => {
-        strings.column_title
-      }
+      TableColumnSet::Albums => strings.column_name,
+      TableColumnSet::Songs => strings.column_title,
     },
     "artist" => strings.column_artist,
     "album" => strings.column_album,
@@ -118,11 +109,7 @@ fn default_specs(table: TableColumnSet) -> Vec<ColumnSpec> {
 fn default_column_ids(table: TableColumnSet) -> &'static [&'static str] {
   match table {
     TableColumnSet::Songs => &["liked", "title", "artist", "album", "length"],
-    TableColumnSet::AlbumTracks => &["liked", "index", "title", "artist", "length"],
     TableColumnSet::Albums => &["title", "artist", "date"],
-    TableColumnSet::Podcasts => &["title", "publisher"],
-    TableColumnSet::Episodes => &["played", "date", "title", "duration"],
-    TableColumnSet::RecentlyPlayed => &["liked", "title", "artist", "length"],
   }
 }
 
@@ -130,9 +117,6 @@ fn resolve_width(layout_width: u16, spec: WidthSpec) -> u16 {
   match spec {
     WidthSpec::Fixed(width) => width,
     WidthSpec::Percent(percent) => get_percentage_width(layout_width, percent),
-    WidthSpec::PercentMinus(percent, minus) => {
-      get_percentage_width(layout_width, percent).saturating_sub(minus)
-    }
   }
 }
 
@@ -143,11 +127,7 @@ fn column_def(table: TableColumnSet, id: &str) -> Option<ColumnDef> {
 fn column_defs(table: TableColumnSet) -> &'static [ColumnDef] {
   match table {
     TableColumnSet::Songs => &SONG_COLUMNS,
-    TableColumnSet::AlbumTracks => &ALBUM_TRACK_COLUMNS,
     TableColumnSet::Albums => &ALBUM_COLUMNS,
-    TableColumnSet::Podcasts => &PODCAST_COLUMNS,
-    TableColumnSet::Episodes => &EPISODE_COLUMNS,
-    TableColumnSet::RecentlyPlayed => &RECENTLY_PLAYED_COLUMNS,
   }
 }
 
@@ -161,16 +141,6 @@ const SONG_COLUMNS: [ColumnDef; 7] = [
   year_column(),
 ];
 
-const ALBUM_TRACK_COLUMNS: [ColumnDef; 7] = [
-  liked_column(),
-  index_column(),
-  title_column(WidthSpec::PercentMinus(2.0 / 5.0, 5), "Title"),
-  artist_column(WidthSpec::Percent(2.0 / 5.0)),
-  album_column(WidthSpec::Percent(0.3)),
-  length_column(WidthSpec::Percent(1.0 / 5.0), "Length"),
-  year_column(),
-];
-
 const ALBUM_COLUMNS: [ColumnDef; 4] = [
   title_column(WidthSpec::Percent(2.0 / 5.0), "Name"),
   artist_column(WidthSpec::Percent(2.0 / 5.0)),
@@ -181,48 +151,6 @@ const ALBUM_COLUMNS: [ColumnDef; 4] = [
     column_id: ColumnId::None,
   },
   liked_column(),
-];
-
-const PODCAST_COLUMNS: [ColumnDef; 2] = [
-  title_column(WidthSpec::Percent(2.0 / 5.0), "Name"),
-  ColumnDef {
-    id: "publisher",
-    header: "Publisher(s)",
-    width: WidthSpec::Percent(2.0 / 5.0),
-    column_id: ColumnId::None,
-  },
-];
-
-const EPISODE_COLUMNS: [ColumnDef; 4] = [
-  ColumnDef {
-    id: "played",
-    header: "",
-    width: WidthSpec::Fixed(2),
-    column_id: ColumnId::None,
-  },
-  ColumnDef {
-    id: "date",
-    header: "Date",
-    width: WidthSpec::PercentMinus(0.5 / 5.0, 2),
-    column_id: ColumnId::None,
-  },
-  title_column(WidthSpec::Percent(3.5 / 5.0), "Name"),
-  ColumnDef {
-    id: "duration",
-    header: "Duration",
-    width: WidthSpec::Percent(1.0 / 5.0),
-    column_id: ColumnId::None,
-  },
-];
-
-const RECENTLY_PLAYED_COLUMNS: [ColumnDef; 7] = [
-  liked_column(),
-  index_column(),
-  title_column(WidthSpec::PercentMinus(2.0 / 5.0, 2), "Title"),
-  artist_column(WidthSpec::Percent(2.0 / 5.0)),
-  album_column(WidthSpec::Percent(0.3)),
-  length_column(WidthSpec::Percent(1.0 / 5.0), "Length"),
-  year_column(),
 ];
 
 const fn liked_column() -> ColumnDef {
@@ -303,37 +231,6 @@ mod tests {
   }
 
   #[test]
-  fn the_year_column_is_in_no_default_column_list() {
-    for table in [
-      TableColumnSet::Songs,
-      TableColumnSet::AlbumTracks,
-      TableColumnSet::RecentlyPlayed,
-    ] {
-      let columns = resolve_columns(table, 100, &[]);
-      assert!(columns.iter().all(|c| c.id != "year"));
-    }
-  }
-
-  #[test]
-  fn song_tables_accept_a_configured_year_column() {
-    let year = ColumnSpec {
-      id: "year".to_string(),
-      ..Default::default()
-    };
-    for (table, name) in [
-      (TableColumnSet::Songs, "songs"),
-      (TableColumnSet::AlbumTracks, "album_tracks"),
-      (TableColumnSet::RecentlyPlayed, "recently_played"),
-    ] {
-      assert!(crate::core::user_config::valid_column_ids(name).contains(&"year"));
-      let columns = resolve_columns(table, 100, std::slice::from_ref(&year));
-      assert_eq!(columns.len(), 1, "{name}");
-      assert_eq!(columns[0].header, "Year");
-      assert_eq!(columns[0].width, 4);
-    }
-  }
-
-  #[test]
   fn configured_columns_can_reorder_and_override_headers() {
     let columns = resolve_columns(
       TableColumnSet::Songs,
@@ -362,8 +259,8 @@ mod tests {
   }
   #[test]
   fn chinese_column_defaults_leave_explicit_english_headers_untouched() {
-    use crate::core::i18n::screens::{ZH_HANS, ZH_HANT};
-    for strings in [&ZH_HANS, &ZH_HANT] {
+    use crate::core::i18n::screens::{FR, PT_BR};
+    for strings in [&PT_BR, &FR] {
       let columns = resolve_columns_localized(TableColumnSet::Songs, 80, &[], strings);
       assert_eq!(columns[1].header, strings.column_title);
       assert_eq!(columns[2].header, strings.column_artist);

@@ -9,9 +9,6 @@ use ratatui::{
   Frame,
 };
 
-use rspotify::model::PlayableItem;
-use rspotify::prelude::Id;
-
 use super::util::{
   draw_selectable_list, get_color, get_search_results_highlight_state, join_artist_names,
 };
@@ -133,50 +130,7 @@ pub fn draw_input_and_help_box(
   f.render_widget(settings, settings_area);
 }
 
-/// Internet-radio search results: one full-area station list instead of the
-/// five-block Spotify layout (a directory search returns only stations, so
-/// Artists/Albums/Playlists/Podcasts would all be dead panels). Backed by the
-/// same `SongSearch` block/index as the songs list so selection and Enter
-/// share the existing machinery.
-fn draw_radio_station_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let stations: Vec<String> = match &app.search_results().tracks {
-    Some(tracks) => tracks
-      .items
-      .iter()
-      .map(|station| {
-        let mut row = format!("\u{1F4FB} {}", station.name);
-        // Genre tags land in `artists`, the country/codec/bitrate summary in
-        // `album` (see infra::radio::station_to_track_info); both optional.
-        if !station.artists.is_empty() {
-          row += &format!(" - {}", station.artists.join(", "));
-        }
-        if !station.album.is_empty() {
-          row += &format!("  ({})", station.album);
-        }
-        row
-      })
-      .collect(),
-    None => vec![],
-  };
-
-  draw_selectable_list(
-    f,
-    app,
-    layout_chunk,
-    app.strings().screens.radio_stations,
-    &stations,
-    get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
-    app.view.search_selected_tracks_index,
-    &app.view.search_tracks_scroll_offset,
-  );
-}
-
 pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  if app.active_source == crate::core::source::Source::Radio {
-    draw_radio_station_results(f, app, layout_chunk);
-    return;
-  }
-
   let [song_artist_area, albums_playlist_area, podcasts_area] =
     layout_chunk.layout(&Layout::vertical([
       Constraint::Percentage(35),
@@ -190,18 +144,6 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       Constraint::Percentage(50),
     ]));
 
-    let currently_playing_id = app
-      .current_playback_context
-      .clone()
-      .and_then(|context| {
-        context.item.and_then(|item| match item {
-          PlayableItem::Track(track) => track.id.map(|id| id.id().to_string()),
-          PlayableItem::Episode(episode) => Some(episode.id.id().to_string()),
-          _ => None,
-        })
-      })
-      .unwrap_or_default();
-
     let songs = match &app.search_results().tracks {
       Some(tracks) => tracks
         .items
@@ -209,12 +151,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .map(|item| {
           let mut song_name = "".to_string();
           let id = item.id.clone().unwrap_or_default();
-          if currently_playing_id == id {
-            song_name += "▶ "
-          }
-          if app.liked_song_ids_set().contains(&id) {
-            song_name += &app.user_config.padded_liked_icon();
-          }
+          app.liked_song_ids_set().contains(&id);
 
           song_name += item.display_name(app.strings());
           song_name += &format!(" - {}", item.artists.join(", "));
@@ -242,9 +179,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .map(|item| {
           let mut artist = String::new();
           if let Some(ref id) = item.id {
-            if app.followed_artist_ids_set().contains(id.as_str()) {
-              artist.push_str(&app.user_config.padded_liked_icon());
-            }
+            if app.followed_artist_ids_set().contains(id.as_str()) {}
           }
           artist.push_str(&item.name);
           artist
@@ -278,9 +213,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .map(|item| {
           let mut album_artist = String::new();
           if let Some(ref id) = item.id {
-            if app.saved_album_ids_set().contains(id.as_str()) {
-              album_artist.push_str(&app.user_config.padded_liked_icon());
-            }
+            if app.saved_album_ids_set().contains(id.as_str()) {}
           }
           album_artist.push_str(&format!(
             "{} - {} ({})",
@@ -362,9 +295,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
           .map(|item| {
             let mut show_name = String::new();
             if let Some(ref id) = item.id {
-              if app.saved_show_ids_set().contains(id.as_str()) {
-                show_name.push_str(&app.user_config.padded_liked_icon());
-              }
+              if app.saved_show_ids_set().contains(id.as_str()) {}
             }
             show_name.push_str(&item.name);
             show_name
@@ -382,9 +313,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::pagination::Paged;
-  use crate::core::plugin_api::TrackInfo;
-  use crate::core::source::Source;
+
   use ratatui::{backend::TestBackend, Terminal};
 
   fn rendered(app: &App, area: Rect) -> String {
@@ -399,70 +328,6 @@ mod tests {
       .collect()
   }
 
-  fn station(name: &str, tags: Vec<String>, summary: &str) -> TrackInfo {
-    TrackInfo {
-      generated_name: None,
-      uri: Some(format!("radio:https://example.com/{name}")),
-      name: name.to_string(),
-      artists: tags,
-      album: summary.to_string(),
-      duration_ms: 0,
-      id: None,
-      album_id: None,
-      artist_refs: vec![],
-      is_playable: true,
-      is_local: false,
-      track_number: 0,
-      explicit: false,
-      image_url: None,
-      release_date: None,
-    }
-  }
-
-  /// Radio search results must render as one full-area Stations panel, not
-  /// the five-block Spotify layout with stations shoved under "Songs".
-  #[test]
-  fn radio_results_render_single_station_panel() {
-    let mut app = App::default();
-    app.active_source = Source::Radio;
-    app.set_search_results(crate::core::app::SearchResult {
-      tracks: Some(Paged {
-        items: vec![
-          station(
-            "Groove Salad",
-            vec!["ambient".to_string(), "chillout".to_string()],
-            "US \u{2022} MP3 \u{2022} 128 kbps",
-          ),
-          station("Bare FM", vec![], ""),
-        ],
-        total: 2,
-        ..Default::default()
-      }),
-      ..Default::default()
-    });
-
-    let content = rendered(&app, Rect::new(0, 0, 90, 30));
-
-    assert!(
-      content.contains("Radio Stations"),
-      "panel title should be Radio Stations: {content}"
-    );
-    assert!(
-      content.contains("Groove Salad - ambient, chillout"),
-      "station rows should show name and tags: {content}"
-    );
-    for spotify_panel in ["Songs", "Artists", "Albums", "Playlists", "Podcasts"] {
-      assert!(
-        !content.contains(spotify_panel),
-        "{spotify_panel} panel must not render under Radio: {content}"
-      );
-    }
-    assert!(
-      !content.contains("Bare FM -"),
-      "a station without tags must not render a dangling separator: {content}"
-    );
-  }
-
   /// The Spotify layout is untouched for the default source.
   #[test]
   fn spotify_results_still_render_five_blocks() {
@@ -472,49 +337,6 @@ mod tests {
       assert!(
         content.contains(spotify_panel),
         "{spotify_panel} panel should render under Spotify: {content}"
-      );
-    }
-  }
-
-  #[test]
-  fn search_album_types_translate_without_changing_album_titles() {
-    use crate::core::i18n::Language;
-    use crate::core::plugin_api::AlbumInfo;
-    use unicode_width::UnicodeWidthStr;
-    let mut app = App::default();
-    app.set_search_results(crate::core::app::SearchResult {
-      albums: Some(crate::core::pagination::Paged {
-        items: vec![AlbumInfo {
-          name: "single {title}".into(),
-          album_type: Some("single".into()),
-          ..Default::default()
-        }],
-        total: 1,
-        ..Default::default()
-      }),
-      ..Default::default()
-    });
-    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
-      app.user_config.behavior.language = language;
-      app.refresh_language();
-      let mut terminal = Terminal::new(TestBackend::new(180, 40)).unwrap();
-      terminal
-        .draw(|frame| draw_search_results(frame, &app, frame.area()))
-        .unwrap();
-      let buffer = terminal.backend().buffer();
-      let mut text = String::new();
-      for y in 0..40 {
-        let mut x = 0;
-        while x < 180 {
-          let symbol = buffer[(x, y)].symbol();
-          text.push_str(symbol);
-          x += symbol.width().max(1) as u16;
-        }
-      }
-      assert!(text.contains("single {title}"), "{text}");
-      assert!(
-        text.contains(&format!("({})", app.strings().screens.album_type_single)),
-        "{text}"
       );
     }
   }

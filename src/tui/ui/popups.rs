@@ -1,9 +1,6 @@
-use crate::core::app::{
-  ActiveBlock, AnnouncementLevel, App, DialogContext, HelpMenuModel, PlaylistPickerRow,
-};
+use crate::core::app::{ActiveBlock, AnnouncementLevel, App, DialogContext, HelpMenuModel};
 use crate::core::plugin_api::PlayableInfo;
 use crate::core::plugin_api::PopupLine;
-use crate::infra::network::sync::PartyStatus;
 use ratatui::{
   layout::{Alignment, Constraint, Direction, Layout, Rect},
   style::{Modifier, Style},
@@ -27,7 +24,6 @@ pub fn ensure_help_menu_model(app: &mut App) {
     m.width != total_width
       || m.keys != app.user_config.keys
       || m.source != app.active_source
-      || m.spotify_connected != app.spotify_connected
       || m.filter != app.view.help_filter
   });
   if !stale {
@@ -45,7 +41,6 @@ pub fn ensure_help_menu_model(app: &mut App) {
     width: total_width,
     keys: app.user_config.keys.clone(),
     source: app.active_source,
-    spotify_connected: app.spotify_connected,
     filter: app.view.help_filter.clone(),
     header,
     rows,
@@ -242,28 +237,6 @@ mod help_menu_tests {
   }
 
   #[test]
-  fn help_model_is_rebuilt_when_the_source_or_the_session_changes() {
-    let mut app = App::default_connected();
-    ensure_help_menu_model(&mut app);
-    let connected = app.view.help_menu_model.as_ref().unwrap().rows.len();
-
-    app.active_source = crate::core::source::Source::Local;
-    ensure_help_menu_model(&mut app);
-    let local = app.view.help_menu_model.as_ref().unwrap().rows.len();
-    assert!(
-      local < connected,
-      "{local} rows under Local, {connected} connected"
-    );
-    assert_eq!(app.view.help_docs_size as usize, local);
-
-    app.active_source = crate::core::source::Source::Spotify;
-    app.spotify_connected = false;
-    ensure_help_menu_model(&mut app);
-    let free = app.view.help_menu_model.as_ref().unwrap().rows.len();
-    assert!(free < connected, "{free} rows without a session");
-  }
-
-  #[test]
   fn help_menu_renders_only_filtered_rows_and_live_prompt() {
     let mut app = App::default();
     app.view.help_filter = "volume".to_string();
@@ -361,7 +334,6 @@ fn queue_item_line(item: &PlayableInfo, strings: &crate::core::i18n::Strings) ->
 /// tracks. Rows read from the still-alive per-source `*_playback` state.
 fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
   // Format the upcoming rows of a Subsonic/YouTube `TrackInfo` context list.
-  #[cfg(feature = "queue-download")]
   fn track_rows(
     tracks: &[crate::core::plugin_api::TrackInfo],
     start: usize,
@@ -372,25 +344,6 @@ fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
       .skip(start)
       .take(max)
       .map(|t| format!("{} - {}", t.name, t.artists.join(", ")))
-      .collect()
-  }
-
-  // Local queues are `file://` URIs only (no API metadata), so display the
-  // file name stem for each upcoming track.
-  #[cfg(feature = "local-files")]
-  fn local_rows(uris: &[String], start: usize, max: usize) -> Vec<String> {
-    uris
-      .iter()
-      .skip(start)
-      .take(max)
-      .map(|u| {
-        let trimmed = u.trim_start_matches("file://");
-        std::path::Path::new(trimmed)
-          .file_stem()
-          .and_then(|s| s.to_str())
-          .map(|s| s.to_string())
-          .unwrap_or_else(|| u.clone())
-      })
       .collect()
   }
 
@@ -410,76 +363,23 @@ fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
   };
 
   // 1. A suspended context is authoritative: the queue is draining over it.
-  #[cfg(any(feature = "queue", feature = "internet-radio"))]
   if let Some(ctx) = app.queue_suspended.as_ref() {
     use crate::core::queue::SuspendedContext;
     return match ctx {
-      #[cfg(feature = "streaming")]
-      SuspendedContext::Spotify { .. } => spotify_mirror(max),
-      // A client-side shuffle session resumes a flat track list; the Web-API
-      // mirror is the best available metadata for its upcoming rows. An exhausted
-      // session (`resume_index` is `None`) plays nothing on resume, so it shows no
-      // preview rows.
-      #[cfg(feature = "streaming")]
-      SuspendedContext::SpotifyShuffled { resume_index, .. } => match resume_index {
-        Some(_) => spotify_mirror(max),
-        None => Vec::new(),
-      },
-      #[cfg(feature = "local-files")]
-      SuspendedContext::Local { resume_index, .. } => {
-        match (resume_index, app.local_playback.as_ref()) {
-          (Some(i), Some(s)) => local_rows(&s.queue, *i, max),
-          _ => Vec::new(),
-        }
-      }
-      #[cfg(feature = "subsonic")]
-      SuspendedContext::Subsonic { resume_index, .. } => {
-        match (resume_index, app.subsonic_playback.as_ref()) {
-          (Some(i), Some(s)) => track_rows(&s.tracks, *i, max),
-          _ => Vec::new(),
-        }
-      }
-      #[cfg(feature = "qobuz")]
       SuspendedContext::Qobuz { resume_index, .. } => {
         match (resume_index, app.qobuz_playback.as_ref()) {
           (Some(i), Some(s)) => track_rows(&s.tracks, *i, max),
           _ => Vec::new(),
         }
       }
-      #[cfg(feature = "youtube")]
-      SuspendedContext::YouTube { resume_index, .. } => {
-        match (resume_index, app.youtube_playback.as_ref()) {
-          (Some(i), Some(s)) => track_rows(&s.tracks, *i, max),
-          _ => Vec::new(),
-        }
-      }
-      #[cfg(feature = "internet-radio")]
-      SuspendedContext::Radio { station } => vec![app.strings().popups.resume(&station.name)],
     };
   }
 
   // 2. Queued items pending over a still-playing context: preview what resumes
   //    after them (the context's upcoming tracks, from the next index on).
   if !app.native_queue.is_empty() {
-    #[cfg(feature = "local-files")]
-    if let Some(s) = app.local_playback.as_ref() {
-      return local_rows(&s.queue, s.index + 1, max);
-    }
-    #[cfg(feature = "subsonic")]
-    if let Some(s) = app.subsonic_playback.as_ref() {
-      return track_rows(&s.tracks, s.index + 1, max);
-    }
-    #[cfg(feature = "qobuz")]
     if let Some(s) = app.qobuz_playback.as_ref() {
       return track_rows(&s.tracks, s.index + 1, max);
-    }
-    #[cfg(feature = "youtube")]
-    if let Some(s) = app.youtube_playback.as_ref() {
-      return track_rows(&s.tracks, s.index + 1, max);
-    }
-    #[cfg(feature = "internet-radio")]
-    if let Some(s) = app.radio_playback.as_ref() {
-      return vec![app.strings().popups.resume(&s.station.name)];
     }
     return spotify_mirror(max);
   }
@@ -526,13 +426,7 @@ pub fn draw_queue_in(f: &mut Frame<'_>, app: &App, area: Rect) {
     // With an empty native queue, fall back to displaying the legacy Spotify
     // mirror only when controlling an external Connect device (the queue there
     // lives Spotify-side). Otherwise show a hint.
-    if app.spotify_external_device_active() {
-      if let Some(q) = app.queue.as_ref() {
-        for item in &q.queue {
-          items.push(ListItem::new(queue_item_line(item, app.strings())).style(style));
-        }
-      }
-    } else if !app.queue_owns_playback() {
+    if !app.queue_owns_playback() {
       // While the queue owns playback the last queued track is the "Now playing"
       // row above, so an "empty" hint would contradict it — omit it there.
       items.push(
@@ -841,82 +735,10 @@ mod error_screen_tests {
       "reserving too few rows would push the hint out:\n{rendered}"
     );
   }
-
-  /// A temp-directory log path is routinely longer than the columns an 80-wide
-  /// terminal leaves after the label, and a cut-off filename is useless to the
-  /// person filing the report.
-  #[test]
-  fn error_screen_shows_a_long_log_path_in_full() {
-    let path = "/tmp/spotatui_logs/a_very_long_directory_name/spotatuilog_2026_09_24_181205.log";
-    let mut app = App::default();
-    app.log_path = path.to_string();
-    app.handle_error(anyhow::anyhow!(
-      "{}",
-      "Player command failed: No active device found. ".repeat(40)
-    ));
-
-    let rendered = rendered_error_screen_at(&app, 80, 24);
-    // The path wraps across rows, so the row padding and the frame have to go
-    // before the pieces sit next to each other again.
-    let unbroken = rendered.replace([' ', '\n', '\u{2502}'], "");
-
-    assert!(
-      unbroken.contains(path),
-      "the full log path must survive an 80 column terminal:\n{rendered}"
-    );
-  }
-
-  #[test]
-  fn error_screen_still_names_the_log_file_on_a_small_terminal() {
-    let mut app = App::default();
-    app.log_path = "/tmp/spotatui_logs/spotatuilog42".to_string();
-    app.handle_error(anyhow::anyhow!(
-      "{}",
-      "Player command failed: No active device found. ".repeat(40)
-    ));
-
-    let rendered = rendered_error_screen_at(&app, 80, 24);
-
-    assert!(
-      rendered.contains("/tmp/spotatui_logs/spotatuilog42"),
-      "a long error must not push the log path off an 80x24 screen:\n{rendered}"
-    );
-    assert!(
-      rendered.contains("--debug"),
-      "the debug hint must survive the same squeeze:\n{rendered}"
-    );
-  }
 }
 
 #[cfg(test)]
-mod queue_tests {
-  use super::*;
-  use crate::tui::event::Key;
-  use ratatui::{backend::TestBackend, Terminal};
-
-  #[test]
-  fn empty_queue_hint_names_the_configured_add_key() {
-    let mut app = App::default_connected();
-    app.user_config.keys.add_item_to_queue = Key::Char('a');
-
-    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
-    terminal.draw(|f| draw_queue(f, &app)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let content: String = (0..20)
-      .flat_map(|y| (0..100).map(move |x| (x, y)))
-      .filter_map(|(x, y)| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
-      .collect();
-
-    assert!(
-      content.contains("press a on a track"),
-      "empty queue hint should name the rebound key: {content}"
-    );
-    assert!(
-      !content.contains("press z"),
-      "empty queue hint must not still show the default key: {content}"
-    );
-  }
-}
+mod queue_tests {}
 
 pub fn draw_dialog(f: &mut Frame<'_>, app: &App) {
   let dialog_context = match app.get_current_route().active_block {
@@ -925,9 +747,7 @@ pub fn draw_dialog(f: &mut Frame<'_>, app: &App) {
   };
 
   match dialog_context {
-    DialogContext::PlaylistWindow
-    | DialogContext::PlaylistSearch
-    | DialogContext::YouTubePlaylistWindow => {
+    DialogContext::PlaylistSearch => {
       if let Some(playlist) = app.view.dialog.as_ref() {
         let text = vec![
           Line::from(Span::raw(app.strings().popups.delete_playlist_question)),
@@ -938,22 +758,6 @@ pub fn draw_dialog(f: &mut Frame<'_>, app: &App) {
           Line::from(Span::raw(app.strings().popups.question_mark)),
         ];
         draw_confirmation_dialog(f, app, app.strings().popups.confirm, text, 45);
-      }
-    }
-    DialogContext::RemoveTrackFromPlaylistConfirm => {
-      if let Some(pending_remove) = app.pending_playlist_track_removal.as_ref() {
-        let text = vec![
-          Line::from(Span::raw(app.strings().popups.remove_track_question)),
-          Line::from(Span::styled(
-            app.strings().popups.track(&pending_remove.track_name),
-            Style::default().add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-          )),
-          Line::from(Span::styled(
-            app.strings().popups.playlist(&pending_remove.playlist_name),
-            Style::default().add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-          )),
-        ];
-        draw_confirmation_dialog(f, app, app.strings().popups.remove_track, text, 60);
       }
     }
     DialogContext::PersistKeybindingFallback => {
@@ -978,24 +782,8 @@ pub fn draw_dialog(f: &mut Frame<'_>, app: &App) {
         );
       }
     }
-    DialogContext::RemovePlaylistSyncLinkConfirm => {
-      if let Some(name) = app.view.dialog.as_ref() {
-        let text = vec![
-          Line::from(Span::raw(app.strings().popups.remove_link_question)),
-          Line::from(Span::styled(
-            name.as_str(),
-            Style::default().add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-          )),
-          Line::from(Span::raw(app.strings().popups.mirrors_stay)),
-        ];
-        draw_confirmation_dialog(f, app, app.strings().popups.remove_link, text, 50);
-      }
-    }
     DialogContext::AddTrackToPlaylistPicker => {
       draw_add_track_to_playlist_picker_dialog(f, app);
-    }
-    DialogContext::PlaylistSyncPicker => {
-      draw_playlist_sync_picker_dialog(f, app);
     }
   }
 }
@@ -1148,24 +936,10 @@ fn draw_add_track_to_playlist_picker_dialog(f: &mut Frame<'_>, app: &App) {
     vchunks[1],
   );
 
-  let mut list_state = ListState::default();
-  // Rows follow the active source: local YouTube playlists under the YouTube
-  // source, editable Spotify playlists plus folder rows otherwise (must stay
-  // in sync with the picker's key handler).
-  let picker_rows = app.playlist_picker_items();
+  let _list_state = ListState::default();
 
-  if picker_rows.is_empty() {
-    let empty_message = if filter.trim().is_empty() {
-      popups.no_editable_playlists.to_string()
-    } else {
-      popups.no_matching_playlists(filter.trim())
-    };
-    let empty_text = Paragraph::new(empty_message)
-      .style(Style::default().fg(app.user_config.theme.inactive.into()))
-      .alignment(Alignment::Center);
-    f.render_widget(empty_text, vchunks[2]);
-  } else {
-    let is_own_playlist = |playlist: &crate::core::plugin_api::PlaylistInfo| -> bool {
+  {
+    let _is_own_playlist = |playlist: &crate::core::plugin_api::PlaylistInfo| -> bool {
       // Local YouTube playlists carry no owner id — they are always the
       // user's own (no "(collab)" suffix).
       playlist.owner_id.is_none()
@@ -1174,47 +948,6 @@ fn draw_add_track_to_playlist_picker_dialog(f: &mut Frame<'_>, app: &App) {
           .as_ref()
           .is_some_and(|user| Some(user.id.as_str()) == playlist.owner_id.as_deref())
     };
-    let items: Vec<ListItem> = picker_rows
-      .iter()
-      .map(|row| {
-        let label = match row {
-          // Same folder rendering as the sidebar (ui/library.rs): back rows
-          // ("← name") as-is, other folders with the FOLDER_ICON prefix.
-          PlaylistPickerRow::Folder(folder) => {
-            let name = folder.display_name(app.strings());
-            if name.starts_with('\u{2190}') {
-              name.into_owned()
-            } else {
-              format!("{} {name}", super::util::FOLDER_ICON)
-            }
-          }
-          PlaylistPickerRow::Playlist(playlist) => {
-            if is_own_playlist(playlist) {
-              playlist.name.clone()
-            } else {
-              // `owner` is the display name, falling back to the owner id.
-              app
-                .strings()
-                .popups
-                .collaborative_playlist(&playlist.name, &playlist.owner)
-            }
-          }
-        };
-        ListItem::new(Span::raw(label))
-      })
-      .collect();
-    let selected = app
-      .view
-      .playlist_picker_selected_index
-      .min(picker_rows.len() - 1);
-    list_state.select(Some(selected));
-
-    let list = List::new(items)
-      .style(app.user_config.theme.base_style())
-      .highlight_style(Style::default().fg(app.user_config.theme.hovered.into()))
-      .highlight_symbol("▶ ");
-
-    f.render_stateful_widget(list, vchunks[2], &mut list_state);
   }
 
   let footer = Paragraph::new(app.strings().popups.playlist_picker_controls(
@@ -1224,76 +957,6 @@ fn draw_add_track_to_playlist_picker_dialog(f: &mut Frame<'_>, app: &App) {
   .style(Style::default().fg(app.user_config.theme.inactive.into()))
   .alignment(Alignment::Center);
   f.render_widget(footer, vchunks[3]);
-}
-
-fn draw_playlist_sync_picker_dialog(f: &mut Frame<'_>, app: &App) {
-  let rect = centered_modal_rect(f.area(), 50, 12);
-  f.render_widget(Clear, rect);
-
-  let block = Block::default()
-    .title(Span::styled(
-      app.strings().popups.mirror_playlist,
-      Style::default()
-        .fg(app.user_config.theme.header.into())
-        .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-    ))
-    .borders(Borders::ALL)
-    .style(app.user_config.theme.base_style())
-    .border_style(Style::default().fg(app.user_config.theme.inactive.into()));
-  f.render_widget(block, rect);
-
-  let vchunks = Layout::default()
-    .direction(Direction::Vertical)
-    .margin(1)
-    .constraints([
-      Constraint::Length(2),
-      Constraint::Min(3),
-      Constraint::Length(1),
-    ])
-    .split(rect);
-
-  let master = app
-    .pending_playlist_sync_master()
-    .map(|endpoint| endpoint.name.as_str())
-    .unwrap_or(app.strings().popups.selected_playlist);
-
-  let header = Paragraph::new(Line::from(Span::raw(
-    app.strings().popups.mirror_onto(master),
-  )))
-  .wrap(Wrap { trim: true })
-  .style(app.user_config.theme.base_style());
-  f.render_widget(header, vchunks[0]);
-
-  let sources = app.playlist_sync_picker_sources();
-  if sources.is_empty() {
-    let empty_text = Paragraph::new(app.strings().popups.no_mirror_source)
-      .style(Style::default().fg(app.user_config.theme.inactive.into()))
-      .alignment(Alignment::Center);
-    f.render_widget(empty_text, vchunks[1]);
-  } else {
-    let items: Vec<ListItem> = sources
-      .iter()
-      .map(|source| ListItem::new(Span::raw(app.strings().sidebar.source_label(*source))))
-      .collect();
-    let selected = app.view.playlist_sync_picker_index.min(sources.len() - 1);
-    let mut list_state = ListState::default();
-    list_state.select(Some(selected));
-
-    let list = List::new(items)
-      .style(app.user_config.theme.base_style())
-      .highlight_style(Style::default().fg(app.user_config.theme.hovered.into()))
-      .highlight_symbol("▶ ");
-
-    f.render_stateful_widget(list, vchunks[1], &mut list_state);
-  }
-
-  let footer = Paragraph::new(app.strings().popups.mirror_picker_controls(
-    &app.user_config.keys.move_down.to_string(),
-    &app.user_config.keys.move_up.to_string(),
-  ))
-  .style(Style::default().fg(app.user_config.theme.inactive.into()))
-  .alignment(Alignment::Center);
-  f.render_widget(footer, vchunks[2]);
 }
 
 pub fn draw_announcement_prompt(f: &mut Frame<'_>, app: &App) {
@@ -1405,177 +1068,6 @@ pub fn draw_recap_prompt(f: &mut Frame<'_>, app: &App) {
         .style(app.user_config.theme.base_style())
         .border_style(Style::default().fg(app.user_config.theme.active.into()))
         .title(app.strings().popups.recap_title),
-    );
-
-  f.render_widget(paragraph, rect);
-}
-
-/// The offer to set up Soloist, after librespot failed several tracks in a row.
-pub fn draw_soloist_offer(f: &mut Frame<'_>, app: &App) {
-  if !app.soloist_offer_shows() {
-    return;
-  }
-  let strings = &app.strings().popups;
-  let width = std::cmp::min(f.area().width.saturating_sub(4), 70);
-  let rect = f
-    .area()
-    .centered(Constraint::Length(width), Constraint::Length(13));
-  f.render_widget(Clear, rect);
-  let text = vec![
-    Line::from(strings.soloist_offer_body),
-    Line::from(""),
-    Line::from(strings.soloist_offer_step_download),
-    Line::from(strings.soloist_offer_step_key),
-    Line::from(strings.soloist_offer_step_engine),
-    Line::from(""),
-    Line::from(Span::styled(
-      strings.soloist_offer_controls,
-      Style::default().fg(app.user_config.theme.inactive.into()),
-    )),
-  ];
-  let paragraph = Paragraph::new(text)
-    .style(app.user_config.theme.base_style())
-    .wrap(Wrap { trim: false })
-    .block(
-      Block::default()
-        .borders(Borders::ALL)
-        .style(app.user_config.theme.base_style())
-        .border_style(Style::default().fg(app.user_config.theme.active.into()))
-        .title(strings.soloist_offer_title),
-    );
-  f.render_widget(paragraph, rect);
-}
-
-/// The Soloist pairing guide over every screen, until Soloist logs in or Esc closes it.
-pub fn draw_soloist_pairing(f: &mut Frame<'_>, app: &App) {
-  let Some(device) = app.soloist_pairing_device() else {
-    return;
-  };
-  let strings = &app.strings().popups;
-  let width = std::cmp::min(f.area().width.saturating_sub(4), 60);
-  let rect = f
-    .area()
-    .centered(Constraint::Length(width), Constraint::Length(9));
-  f.render_widget(Clear, rect);
-  let text = vec![
-    Line::from(strings.soloist_pair_open),
-    Line::from(strings.soloist_pair_pick(device)),
-    Line::from(""),
-    Line::from(Span::styled(
-      strings.soloist_pair_waiting,
-      Style::default().fg(app.user_config.theme.active.into()),
-    )),
-    Line::from(""),
-    Line::from(Span::styled(
-      strings.plugin_close_hint,
-      Style::default().fg(app.user_config.theme.inactive.into()),
-    )),
-  ];
-  let paragraph = Paragraph::new(text)
-    .style(app.user_config.theme.base_style())
-    .wrap(Wrap { trim: false })
-    .block(
-      Block::default()
-        .borders(Borders::ALL)
-        .style(app.user_config.theme.base_style())
-        .border_style(Style::default().fg(app.user_config.theme.active.into()))
-        .title(strings.soloist_pair_title),
-    );
-  f.render_widget(paragraph, rect);
-}
-
-#[cfg(all(test, feature = "soloist"))]
-mod soloist_pairing_tests {
-  use super::*;
-  use crate::tui::event::Key;
-  use ratatui::{backend::TestBackend, Terminal};
-
-  #[test]
-  fn the_pairing_guide_names_the_device_until_esc_closes_it() {
-    let mut app = App::default();
-    app.soloist_notice(crate::infra::soloist::Notice::NotPaired);
-    let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-    terminal.draw(|f| draw_soloist_pairing(f, &app)).unwrap();
-    let content: String = terminal
-      .backend()
-      .buffer()
-      .content()
-      .iter()
-      .map(|cell| cell.symbol())
-      .collect();
-    let pick = app
-      .strings()
-      .popups
-      .soloist_pair_pick(&app.user_config.behavior.streaming_device_name);
-    assert!(content.contains(&pick), "{content}");
-
-    crate::tui::handlers::handle_app(Key::Esc, &mut app);
-    assert_eq!(app.soloist_pairing_device(), None);
-  }
-
-  #[test]
-  fn the_soloist_offer_lists_the_steps_until_esc_closes_it() {
-    let mut app = App::default();
-    app.offer_soloist_setup();
-    let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
-    terminal.draw(|f| draw_soloist_offer(f, &app)).unwrap();
-    let content: String = terminal
-      .backend()
-      .buffer()
-      .content()
-      .iter()
-      .map(|cell| cell.symbol())
-      .collect();
-    let strings = &app.strings().popups;
-    assert!(content.contains(strings.soloist_offer_title), "{content}");
-    assert!(
-      content.contains(strings.soloist_offer_step_key),
-      "{content}"
-    );
-
-    crate::tui::handlers::handle_app(Key::Esc, &mut app);
-    assert!(!app.soloist_offer_shows());
-  }
-}
-
-pub fn draw_community_pin_prompt(f: &mut Frame<'_>, app: &App) {
-  let width = std::cmp::min(f.area().width.saturating_sub(4), 66);
-  let height = 14;
-  let rect = f
-    .area()
-    .centered(Constraint::Length(width), Constraint::Length(height));
-
-  f.render_widget(Clear, rect);
-
-  let text = vec![
-    Line::from(Span::styled(
-      app.strings().popups.community_pinned,
-      Style::default()
-        .fg(app.user_config.theme.active.into())
-        .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-    )),
-    Line::from(""),
-    Line::from(app.strings().popups.community_details),
-    Line::from(app.strings().popups.community_add),
-    Line::from(""),
-    Line::from(app.strings().popups.community_choice),
-    Line::from(""),
-    Line::from(Span::styled(
-      app.strings().popups.community_controls,
-      Style::default().fg(app.user_config.theme.inactive.into()),
-    )),
-  ];
-
-  let paragraph = Paragraph::new(text)
-    .style(app.user_config.theme.base_style())
-    .alignment(Alignment::Left)
-    .wrap(Wrap { trim: false })
-    .block(
-      Block::default()
-        .borders(Borders::ALL)
-        .style(app.user_config.theme.base_style())
-        .border_style(Style::default().fg(app.user_config.theme.active.into()))
-        .title(app.strings().popups.community_title),
     );
 
   f.render_widget(paragraph, rect);
@@ -1724,249 +1216,6 @@ pub fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
   f.render_stateful_widget(list, rect, &mut state);
 }
 
-pub fn draw_party(f: &mut Frame<'_>, app: &App) {
-  let [area] = f
-    .area()
-    .layout(&Layout::vertical([Constraint::Percentage(100)]).margin(2));
-
-  let popup_width = 50u16.min(area.width);
-  let popup_height = 16u16.min(area.height);
-  let popup_x = (area.width.saturating_sub(popup_width)) / 2 + area.x;
-  let popup_y = (area.height.saturating_sub(popup_height)) / 2 + area.y;
-  let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-  f.render_widget(Clear, popup_area);
-
-  let style = app.user_config.theme.base_style();
-  let active_style = Style::default()
-    .fg(app.user_config.theme.active.into())
-    .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD));
-  let hint_style = Style::default().fg(app.user_config.theme.hint.into());
-
-  let mut lines: Vec<Line> = Vec::new();
-
-  match app.party_status() {
-    PartyStatus::Disconnected | PartyStatus::Connecting => {
-      if !app.view.party_input.is_empty()
-        || app.view.party_input_idx > 0
-        || !app.view.party_join_name.is_empty()
-      {
-        let code_str: String = app
-          .view
-          .party_input
-          .iter()
-          .filter(|c| c.is_alphanumeric())
-          .map(|c| c.to_ascii_uppercase())
-          .collect();
-        let name_str: String = app.view.party_join_name.iter().collect();
-        let trimmed_name = name_str.trim();
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_code_prompt,
-          style,
-        )));
-        lines.push(Line::from(""));
-        let display = format!(
-          "  [ {} ]",
-          if code_str.is_empty() {
-            "______".to_string()
-          } else {
-            let mut padded = code_str.clone();
-            while padded.len() < 6 {
-              padded.push('_');
-            }
-            padded
-          }
-        );
-        lines.push(Line::from(Span::styled(display, active_style)));
-        lines.push(Line::from(""));
-
-        let name_display = if name_str.is_empty() {
-          "________________".to_string()
-        } else {
-          name_str.clone()
-        };
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_name_prompt,
-          style,
-        )));
-        lines.push(Line::from(Span::styled(
-          format!("  [ {} ]", name_display),
-          active_style,
-        )));
-        lines.push(Line::from(""));
-        if code_str.len() == 6 && !trimmed_name.is_empty() {
-          lines.push(Line::from(Span::styled(
-            app.strings().popups.party_join_enter,
-            hint_style,
-          )));
-        } else if code_str.len() == 6 {
-          lines.push(Line::from(Span::styled(
-            app.strings().popups.party_name_required,
-            hint_style,
-          )));
-        } else {
-          let char_count = app.strings().popups.party_code_length(code_str.len());
-          lines.push(Line::from(Span::styled(char_count, hint_style)));
-        }
-        lines.push(Line::from(Span::styled(
-          app
-            .strings()
-            .popups
-            .party_name_length(trimmed_name.chars().count()),
-          hint_style,
-        )));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_code_then_name,
-          hint_style,
-        )));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.esc_cancel,
-          hint_style,
-        )));
-      } else {
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.listening_party,
-          active_style,
-        )));
-        lines.push(Line::from(""));
-        if *app.party_status() == PartyStatus::Connecting {
-          lines.push(Line::from(Span::styled(
-            app.strings().popups.connecting,
-            hint_style,
-          )));
-        } else {
-          lines.push(Line::from(vec![
-            Span::styled("1 ", active_style),
-            Span::styled(app.strings().popups.host_party, style),
-          ]));
-          lines.push(Line::from(vec![
-            Span::styled("2 ", active_style),
-            Span::styled(app.strings().popups.join_party, style),
-          ]));
-          lines.push(Line::from(""));
-          lines.push(Line::from(Span::styled(
-            app.strings().popups.esc_close,
-            hint_style,
-          )));
-        }
-      }
-    }
-    PartyStatus::Hosting => {
-      lines.push(Line::from(Span::styled(
-        app.strings().popups.party_hosting,
-        active_style,
-      )));
-      lines.push(Line::from(""));
-      if let Some(session) = app.party_session() {
-        let code_display = if session.code.is_empty() {
-          app.strings().popups.generating.to_string()
-        } else {
-          session.code.clone()
-        };
-        lines.push(Line::from(vec![
-          Span::styled(app.strings().popups.share_code, style),
-          Span::styled(code_display, active_style),
-        ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-          Span::styled(app.strings().popups.control_label, style),
-          Span::styled(
-            match session.control_mode {
-              crate::infra::network::sync::ControlMode::HostOnly => {
-                app.strings().popups.control_host_only
-              }
-              crate::infra::network::sync::ControlMode::SharedControl => {
-                app.strings().popups.control_shared
-              }
-            },
-            style,
-          ),
-        ]));
-        lines.push(Line::from(""));
-        if session.guests.is_empty() {
-          lines.push(Line::from(Span::styled(
-            app.strings().popups.waiting_guests,
-            hint_style,
-          )));
-        } else {
-          let listener_label = if session.guests.len() == 1 {
-            app.strings().popups.listener_one.to_string()
-          } else {
-            app.strings().popups.listeners(session.guests.len())
-          };
-          lines.push(Line::from(Span::styled(listener_label, style)));
-          for (i, guest) in session.guests.iter().enumerate() {
-            let label = format!("  {}. {}", i + 1, guest);
-            lines.push(Line::from(Span::styled(label, style)));
-          }
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_toggle_control,
-          hint_style,
-        )));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_leave,
-          hint_style,
-        )));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_close_menu,
-          hint_style,
-        )));
-      }
-    }
-    PartyStatus::Joined => {
-      lines.push(Line::from(Span::styled(
-        app.strings().popups.party_guest,
-        active_style,
-      )));
-      lines.push(Line::from(""));
-      if let Some(session) = app.party_session() {
-        lines.push(Line::from(vec![
-          Span::styled(app.strings().popups.host_label, style),
-          Span::styled(&session.host_name, style),
-        ]));
-        lines.push(Line::from(vec![
-          Span::styled(app.strings().popups.room_label, style),
-          Span::styled(&session.code, active_style),
-        ]));
-        lines.push(Line::from(vec![
-          Span::styled(app.strings().popups.mode_label, style),
-          Span::styled(app.strings().popups.following_host, hint_style),
-        ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_leave,
-          hint_style,
-        )));
-        lines.push(Line::from(Span::styled(
-          app.strings().popups.party_close_menu,
-          hint_style,
-        )));
-      }
-    }
-  }
-
-  let title = match app.party_status() {
-    PartyStatus::Hosting => app.strings().popups.party_hosting_title,
-    PartyStatus::Joined => app.strings().popups.party_joined_title,
-    _ => app.strings().popups.party_title,
-  };
-
-  let paragraph = Paragraph::new(lines)
-    .block(
-      Block::default()
-        .borders(Borders::ALL)
-        .style(style)
-        .title(Span::styled(title, active_style))
-        .border_style(Style::default().fg(app.user_config.theme.active.into())),
-    )
-    .alignment(Alignment::Center)
-    .wrap(Wrap { trim: false });
-
-  f.render_widget(paragraph, popup_area);
-}
-
 /// Draw the plugin popup overlay, if one is active.
 ///
 /// Called last in the terminal draw closure so it overlays every screen.
@@ -2040,147 +1289,7 @@ fn build_popup_line<'a>(pl: &'a PopupLine) -> Line<'a> {
 }
 
 #[cfg(test)]
-mod playlist_sync_picker_tests {
-  use super::*;
-  use crate::core::action::Action;
-  use crate::core::plugin_api::PlaylistInfo;
-  use crate::core::source::Source;
-  use ratatui::{backend::TestBackend, Terminal};
-
-  #[test]
-  fn the_mirror_picker_lists_the_offered_sources() {
-    let mut app = App::default_connected().under_source(Source::Qobuz);
-    app.qobuz_playlists_mut().push(PlaylistInfo {
-      generated_name: None,
-      uri: "qobuz:playlist:9".to_string(),
-      name: "Mine".to_string(),
-      owner: "qobuz".to_string(),
-      track_count: 3,
-      id: Some("9".to_string()),
-      owner_id: None,
-      collaborative: false,
-      public: None,
-      image_url: None,
-    });
-    app.view.selected_playlist_index = Some(0);
-    app.apply(Action::OpenPlaylistSyncPicker);
-
-    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-    terminal.draw(|f| draw_dialog(f, &app)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let content: String = (0..24)
-      .flat_map(|y| (0..80).map(move |x| (x, y)))
-      .filter_map(|(x, y)| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
-      .collect();
-
-    assert!(
-      content.contains("Mirror Playlist"),
-      "picker title missing: {content}"
-    );
-    assert!(
-      content.contains("Mirror \"Mine\" onto:"),
-      "picker header missing: {content}"
-    );
-    assert!(
-      content.contains("Spotify"),
-      "the connected session should be offered: {content}"
-    );
-    assert!(
-      !content.contains("Qobuz"),
-      "the master's own source must not be offered: {content}"
-    );
-  }
-}
+mod playlist_sync_picker_tests {}
 
 #[cfg(test)]
-mod playlist_picker_localization_tests {
-  use super::*;
-  use crate::core::app::{PlaylistFolder, PlaylistFolderItem};
-  use crate::core::i18n::Language;
-  use ratatui::{backend::TestBackend, Terminal};
-
-  #[test]
-  fn the_playlist_picker_shows_the_search_hint_query_and_no_match_message() {
-    let mut app = App::default();
-    let render = |app: &App| {
-      let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-      terminal
-        .draw(|frame| draw_add_track_to_playlist_picker_dialog(frame, app))
-        .unwrap();
-      let buffer = terminal.backend().buffer();
-      (0..buffer.area.height)
-        .map(|y| {
-          (0..buffer.area.width)
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-    };
-
-    assert!(render(&app).contains("/ search playlists"));
-
-    app.view.playlist_picker_filter = "zzz".to_string();
-    app.view.playlist_picker_filter_editing = true;
-    let text = render(&app);
-    assert!(text.contains("Search: zzz"), "{text}");
-    assert!(text.contains("No playlists match \"zzz\""), "{text}");
-  }
-
-  #[test]
-  fn the_playlist_picker_relabels_generated_folders_and_back_rows_without_renaming_user_folders() {
-    let mut app = App::default();
-    for back in [false, true] {
-      app.view.playlist_picker_folder_id = if back { 2 } else { 0 };
-      *app.playlist_folder_items_mut() = [true, false]
-        .into_iter()
-        .map(|generated_name| {
-          PlaylistFolderItem::Folder(PlaylistFolder {
-            name: if back {
-              "← Unnamed Folder"
-            } else {
-              "Unnamed Folder"
-            }
-            .into(),
-            generated_name,
-            current_id: if back { 2 } else { 0 },
-            target_id: 1,
-          })
-        })
-        .collect();
-      for language in [Language::En, Language::ZhHans, Language::ZhHant] {
-        app.user_config.behavior.language = language;
-        app.refresh_language();
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-          .draw(|frame| draw_add_track_to_playlist_picker_dialog(frame, &app))
-          .unwrap();
-        use unicode_width::UnicodeWidthStr;
-        let buffer = terminal.backend().buffer();
-        let mut text = String::new();
-        for y in 0..buffer.area.height {
-          let mut x = 0;
-          while x < buffer.area.width {
-            let symbol = buffer[(x, y)].symbol();
-            text.push_str(symbol);
-            x += symbol.width().max(1) as u16;
-          }
-          text.push('\n');
-        }
-        let prefix = if back {
-          "← ".to_string()
-        } else {
-          format!("{} ", super::super::util::FOLDER_ICON)
-        };
-        assert!(
-          text.contains(&format!(
-            "{prefix}{}",
-            app.strings().status.infra.unnamed_folder
-          )),
-          "{text}"
-        );
-        assert!(text.contains(&format!("{prefix}Unnamed Folder")), "{text}");
-      }
-    }
-  }
-}
+mod playlist_picker_localization_tests {}

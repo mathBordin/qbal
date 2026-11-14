@@ -8,7 +8,6 @@ pub struct HelpMenuModel {
   pub width: usize,
   pub keys: crate::core::user_config::KeyBindings,
   pub source: Source,
-  pub spotify_connected: bool,
   pub filter: String,
   pub header: String,
   pub rows: Vec<String>,

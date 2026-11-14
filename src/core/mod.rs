@@ -16,17 +16,15 @@ pub mod app;
 pub mod art;
 pub mod auth;
 pub mod banner;
-#[cfg_attr(not(any(feature = "tui", feature = "gui")), allow(dead_code))]
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod changelog;
 #[cfg(feature = "art-decode")]
 pub mod cover_theme;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod driver;
-pub mod first_run;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod format;
 pub mod geometry;
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod gui_layout;
 // Headless builds still serialize the full table, including terminal-only formatters.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
@@ -42,7 +40,6 @@ pub mod pane;
 pub mod paths;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod persisted_playback;
-pub mod playlist_sync;
 pub mod plugin_api;
 pub mod queue;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
@@ -56,9 +53,5 @@ pub mod state;
 pub mod test_helpers;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod theme;
-#[cfg(feature = "gui")]
-pub mod update;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod user_config;
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub mod visualizer_look;

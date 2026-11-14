@@ -74,7 +74,7 @@ fn placeholders(text: &str) -> std::collections::BTreeSet<&str> {
 fn every_language_has_nonempty_messages_and_the_same_named_placeholders() {
   let english = entries(&EN);
   assert!(!english.is_empty());
-  for (language, table) in [("en", &EN), ("zh-Hans", &ZH_HANS), ("zh-Hant", &ZH_HANT)] {
+  for (language, table) in [("en", &EN), ("pt-BR", &PT_BR), ("fr", &FR)] {
     let translated = entries(table);
     assert_eq!(
       english.keys().collect::<Vec<_>>(),
@@ -95,22 +95,17 @@ fn every_language_has_nonempty_messages_and_the_same_named_placeholders() {
 #[test]
 fn reports_entries_still_in_english() {
   let english = entries(&EN);
-  let simplified = entries(&ZH_HANS);
-  for (language, table) in [("zh-Hans", &ZH_HANS), ("zh-Hant", &ZH_HANT)] {
+  for (language, table) in [("pt-BR", &PT_BR), ("fr", &FR)] {
     let translated = entries(table);
     let mut counts: std::collections::BTreeMap<String, (usize, usize)> =
       std::collections::BTreeMap::new();
     let mut missing = Vec::new();
-    let mut simplified_only = Vec::new();
     for (key, message) in &translated {
       let group = key.rsplit_once('.').unwrap().0.to_string();
       let count = counts.entry(group).or_default();
       count.0 += 1;
       if *message == english[key] {
         missing.push(key.as_str());
-        if language == "zh-Hant" && simplified[key] != english[key] {
-          simplified_only.push(key.as_str());
-        }
       } else {
         count.1 += 1;
       }
@@ -127,33 +122,5 @@ fn reports_entries_still_in_english() {
       "Still English (including intentional product names/keys):\n{}",
       missing.join("\n")
     );
-    if language == "zh-Hant" {
-      println!(
-        "Translated in Simplified but missing in Traditional:\n{}",
-        simplified_only.join("\n")
-      );
-    }
   }
-}
-
-#[test]
-fn the_soloist_expiry_unit_reads_in_the_language_and_keeps_an_unknown_one() {
-  let english = EN.status.infra;
-  assert_eq!(english.soloist_expiry_unit("day"), "day");
-  assert_eq!(english.soloist_expiry_unit("hours"), "hours");
-  let simplified = ZH_HANS.status.infra;
-  assert_eq!(
-    simplified.soloist_expires_soon(3, simplified.soloist_expiry_unit("days")),
-    "Soloist 版本将在 3 天后过期，请尽快下载新版本。"
-  );
-  assert_eq!(ZH_HANT.status.infra.soloist_expiry_unit("minutes"), "分鐘");
-  assert_eq!(simplified.soloist_expiry_unit("weeks"), "weeks");
-}
-
-#[test]
-fn the_soloist_quality_choices_read_in_the_language_without_changing_the_stored_value() {
-  let id = "behavior.soloist_audio_quality";
-  assert_eq!(EN.settings.option_label(id, "Very high"), "Very high");
-  assert_eq!(ZH_HANS.settings.option_label(id, "Very high"), "极高");
-  assert_eq!(ZH_HANT.settings.option_label(id, "Lossless"), "無損");
 }

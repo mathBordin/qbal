@@ -113,13 +113,9 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       Span::styled(note, Style::default().fg(app.user_config.theme.hint.into())),
     ]));
   }
-  let counter_message = app.global_counter_line();
 
-  let counter_style = Style::default().fg(app.user_config.theme.hint.into());
-  changelog_lines.push(Line::from(vec![Span::styled(
-    counter_message,
-    counter_style,
-  )]));
+  let _counter_style = Style::default().fg(app.user_config.theme.hint.into());
+  changelog_lines.push(Line::from(vec![]));
   changelog_lines.push(Line::from(vec![Span::styled(
     app.strings().screens.discord_community,
     Style::default().fg(app.user_config.theme.active.into()),

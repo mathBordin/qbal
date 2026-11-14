@@ -2,28 +2,27 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum Language {
   #[default]
   #[serde(rename = "auto")]
   Auto,
   #[serde(rename = "en")]
   En,
-  #[serde(rename = "zh-Hans")]
-  ZhHans,
-  #[serde(rename = "zh-Hant")]
-  ZhHant,
+  #[serde(rename = "pt-BR")]
+  PtBr,
+  #[serde(rename = "fr")]
+  Fr,
 }
 
 impl Language {
-  pub const OPTIONS: &'static [&'static str] = &["auto", "en", "zh-Hans", "zh-Hant"];
+  pub const OPTIONS: &'static [&'static str] = &["auto", "en", "pt-BR", "fr"];
 
   pub const fn as_str(self) -> &'static str {
     match self {
       Self::Auto => "auto",
       Self::En => "en",
-      Self::ZhHans => "zh-Hans",
-      Self::ZhHant => "zh-Hant",
+      Self::PtBr => "pt-BR",
+      Self::Fr => "fr",
     }
   }
 
@@ -32,7 +31,8 @@ impl Language {
     match normalized.split('-').next().unwrap_or("") {
       "auto" if normalized == "auto" => Some(Self::Auto),
       "en" => Some(Self::En),
-      "zh" => Some(language_with(value)),
+      "pt" => Some(Self::PtBr),
+      "fr" => Some(Self::Fr),
       _ => None,
     }
   }
@@ -40,8 +40,8 @@ impl Language {
   pub const fn resolve(self, system: Self) -> Self {
     match self {
       Self::Auto => match system {
-        Self::ZhHans => Self::ZhHans,
-        Self::ZhHant => Self::ZhHant,
+        Self::PtBr => Self::PtBr,
+        Self::Fr => Self::Fr,
         Self::Auto | Self::En => Self::En,
       },
       explicit => explicit,
@@ -62,7 +62,7 @@ impl<'de> Deserialize<'de> for Language {
         return Ok(language);
       }
     }
-    log::warn!("Invalid behavior.language; using auto (expected auto, en, zh-Hans or zh-Hant)");
+    log::warn!("Invalid behavior.language; using auto (expected auto, en, pt-BR or fr)");
     Ok(Self::Auto)
   }
 }
@@ -78,23 +78,14 @@ fn normalized_locale(value: &str) -> String {
 }
 
 /// Interpret one locale, including POSIX encoding/modifier suffixes and BCP 47
-/// script/region tags. An explicit script takes precedence over the region.
-/// Bare `zh` defaults to Simplified; all non-Chinese languages use English.
+/// region tags. Any Portuguese locale (pt, pt-BR, pt-PT) selects Brazilian
+/// Portuguese, any French locale selects French; every other language uses English.
 pub fn language_with(value: &str) -> Language {
   let normalized = normalized_locale(value);
-  let mut parts = normalized.split('-');
-  if parts.next() != Some("zh") {
-    return Language::En;
-  }
-  let parts: Vec<&str> = parts.collect();
-  if parts.contains(&"hant") || parts.contains(&"cht") {
-    Language::ZhHant
-  } else if parts.contains(&"hans") || parts.contains(&"chs") {
-    Language::ZhHans
-  } else if parts.iter().any(|part| matches!(*part, "tw" | "hk" | "mo")) {
-    Language::ZhHant
-  } else {
-    Language::ZhHans
+  match normalized.split('-').next() {
+    Some("pt") => Language::PtBr,
+    Some("fr") => Language::Fr,
+    _ => Language::En,
   }
 }
 
@@ -197,82 +188,56 @@ mod tests {
   use super::*;
 
   #[test]
-  fn chinese_scripts_and_regions_select_the_matching_table() {
-    for locale in [
-      "zh",
-      "zh_CN",
-      "zh_CN.UTF-8",
-      "zh-SG",
-      "zh_Hans",
-      "zh-CHS",
-      "ZH-hans-CN",
-      "zh-Hans-HK",
-      "zh_CN@foo",
-    ] {
-      assert_eq!(language_with(locale), Language::ZhHans, "{locale}");
+  fn portuguese_and_french_locales_select_their_tables() {
+    for locale in ["pt_BR.UTF-8", "pt-BR", "pt", "pt_PT", "PT-br"] {
+      assert_eq!(language_with(locale), Language::PtBr, "{locale}");
     }
-    for locale in [
-      "zh_TW",
-      "zh-HK",
-      "zh_MO.UTF-8",
-      "zh-Hant",
-      "zh-CHT",
-      "zh-Hant-CN",
-    ] {
-      assert_eq!(language_with(locale), Language::ZhHant, "{locale}");
+    for locale in ["fr_FR.UTF-8", "fr", "fr-CA", "fr_BE@euro"] {
+      assert_eq!(language_with(locale), Language::Fr, "{locale}");
     }
-  }
-
-  #[test]
-  fn every_other_system_language_uses_english() {
-    for locale in [
-      "",
-      "en-US",
-      "ja-JP",
-      "ko-KR",
-      "fr_FR.UTF-8",
-      "de",
-      "C",
-      "C.UTF-8",
-      "POSIX",
-      "zho",
-      "not-zh-HK",
-    ] {
+    for locale in ["en_US.UTF-8", "C", "POSIX", "de_DE", "zh-CN", ""] {
       assert_eq!(language_with(locale), Language::En, "{locale}");
     }
   }
 
   #[test]
-  fn locale_precedence_and_explicit_settings_do_not_mutate_the_environment() {
-    assert_eq!(
-      system_language_with([Some("C"), Some("zh_TW"), Some("zh_CN")], Some("zh-Hant")),
-      Language::En
-    );
-    assert_eq!(
-      system_language_with([None, Some("zh_TW"), Some("en_US")], None),
-      Language::ZhHant
-    );
-    assert_eq!(
-      system_language_with([Some(""), None, None], Some("zh-SG")),
-      Language::ZhHans
-    );
-    assert_eq!(system_language_with([None, None, None], None), Language::En);
-    assert_eq!(Language::En.resolve(Language::ZhHant), Language::En);
-    assert_eq!(Language::ZhHans.resolve(Language::En), Language::ZhHans);
-    assert_eq!(Language::Auto.resolve(Language::ZhHant), Language::ZhHant);
+  fn explicit_settings_parse_and_round_trip() {
+    for option in Language::OPTIONS {
+      let language = Language::parse(option).unwrap();
+      assert_eq!(language.as_str(), *option);
+    }
+    assert_eq!(Language::parse("pt_BR"), Some(Language::PtBr));
+    assert_eq!(Language::parse("FR"), Some(Language::Fr));
+    assert_eq!(Language::parse("zh-Hans"), None);
   }
 
   #[test]
-  fn macos_uses_the_first_preferred_language_even_when_it_is_not_chinese() {
+  fn auto_follows_the_system_language() {
+    assert_eq!(Language::Auto.resolve(Language::PtBr), Language::PtBr);
+    assert_eq!(Language::Auto.resolve(Language::Fr), Language::Fr);
+    assert_eq!(Language::Auto.resolve(Language::En), Language::En);
+    assert_eq!(Language::Fr.resolve(Language::PtBr), Language::Fr);
+  }
+
+  #[test]
+  fn env_overrides_win_and_blank_values_are_skipped() {
     assert_eq!(
-      apple_language_with("(\n    \"zh-Hant-TW\",\n    en\n)"),
-      Some("zh-Hant-TW")
+      system_language_with([None, Some(" "), Some("fr_FR.UTF-8")], Some("pt-BR")),
+      Language::Fr
     );
     assert_eq!(
-      apple_language_with("(fr, \"zh-Hans\")").map(language_with),
-      Some(Language::En)
+      system_language_with([None, None, None], Some("pt-BR")),
+      Language::PtBr
+    );
+    assert_eq!(system_language_with([None, None, None], None), Language::En);
+  }
+
+  #[test]
+  fn apple_language_lists_name_the_first_language() {
+    assert_eq!(
+      apple_language_with("(\n    \"pt-BR\",\n    en\n)"),
+      Some("pt-BR")
     );
     assert_eq!(apple_language_with("()"), None);
-    assert_eq!(apple_language_with("unavailable"), None);
   }
 }

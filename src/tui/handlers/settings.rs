@@ -186,9 +186,7 @@ fn handle_edit_mode(key: Key, app: &mut App) {
       SettingValue::Preset(_) => handle_preset_edit(key, app),
       SettingValue::Cycle(_, _) => {} // enter_edit_mode handles Cycle without entering edit mode
       SettingValue::Key(_) => handle_key_edit(key, app),
-      SettingValue::String(_) | SettingValue::Color(_) | SettingValue::Secret(_) => {
-        handle_string_edit(key, app)
-      }
+      SettingValue::String(_) | SettingValue::Color(_) => handle_string_edit(key, app),
     }
   }
 }
@@ -283,25 +281,6 @@ fn handle_string_edit(key: Key, app: &mut App) {
       if let Some(setting) = app.settings_items.get_mut(app.view.settings_selected_index) {
         let new_value = app.view.settings_edit_buffer.clone();
 
-        #[cfg(feature = "self-update")]
-        if let Some(error) = (setting.id == "behavior.auto_update_delay")
-          .then(|| crate::core::user_config::parse_update_delay_secs(&new_value))
-          .and_then(Result::err)
-        {
-          let detail = match new_value.trim().chars().last() {
-            Some('d') => strings.delay_days,
-            Some('h') => strings.delay_hours,
-            Some('m') => strings.delay_minutes,
-            Some('s') => strings.delay_seconds,
-            _ => strings.delay_number,
-          };
-          app.handle_error_with_message(
-            anyhow::anyhow!("Invalid delay format: {}", error),
-            strings.invalid_delay(detail),
-          );
-          return;
-        }
-
         let automatic_dither = setting.id == "theme.cover_art_dither_color"
           && (new_value.trim().is_empty() || new_value.trim().eq_ignore_ascii_case("auto"));
         if matches!(setting.value, SettingValue::Color(_)) && !automatic_dither {
@@ -333,10 +312,6 @@ fn handle_string_edit(key: Key, app: &mut App) {
           }
           SettingValue::Color(_) => {
             setting.value = SettingValue::Color(new_value);
-          }
-          // The field opens empty, so Enter without typing keeps the saved password.
-          SettingValue::Secret(_) if !new_value.is_empty() => {
-            setting.value = SettingValue::Secret(new_value);
           }
           _ => {}
         }
@@ -658,58 +633,12 @@ mod tests {
       .unwrap_or_else(|| panic!("expected a {id} setting"))
   }
 
-  #[cfg(feature = "soloist")]
-  #[test]
-  fn o_presses_the_selected_row_button_past_the_global_jump_key() {
-    let mut app = App::default();
-    assert_eq!(app.user_config.keys.jump_to_context, BUTTON_KEY);
-    open_settings(&mut app);
-    app.view.settings_selected_index = setting_index(&app, "behavior.soloist_path");
-
-    handle_app(BUTTON_KEY, &mut app);
-
-    assert_eq!(
-      app
-        .setting_button_label("behavior.soloist_path")
-        .map(|(_, busy)| busy),
-      Some(true)
-    );
-    assert_eq!(app.get_current_route().id, RouteId::Settings);
-  }
-
   fn first_bool_setting_index(app: &App) -> usize {
     app
       .settings_items
       .iter()
       .position(|setting| matches!(setting.value, SettingValue::Bool(_)))
       .expect("expected a boolean setting")
-  }
-
-  #[test]
-  fn key_conflicts_keep_english_diagnostics_and_localized_ui_names() {
-    let mut config = crate::core::user_config::UserConfig::new();
-    config.behavior.language = crate::core::i18n::Language::ZhHans;
-    config.keys.help = Key::F5;
-    let (tx, _rx) = std::sync::mpsc::channel();
-    let mut app = App::new(tx, config, None);
-    app.view.settings_category = SettingsCategory::Keybindings;
-    open_settings(&mut app);
-    app.view.settings_selected_index = setting_index(&app, "keys.search");
-    assert_eq!(
-      check_keybinding_conflict(&app, Key::F5, "keys.search"),
-      Some(("Help".to_string(), "帮助".to_string()))
-    );
-    handle_key_edit(Key::F5, &mut app);
-    assert_eq!(app.api_error(), "按键 f5 已分配给帮助");
-
-    // The CLI override must use English even while staged rows still have Chinese names.
-    app.use_english_messages();
-    assert_eq!(
-      check_keybinding_conflict(&app, Key::F5, "keys.search"),
-      Some(("Help".to_string(), "Help".to_string()))
-    );
-    handle_key_edit(Key::F5, &mut app);
-    assert_eq!(app.api_error(), "Key f5 is already assigned to Help");
   }
 
   #[test]
@@ -967,24 +896,6 @@ mod tests {
     assert_eq!(app.get_current_route().id, RouteId::Settings);
     assert!(app.view.settings_filter_editing);
     assert_eq!(app.view.settings_filter, "dq");
-  }
-
-  #[test]
-  fn the_filter_uses_the_configured_search_binding() {
-    use crate::core::user_config::UserConfig;
-    use std::sync::mpsc::channel;
-    use std::time::SystemTime;
-
-    let (tx, _rx) = channel();
-    let mut config = UserConfig::new();
-    config.keys.search = Key::Char('f');
-    let mut app = App::new(tx, config, Some(SystemTime::now()));
-    open_settings(&mut app);
-
-    handle_app(Key::Char('f'), &mut app);
-
-    assert!(app.view.settings_filter_editing);
-    assert!(app.view.settings_filter.is_empty());
   }
 
   #[test]

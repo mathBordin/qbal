@@ -235,7 +235,6 @@ pub fn route_draws_main_layout(app: &App) -> bool {
     ActiveBlock::HelpMenu
     | ActiveBlock::Queue
     | ActiveBlock::Error
-    | ActiveBlock::SelectDevice
     | ActiveBlock::Analysis
     | ActiveBlock::LyricsView
     | ActiveBlock::MiniPlayer
@@ -262,20 +261,16 @@ pub fn main_layout_has_keys(app: &App) -> bool {
     app.get_current_route().active_block,
     ActiveBlock::HelpMenu
       | ActiveBlock::Queue
-      | ActiveBlock::Party
       | ActiveBlock::Error
-      | ActiveBlock::SelectDevice
       | ActiveBlock::Analysis
       | ActiveBlock::LyricsView
       | ActiveBlock::MiniPlayer
       | ActiveBlock::CoverArtView
       | ActiveBlock::AnnouncementPrompt
       | ActiveBlock::RecapPrompt
-      | ActiveBlock::CommunityPinPrompt
       | ActiveBlock::ExitPrompt
       | ActiveBlock::Settings
       | ActiveBlock::PluginScreen
-      | ActiveBlock::CreatePlaylistForm
       | ActiveBlock::Dialog(_)
       | ActiveBlock::SortMenu
       | ActiveBlock::Input

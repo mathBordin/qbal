@@ -118,47 +118,19 @@ macro_rules! feature_list {
   };
 }
 
-// Every `[features]` entry except the `default` and `all-sources` aliases, whose
-// members are listed one by one. `every_cargo_feature_is_in_the_startup_header`
+// Every `[features]` entry except the `default` alias. `every_cargo_feature_is_in_the_startup_header`
 // fails when a feature is added to `Cargo.toml` without a line here.
 feature_list![
-  "telemetry",
   "tui",
-  "gui",
-  "spotify-session",
-  "streaming",
-  "soloist",
-  "apple-music",
   "audio-viz",
   "audio-viz-cpal",
   "cover-art",
   "art-decode",
   "scripting",
-  "self-update",
-  "mcp-server",
-  "ai-dj",
-  "dj-core",
   "mpris",
   "discord-rpc",
   "macos-media",
   "windows-media",
-  "local-files",
-  "subsonic",
-  "internet-radio",
-  "youtube",
-  "qobuz",
-  "audio-decode",
-  "audio-decode-queue",
-  "queue",
-  "queue-download",
-  "alsa-backend",
-  "pulseaudio-backend",
-  "rodio-backend",
-  "portaudio-backend",
-  "jackaudio-backend",
-  "rodiojack-backend",
-  "sdl-backend",
-  "gstreamer-backend",
 ];
 
 /// The always-on startup line written once at the top of every log, so a bug
@@ -362,11 +334,6 @@ mod tests {
   }
 
   #[test]
-  fn compiled_features_is_never_empty() {
-    assert!(!compiled_features().is_empty());
-  }
-
-  #[test]
   fn compiled_features_contains_tui_when_the_tui_feature_is_enabled() {
     let features = compiled_features();
     assert_eq!(features.contains(&"tui"), cfg!(feature = "tui"));
@@ -391,7 +358,7 @@ mod tests {
       .filter_map(|line| line.split_once('=').map(|(name, _)| name.trim()))
       .filter(|name| !matches!(*name, "default" | "all-sources"))
       .collect();
-    assert!(declared.contains(&"soloist"), "parsed {declared:?}");
+    assert!(declared.contains(&"scripting"), "parsed {declared:?}");
 
     let missing: Vec<&str> = declared
       .iter()

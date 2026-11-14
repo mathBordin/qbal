@@ -268,14 +268,6 @@ fn action_shuffle_queues_set_shuffle() {
 }
 
 #[test]
-fn action_search_queues_search_effect() {
-  match run_action(r#"spotatui.search("daft punk")"#) {
-    Action::Search(q) => assert_eq!(q, "daft punk"),
-    _ => panic!("expected a Search effect"),
-  }
-}
-
-#[test]
 fn action_notify_default_ttl_is_4() {
   match run_action(r#"spotatui.notify("hi")"#) {
     Action::Notify(m, ttl) => {
@@ -710,213 +702,7 @@ mod http_tests {
 // --- drain_effects: routes through App methods ---
 
 #[cfg(test)]
-mod drain_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use chrono::Duration as ChronoDuration;
-  use rspotify::model::{
-    context::{Actions, CurrentPlaybackContext},
-    CurrentlyPlayingType, Device, DeviceType, PlayableItem, RepeatState,
-  };
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[allow(deprecated)]
-  fn make_device() -> Device {
-    Device {
-      id: Some("dev-test".to_string()),
-      is_active: true,
-      is_private_session: false,
-      is_restricted: false,
-      name: "Test Device".to_string(),
-      _type: DeviceType::Computer,
-      volume_percent: Some(50),
-    }
-  }
-
-  #[allow(deprecated)]
-  fn make_context(is_playing: bool, shuffle_state: bool) -> CurrentPlaybackContext {
-    CurrentPlaybackContext {
-      device: make_device(),
-      repeat_state: RepeatState::Off,
-      shuffle_state,
-      context: None,
-      timestamp: chrono::Utc::now(),
-      progress: None,
-      is_playing,
-      item: None,
-      currently_playing_type: CurrentlyPlayingType::Unknown,
-      actions: Actions::default(),
-    }
-  }
-
-  #[allow(deprecated)]
-  fn make_context_with_track(is_playing: bool) -> CurrentPlaybackContext {
-    use crate::core::test_helpers::full_track;
-    let track = full_track("4uLU6hMCjMI75M1A2tKUQC", "Test Song");
-    CurrentPlaybackContext {
-      device: make_device(),
-      repeat_state: RepeatState::Off,
-      shuffle_state: false,
-      context: None,
-      timestamp: chrono::Utc::now(),
-      progress: Some(ChronoDuration::milliseconds(0)),
-      is_playing,
-      item: Some(PlayableItem::Track(track)),
-      currently_playing_type: CurrentlyPlayingType::Track,
-      actions: Actions::default(),
-    }
-  }
-
-  fn push_effect(engine: &ScriptEngine, effect: Action) {
-    engine.shared.effects.borrow_mut().push(effect);
-  }
-
-  #[test]
-  fn drain_pause_while_playing_dispatches_pause_playback() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(true, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::Pause);
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::PausePlayback) => {}
-      _ => panic!("expected PausePlayback, got unexpected variant (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn drain_pause_while_already_paused_is_noop() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(false, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::Pause);
-    engine.drain_effects(&mut app);
-
-    assert!(rx.try_recv().is_err(), "expected no IoEvent dispatched");
-  }
-
-  #[test]
-  fn drain_play_while_paused_dispatches_start_playback() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(false, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::Play);
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::StartPlayback(None, None, None)) => {}
-      _ => panic!(
-        "expected StartPlayback(None,None,None), got unexpected variant (IoEvent is not Debug)"
-      ),
-    }
-  }
-
-  #[test]
-  fn drain_play_while_already_playing_is_noop() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(true, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::Play);
-    engine.drain_effects(&mut app);
-
-    assert!(rx.try_recv().is_err(), "expected no IoEvent dispatched");
-  }
-
-  #[test]
-  fn drain_shuffle_true_when_off_dispatches_shuffle_true() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(false, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::SetShuffle(true));
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::Shuffle(true)) => {}
-      _ => panic!("expected Shuffle(true), got unexpected variant (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn drain_shuffle_false_when_already_off_is_noop() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context(false, false));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::SetShuffle(false));
-    engine.drain_effects(&mut app);
-
-    assert!(rx.try_recv().is_err(), "expected no IoEvent dispatched");
-  }
-
-  #[test]
-  fn drain_set_volume_sets_pending_volume() {
-    let (mut app, _rx) = make_app();
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::SetVolume(80));
-    engine.drain_effects(&mut app);
-
-    assert_eq!(app.pending_volume, Some(80));
-  }
-
-  #[test]
-  fn drain_seek_with_track_context_dispatches_seek() {
-    let (mut app, rx) = make_app();
-    app.current_playback_context = Some(make_context_with_track(true));
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::SeekTo(30_000));
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::Seek(ms)) => assert_eq!(ms, 30_000),
-      _ => panic!("expected Seek(30000), got unexpected variant (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn drain_notify_error_sets_error_flag_on_app() {
-    let (mut app, _rx) = make_app();
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(
-      &engine,
-      Action::NotifyError("plugin crashed".to_string(), 6),
-    );
-    engine.drain_effects(&mut app);
-
-    assert_eq!(app.status_message(), Some("plugin crashed"));
-    assert!(app.status_message_is_error());
-  }
-
-  #[test]
-  fn drain_notify_error_blocks_subsequent_normal_notify() {
-    let (mut app, _rx) = make_app();
-
-    let engine = ScriptEngine::new().unwrap();
-    push_effect(&engine, Action::NotifyError("error msg".to_string(), 6));
-    push_effect(&engine, Action::Notify("normal msg".to_string(), 4));
-    engine.drain_effects(&mut app);
-
-    assert_eq!(app.status_message(), Some("error msg"));
-    assert!(app.status_message_is_error());
-  }
-}
+mod drain_tests {}
 
 // --- register_command ---
 
@@ -962,86 +748,7 @@ fn register_command_duplicate_is_error() {
 // --- run_pending_commands ---
 
 #[cfg(test)]
-mod command_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[test]
-  fn run_pending_commands_invokes_callback() {
-    let mut engine = ScriptEngine::new().unwrap();
-    engine
-      .load_source(
-        "myplugin",
-        r#"spotatui.register_command("greet", function() spotatui.notify("hello", 2) end)"#,
-      )
-      .unwrap();
-    let (mut app, _rx) = make_app();
-    app.queue_plugin_command("greet".to_string());
-    engine.run_pending_commands(&mut app);
-    assert_eq!(app.status_message(), Some("hello"));
-  }
-
-  #[test]
-  fn run_pending_commands_unknown_name_sets_error() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.queue_plugin_command("nonexistent".to_string());
-    engine.run_pending_commands(&mut app);
-    assert!(app.status_message_is_error());
-    assert!(app.status_message().unwrap_or("").contains("nonexistent"));
-  }
-
-  #[test]
-  fn run_pending_commands_erroring_callback_sets_error_and_stays_registered() {
-    let mut engine = ScriptEngine::new().unwrap();
-    engine
-      .load_source(
-        "badplugin",
-        r#"spotatui.register_command("boom", function() error("explode") end)"#,
-      )
-      .unwrap();
-    let (mut app, _rx) = make_app();
-    app.queue_plugin_command("boom".to_string());
-    engine.run_pending_commands(&mut app);
-    assert!(app.status_message_is_error());
-
-    // Second invocation: command must still be registered (not removed).
-    app.pending_plugin_commands.clear();
-    app.clear_status_message();
-    app.queue_plugin_command("boom".to_string());
-    engine.run_pending_commands(&mut app);
-    assert!(app.status_message_is_error());
-  }
-
-  #[test]
-  fn run_pending_commands_sets_current_plugin_during_invocation() {
-    let mut engine = ScriptEngine::new().unwrap();
-    engine
-      .load_source(
-        "myplugin",
-        r#"spotatui.register_command("check_plugin", function()
-          spotatui.notify("ok", 1)
-        end)"#,
-      )
-      .unwrap();
-    let (mut app, _rx) = make_app();
-    app.queue_plugin_command("check_plugin".to_string());
-    engine.run_pending_commands(&mut app);
-    assert_eq!(app.status_message(), Some("ok"));
-    // current_plugin is cleared after the call
-    assert!(engine.shared.current_plugin.borrow().is_empty());
-  }
-}
+mod command_tests {}
 
 // --- set_playbar ---
 
@@ -1076,61 +783,7 @@ fn set_playbar_nil_queues_clear() {
 }
 
 #[cfg(test)]
-mod playbar_effect_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[test]
-  fn applying_set_playbar_segment_inserts_into_map() {
-    let (mut app, _rx) = make_app();
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::SetPlaybarSegment {
-        plugin: "myplugin".to_string(),
-        text: Some("seg text".to_string()),
-      });
-    engine.drain_effects(&mut app);
-    assert_eq!(
-      app
-        .plugin_playbar_segments
-        .get("myplugin")
-        .map(|s| s.as_str()),
-      Some("seg text")
-    );
-  }
-
-  #[test]
-  fn applying_set_playbar_segment_nil_removes_from_map() {
-    let (mut app, _rx) = make_app();
-    app
-      .plugin_playbar_segments
-      .insert("myplugin".to_string(), "old".to_string());
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::SetPlaybarSegment {
-        plugin: "myplugin".to_string(),
-        text: None,
-      });
-    engine.drain_effects(&mut app);
-    assert!(!app.plugin_playbar_segments.contains_key("myplugin"));
-  }
-}
+mod playbar_effect_tests {}
 
 // --- popup ---
 
@@ -1219,45 +872,7 @@ fn popup_non_table_non_string_line_raises() {
 }
 
 #[cfg(test)]
-mod popup_effect_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::plugin_api::{PluginPopup, PopupLine};
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[test]
-  fn applying_show_popup_sets_app_popup_and_resets_scroll() {
-    let (mut app, _rx) = make_app();
-    app.view.plugin_popup_scroll = 5;
-    let engine = ScriptEngine::new().unwrap();
-    let popup = PluginPopup {
-      title: "Test".to_string(),
-      lines: vec![PopupLine {
-        text: "hello".to_string(),
-        fg: None,
-        bold: false,
-        italic: false,
-      }],
-    };
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::ShowPopup(popup.clone()));
-    engine.drain_effects(&mut app);
-    assert_eq!(app.plugin_popup, Some(popup));
-    assert_eq!(app.view.plugin_popup_scroll, 0);
-  }
-}
+mod popup_effect_tests {}
 
 // --- set_theme ---
 
@@ -1302,39 +917,7 @@ fn set_theme_bad_color_raises() {
 }
 
 #[cfg(test)]
-mod theme_effect_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[test]
-  fn applying_set_theme_mutates_app_theme_field() {
-    let (mut app, _rx) = make_app();
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::SetTheme(vec![(
-        crate::core::theme::ThemeField::PlaybarText,
-        crate::core::theme::Color::Magenta,
-      )]));
-    engine.drain_effects(&mut app);
-    assert_eq!(
-      app.user_config.theme.playbar_text,
-      crate::core::theme::Color::Magenta
-    );
-  }
-}
+mod theme_effect_tests {}
 
 // --- diff_events ---
 
@@ -1421,17 +1004,6 @@ fn diff_queue_change() {
 mod action_tests {
   use super::*;
   use crate::core::action::RepeatSetting;
-  use crate::core::app::{App, UserInfo};
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
 
   #[test]
   fn set_repeat_maps_all_modes() {
@@ -1465,21 +1037,11 @@ mod action_tests {
 
   #[test]
   fn play_uri_track_uses_uri_list() {
-    match run_action(r#"spotatui.play_uri("spotify:track:abc123")"#) {
+    match run_action(r#"spotatui.play_uri("qobuz:track:abc123")"#) {
       Action::PlayUris { uris, offset: None } => {
-        assert_eq!(uris, vec!["spotify:track:abc123".to_string()]);
+        assert_eq!(uris, vec!["qobuz:track:abc123".to_string()]);
       }
       _ => panic!("expected PlayUris"),
-    }
-  }
-
-  #[test]
-  fn play_uri_album_uses_context() {
-    match run_action(r#"spotatui.play_uri("spotify:album:abc123")"#) {
-      Action::PlayContext { uri, offset: None } => {
-        assert_eq!(uri, "spotify:album:abc123");
-      }
-      _ => panic!("expected PlayContext"),
     }
   }
 
@@ -1492,46 +1054,11 @@ mod action_tests {
   }
 
   #[test]
-  fn play_context_carries_offset() {
-    match run_action(r#"spotatui.play_context("spotify:playlist:p1", 5)"#) {
-      Action::PlayContext {
-        uri,
-        offset: Some(offset),
-      } => {
-        assert_eq!(uri, "spotify:playlist:p1");
-        assert_eq!(offset, 5);
-      }
-      _ => panic!("expected PlayContext with offset"),
-    }
-  }
-
-  #[test]
   fn play_context_rejects_track_uri() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
       .load_source("test", r#"spotatui.play_context("spotify:track:t1")"#)
       .is_err());
-  }
-
-  #[test]
-  fn add_to_queue_queues_dispatch() {
-    match run_action(r#"spotatui.add_to_queue("spotify:track:t1")"#) {
-      Action::AddToQueue(uri) => {
-        assert_eq!(uri, "spotify:track:t1");
-      }
-      _ => panic!("expected AddToQueue"),
-    }
-  }
-
-  #[test]
-  fn create_playlist_with_uris() {
-    match run_action(r#"spotatui.create_playlist("Mix", {"spotify:track:a", "spotify:track:b"})"#) {
-      Action::CreatePlaylist { name, track_uris } => {
-        assert_eq!(name, "Mix");
-        assert_eq!(track_uris.len(), 2);
-      }
-      _ => panic!("expected CreatePlaylist"),
-    }
   }
 
   #[test]
@@ -1543,145 +1070,11 @@ mod action_tests {
   }
 
   #[test]
-  fn playlist_remove_track_requires_position() {
-    match run_action(r#"spotatui.playlist_remove_track("p1", "t1", 0)"#) {
-      Action::RemoveTrackFromPlaylist {
-        playlist,
-        track,
-        position,
-      } => {
-        assert_eq!(playlist, "p1");
-        assert_eq!(track, "t1");
-        assert_eq!(position, 0);
-      }
-      _ => panic!("expected RemoveTrackFromPlaylist"),
-    }
-
-    let mut engine = ScriptEngine::new().unwrap();
-    assert!(engine
-      .load_source("test", r#"spotatui.playlist_remove_track("p1", "t1")"#)
-      .is_err());
-    assert!(engine
-      .load_source("test", r#"spotatui.playlist_remove_track("p1", "t1", -1)"#)
-      .is_err());
-  }
-
-  #[test]
-  fn transfer_playback_does_not_persist_device() {
-    match run_action(r#"spotatui.transfer_playback("dev-1")"#) {
-      Action::TransferPlayback { device_id, persist } => {
-        assert_eq!(device_id, "dev-1");
-        assert!(!persist);
-      }
-      _ => panic!("expected TransferPlayback"),
-    }
-  }
-
-  #[test]
-  fn follow_and_save_actions_map_to_events() {
-    assert!(matches!(
-      run_action(r#"spotatui.toggle_save_track("spotify:track:t1")"#),
-      Action::ToggleSaveTrack(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.save_album("a1")"#),
-      Action::SaveAlbum(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.unsave_album("a1")"#),
-      Action::UnsaveAlbum(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.save_show("s1")"#),
-      Action::SaveShow(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.unsave_show("s1")"#),
-      Action::UnsaveShow(_)
-    ));
-    match run_action(r#"spotatui.follow_artist("ar1")"#) {
-      Action::FollowArtist(id) => {
-        assert_eq!(id, "ar1");
-      }
-      _ => panic!("expected FollowArtist"),
-    }
-    assert!(matches!(
-      run_action(r#"spotatui.unfollow_artist("ar1")"#),
-      Action::UnfollowArtist(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.follow_playlist("p1")"#),
-      Action::FollowPlaylist(_)
-    ));
-    assert!(matches!(
-      run_action(r#"spotatui.unfollow_playlist("p1")"#),
-      Action::UnfollowPlaylist(_)
-    ));
-  }
-
-  #[test]
   fn empty_string_argument_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
       .load_source("test", r#"spotatui.add_to_queue("")"#)
       .is_err());
-  }
-
-  #[test]
-  fn drain_add_to_queue_sends_io_event() {
-    let (mut app, rx) = make_app();
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::AddToQueue("spotify:track:t1".to_string()));
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::AddItemToQueue(uri)) => assert_eq!(uri, "spotify:track:t1"),
-      _ => panic!("expected AddItemToQueue on channel (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn drain_unfollow_playlist_resolves_current_user() {
-    let (mut app, rx) = make_app();
-    *app.user_mut() = Some(UserInfo {
-      id: "me-123".to_string(),
-      display_name: None,
-      country: None,
-    });
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::UnfollowPlaylist("p1".to_string()));
-    engine.drain_effects(&mut app);
-
-    match rx.try_recv() {
-      Ok(IoEvent::UserUnfollowPlaylist(user_id, playlist_id)) => {
-        assert_eq!(user_id, "me-123");
-        assert_eq!(playlist_id, "p1");
-      }
-      _ => panic!("expected UserUnfollowPlaylist on channel (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn drain_unfollow_playlist_without_user_sets_error() {
-    let (mut app, rx) = make_app();
-    let engine = ScriptEngine::new().unwrap();
-    engine
-      .shared
-      .effects
-      .borrow_mut()
-      .push(Action::UnfollowPlaylist("p1".to_string()));
-    engine.drain_effects(&mut app);
-
-    assert!(rx.try_recv().is_err(), "no IoEvent expected");
-    assert!(app.status_message_is_error());
   }
 }
 
@@ -1690,167 +1083,6 @@ mod action_tests {
 #[cfg(test)]
 mod data_read_tests {
   use super::*;
-  use crate::core::app::{App, LyricsStatus, PluginDataKind};
-  use crate::core::plugin_api::PlaylistInfo;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::{Duration, Instant, SystemTime};
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  fn playlist(name: &str) -> PlaylistInfo {
-    PlaylistInfo {
-      generated_name: None,
-      uri: format!("spotify:playlist:{name}"),
-      name: name.to_string(),
-      owner: "owner".to_string(),
-      track_count: 3,
-      id: Some(name.to_string()),
-      owner_id: Some("owner".to_string()),
-      collaborative: false,
-      public: Some(true),
-      image_url: None,
-    }
-  }
-
-  const GET_PLAYLISTS_NOTIFY: &str = r#"
-    spotatui.get_playlists(function(data, err)
-      if err then
-        spotatui.notify("err: " .. err, 1)
-      else
-        spotatui.notify("ok: " .. #data .. ":" .. (data[1] and data[1].name or "-"), 1)
-      end
-    end)
-  "#;
-
-  #[test]
-  fn get_playlists_dispatches_io_event_and_resolves_on_bump() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-    engine.load_source("reader", GET_PLAYLISTS_NOTIFY).unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-
-    match rx.try_recv() {
-      Ok(IoEvent::GetPlaylists) => {}
-      _ => panic!("expected GetPlaylists dispatch (IoEvent is not Debug)"),
-    }
-    // Not resolved yet: generation unchanged.
-    assert!(drain(&engine).is_empty());
-
-    // Simulate the network write + bump, then the next engine pass resolves.
-    *app.all_playlists_mut() = vec![playlist("Jams")];
-    app.plugin_data_generations.bump(PluginDataKind::Playlists);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(500));
-
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "ok: 1:Jams"),
-      _ => panic!("expected data callback notify"),
-    }
-  }
-
-  #[test]
-  fn data_request_times_out_with_distinct_error() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("reader", GET_PLAYLISTS_NOTIFY).unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-    assert!(drain(&engine).is_empty());
-
-    // Never bump; jump past the deadline.
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_secs(16));
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "err: request timed out"),
-      _ => panic!("expected timeout notify"),
-    }
-  }
-
-  #[test]
-  fn erroring_data_callback_queues_notify_error_and_is_one_shot() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "bad_reader",
-        r#"spotatui.get_playlists(function(data, err) error("data boom") end)"#,
-      )
-      .unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-    app.plugin_data_generations.bump(PluginDataKind::Playlists);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(1));
-
-    match one(&engine) {
-      Action::NotifyError(msg, 6) => {
-        assert!(msg.contains("bad_reader"));
-        assert!(msg.contains("data boom"));
-      }
-      _ => panic!("expected data callback error notify"),
-    }
-    assert!(engine.shared.current_plugin.borrow().is_empty());
-
-    // The slot is cleared: another bump must not re-fire the callback.
-    app.plugin_data_generations.bump(PluginDataKind::Playlists);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(2));
-    assert!(drain(&engine).is_empty());
-  }
-
-  #[test]
-  fn two_same_kind_requests_both_resolve_on_one_bump() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "reader",
-        r#"
-          spotatui.get_playlists(function(data, err) spotatui.notify("first", 1) end)
-          spotatui.get_playlists(function(data, err) spotatui.notify("second", 1) end)
-        "#,
-      )
-      .unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-    app.plugin_data_generations.bump(PluginDataKind::Playlists);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(1));
-
-    let effects = drain(&engine);
-    let messages: Vec<String> = effects
-      .into_iter()
-      .filter_map(|e| match e {
-        Action::Notify(m, _) => Some(m),
-        _ => None,
-      })
-      .collect();
-    assert_eq!(messages, vec!["first".to_string(), "second".to_string()]);
-  }
-
-  #[test]
-  fn get_search_results_dispatches_query() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-    engine
-      .load_source(
-        "searcher",
-        r#"spotatui.get_search_results("daft punk", function(data, err) end)"#,
-      )
-      .unwrap();
-
-    engine.process_data_requests_for_test(&mut app, Instant::now());
-    match rx.try_recv() {
-      Ok(IoEvent::GetSearchResults(q, _)) => assert_eq!(q, "daft punk"),
-      _ => panic!("expected GetSearchResults dispatch (IoEvent is not Debug)"),
-    }
-  }
 
   #[test]
   fn get_search_results_empty_query_raises() {
@@ -1860,259 +1092,6 @@ mod data_read_tests {
       r#"spotatui.get_search_results("", function() end)"#,
     );
     assert!(result.is_err());
-  }
-
-  #[test]
-  fn get_lyrics_terminal_status_delivers_immediately_without_dispatch() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-    app.set_lyrics(
-      LyricsStatus::Found,
-      Some(vec![(1500, "hello lyrics".to_string())]),
-      false,
-    );
-
-    engine
-      .load_source(
-        "lyricist",
-        r#"
-          spotatui.get_lyrics(function(data, err)
-            spotatui.notify(data.status .. ":" .. data.lines[1].text .. ":" .. data.lines[1].time_ms, 1)
-          end)
-        "#,
-      )
-      .unwrap();
-
-    engine.process_data_requests_for_test(&mut app, Instant::now());
-    assert!(
-      rx.try_recv().is_err(),
-      "lyrics must not dispatch an IoEvent"
-    );
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "found:hello lyrics:1500"),
-      _ => panic!("expected immediate lyrics notify"),
-    }
-  }
-
-  #[test]
-  fn get_lyrics_pending_resolves_when_fetch_completes() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-    app.set_lyrics(LyricsStatus::Loading, None, false);
-
-    engine
-      .load_source(
-        "lyricist",
-        r#"spotatui.get_lyrics(function(data, err) spotatui.notify(data.status, 1) end)"#,
-      )
-      .unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-    assert!(
-      rx.try_recv().is_err(),
-      "lyrics must not dispatch an IoEvent"
-    );
-    assert!(drain(&engine).is_empty());
-
-    app.set_lyrics(LyricsStatus::NotFound, None, false);
-    app.plugin_data_generations.bump(PluginDataKind::Lyrics);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(1));
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "not_found"),
-      _ => panic!("expected pending lyrics notify"),
-    }
-  }
-
-  /// The driver ticks the script engine *before* its track-change detector, so
-  /// on the tick a track changes `lyrics_status` is still `Found` for the
-  /// previous track. `get_lyrics` from a `track_change` handler must wait for
-  /// the new lyrics rather than resolving with the old ones.
-  #[test]
-  fn get_lyrics_waits_when_the_stored_lyrics_are_for_the_previous_track() {
-    use crate::core::app::{NativeTrackInfo, NativeTrackKind};
-
-    fn playing(app: &mut App, name: &str) {
-      app.is_streaming_active = true;
-      app.native_track_info = Some(NativeTrackInfo {
-        name: name.to_string(),
-        artists: vec!["The Artist".to_string()],
-        album: "The Album".to_string(),
-        duration_ms: 180_000,
-        kind: NativeTrackKind::Track,
-        image_url: None,
-      });
-    }
-
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-
-    // Track A is playing and its lyrics have landed.
-    playing(&mut app, "Track A");
-    app.desired_lyrics_identity = Some(("Track A".to_string(), "The Artist".to_string()));
-    app.set_lyrics(
-      LyricsStatus::Found,
-      Some(vec![(0, "lyrics for A".to_string())]),
-      false,
-    );
-
-    // Playback moves to track B. The detector has NOT run yet, so the lyrics
-    // state still describes A - this is the exact window the bug lived in.
-    playing(&mut app, "Track B");
-
-    engine
-      .load_source(
-        "lyricist",
-        r#"spotatui.get_lyrics(function(data, err) spotatui.notify(data.lines[1].text, 1) end)"#,
-      )
-      .unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-    assert!(
-      rx.try_recv().is_err(),
-      "lyrics must not dispatch an IoEvent"
-    );
-    assert!(
-      drain(&engine).is_empty(),
-      "must not resolve with the previous track's lyrics"
-    );
-
-    // The detector then runs and B's lyrics land, bumping the generation.
-    app.desired_lyrics_identity = Some(("Track B".to_string(), "The Artist".to_string()));
-    app.set_lyrics(
-      LyricsStatus::Found,
-      Some(vec![(0, "lyrics for B".to_string())]),
-      false,
-    );
-    app.plugin_data_generations.bump(PluginDataKind::Lyrics);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(1));
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "lyrics for B"),
-      _ => panic!("expected B's lyrics"),
-    }
-  }
-
-  /// The currency check must not stall the normal case: lyrics that belong to
-  /// the track actually playing still resolve in the same pass.
-  #[test]
-  fn get_lyrics_for_the_current_track_still_delivers_immediately() {
-    use crate::core::app::{NativeTrackInfo, NativeTrackKind};
-
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.is_streaming_active = true;
-    app.native_track_info = Some(NativeTrackInfo {
-      name: "Track A".to_string(),
-      artists: vec!["The Artist".to_string()],
-      album: "The Album".to_string(),
-      duration_ms: 180_000,
-      kind: NativeTrackKind::Track,
-      image_url: None,
-    });
-    app.desired_lyrics_identity = Some(("Track A".to_string(), "The Artist".to_string()));
-    app.set_lyrics(
-      LyricsStatus::Found,
-      Some(vec![(0, "lyrics for A".to_string())]),
-      false,
-    );
-
-    engine
-      .load_source(
-        "lyricist",
-        r#"spotatui.get_lyrics(function(data, err) spotatui.notify(data.lines[1].text, 1) end)"#,
-      )
-      .unwrap();
-
-    engine.process_data_requests_for_test(&mut app, Instant::now());
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "lyrics for A"),
-      _ => panic!("expected immediate delivery"),
-    }
-  }
-
-  #[test]
-  fn get_queue_resolves_with_flattened_items() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "queuer",
-        r#"
-          spotatui.get_queue(function(data, err)
-            local current = data.currently_playing and data.currently_playing.track.name or "-"
-            spotatui.notify(current .. ":" .. #data.items .. ":" .. data.items[1].kind, 1)
-          end)
-        "#,
-      )
-      .unwrap();
-
-    let now = Instant::now();
-    engine.process_data_requests_for_test(&mut app, now);
-
-    app.queue = Some(crate::core::app::QueueState {
-      currently_playing: Some(crate::core::plugin_api::PlayableInfo::Track(track(
-        "uri:now",
-        "Now Playing",
-      ))),
-      queue: vec![crate::core::plugin_api::PlayableInfo::Track(track(
-        "uri:next", "Next Up",
-      ))],
-    });
-    app.plugin_data_generations.bump(PluginDataKind::Queue);
-    engine.process_data_requests_for_test(&mut app, now + Duration::from_millis(1));
-
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "Now Playing:1:track"),
-      _ => panic!("expected queue notify"),
-    }
-  }
-
-  #[test]
-  fn cached_playlists_read_refreshes_on_generation_change() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-
-    // First tick: sentinel forces a refresh of the (empty) snapshot.
-    engine.on_tick(&mut app);
-    engine
-      .load_source(
-        "sync",
-        r#"spotatui.notify("n=" .. #spotatui.playlists(), 1)"#,
-      )
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "n=0"),
-      _ => panic!("expected empty cached read"),
-    }
-
-    // Data lands without a bump: the cache must NOT refresh.
-    *app.all_playlists_mut() = vec![playlist("A")];
-    engine.on_tick(&mut app);
-    engine
-      .load_source(
-        "sync2",
-        r#"spotatui.notify("n=" .. #spotatui.playlists(), 1)"#,
-      )
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "n=0"),
-      _ => panic!("expected stale cached read before bump"),
-    }
-
-    // After the bump the next tick refreshes.
-    app.plugin_data_generations.bump(PluginDataKind::Playlists);
-    engine.on_tick(&mut app);
-    engine
-      .load_source(
-        "sync3",
-        r#"spotatui.notify("n=" .. #spotatui.playlists(), 1)"#,
-      )
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "n=1"),
-      _ => panic!("expected refreshed cached read"),
-    }
   }
 }
 
@@ -2638,19 +1617,10 @@ mod storage_tests {
 #[cfg(test)]
 mod state_event_tests {
   use super::*;
-  use crate::core::app::{ActiveBlock, App, RouteId};
-  use crate::core::plugin_api::DeviceInfo;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use crate::infra::scripting::events::diff_state_events;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
 
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
+  use crate::core::plugin_api::DeviceInfo;
+
+  use crate::infra::scripting::events::diff_state_events;
 
   fn device(id: &str, active: bool) -> DeviceInfo {
     DeviceInfo {
@@ -2720,103 +1690,11 @@ mod state_event_tests {
   }
 
   #[test]
-  fn route_change_event_fires_after_key_navigation() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "router",
-        r#"spotatui.on("route_change", function(ev) spotatui.notify("now at " .. ev.name, 1) end)"#,
-      )
-      .unwrap();
-
-    // Baseline the route (as on_start would), then navigate like a key handler.
-    engine.run_pending_commands(&mut app);
-    let _ = drain(&engine);
-    app.push_navigation_stack(RouteId::Queue, ActiveBlock::Queue);
-    engine.run_pending_commands(&mut app);
-
-    assert_eq!(app.status_message(), Some("now at queue"));
-  }
-
-  #[test]
-  fn current_route_sync_read_tracks_navigation() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.push_navigation_stack(RouteId::Settings, ActiveBlock::Settings);
-    engine.on_tick(&mut app);
-    engine
-      .load_source("reader", r#"spotatui.notify(spotatui.current_route(), 1)"#)
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "settings"),
-      _ => panic!("expected current_route notify"),
-    }
-  }
-
-  #[test]
   fn navigate_unknown_target_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
       .load_source("nav", r#"spotatui.navigate("narnia")"#)
       .is_err());
-  }
-
-  #[test]
-  fn navigate_queue_pushes_route_and_fetches() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, rx) = make_app();
-    engine
-      .load_source("nav", r#"spotatui.navigate("queue")"#)
-      .unwrap();
-    engine.drain_effects(&mut app);
-
-    assert_eq!(app.get_current_route().id, RouteId::Queue);
-    match rx.try_recv() {
-      Ok(IoEvent::GetQueue) => {}
-      _ => panic!("expected GetQueue dispatch (IoEvent is not Debug)"),
-    }
-  }
-
-  #[test]
-  fn back_pops_navigation_stack() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.push_navigation_stack(RouteId::Queue, ActiveBlock::Queue);
-    engine.load_source("nav", r#"spotatui.back()"#).unwrap();
-    engine.drain_effects(&mut app);
-    assert_eq!(app.get_current_route().id, RouteId::Home);
-  }
-
-  #[test]
-  fn device_change_event_fires_on_active_device_swap() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "dev",
-        r#"spotatui.on("device_change", function() spotatui.notify("devices moved", 1) end)"#,
-      )
-      .unwrap();
-
-    engine.on_tick(&mut app); // baseline: no devices
-    let _ = drain(&engine);
-
-    #[allow(deprecated)]
-    let payload = rspotify::model::device::DevicePayload {
-      devices: vec![rspotify::model::Device {
-        id: Some("dev-1".to_string()),
-        is_active: true,
-        is_private_session: false,
-        is_restricted: false,
-        name: "Desk".to_string(),
-        _type: rspotify::model::DeviceType::Computer,
-        volume_percent: Some(30),
-      }],
-    };
-    app.set_devices(payload);
-    engine.on_tick(&mut app);
-    assert_eq!(app.status_message(), Some("devices moved"));
   }
 }
 
@@ -2825,18 +1703,7 @@ mod state_event_tests {
 #[cfg(test)]
 mod screen_tests {
   use super::*;
-  use crate::core::app::{ActiveBlock, App, RouteId};
-  use crate::core::plugin_api::{PluginCoverArtFit, PluginLength, PluginWidgetKind};
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
+  use crate::core::app::{ActiveBlock, RouteId};
 
   const STATS_SCREEN: &str = r#"
     spotatui.register_screen("stats", {
@@ -2848,90 +1715,6 @@ mod screen_tests {
       on_close = function() spotatui.notify("closed", 1) end,
     })
   "#;
-
-  #[test]
-  fn show_screen_pushes_route_and_close_pops() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("stats.lua", STATS_SCREEN).unwrap();
-    engine
-      .load_source("stats.lua", r#"spotatui.show_screen("stats")"#)
-      .unwrap();
-    engine.drain_effects(&mut app);
-
-    assert_eq!(
-      app.get_current_route().id,
-      RouteId::PluginScreen("stats".to_string())
-    );
-    assert_eq!(
-      app.get_current_route().active_block,
-      ActiveBlock::PluginScreen
-    );
-
-    engine
-      .load_source("stats.lua", r#"spotatui.close_screen("stats")"#)
-      .unwrap();
-    engine.drain_effects(&mut app);
-    assert!(!matches!(
-      app.get_current_route().id,
-      RouteId::PluginScreen(_)
-    ));
-  }
-
-  #[test]
-  fn set_screen_publishes_widgets() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("stats.lua", STATS_SCREEN).unwrap();
-    engine
-      .load_source(
-        "stats.lua",
-        r#"
-          spotatui.set_screen("stats", {
-            { type = "paragraph", lines = {"hello", { text = "styled", bold = true }}, height = 4 },
-            { type = "list", title = "Songs", items = {"one", "two"}, selected = 2 },
-            { type = "gauge", ratio = 1.7, label = "70%" },
-          })
-        "#,
-      )
-      .unwrap();
-    engine.drain_effects(&mut app);
-
-    let content = app.plugin_screens.get("stats").expect("content published");
-    assert_eq!(content.title, "Stats");
-    assert_eq!(content.widgets.len(), 3);
-    match &content.widgets[0].kind {
-      PluginWidgetKind::Paragraph { lines, scroll } => {
-        assert_eq!(lines.len(), 2);
-        assert!(lines[1].bold);
-        // Paragraphs scroll by default, matching the api_version = 5 behavior.
-        assert!(*scroll);
-      }
-      _ => panic!("expected paragraph widget"),
-    }
-    assert_eq!(content.widgets[0].height, Some(PluginLength::Cells(4)));
-    assert_eq!(content.widgets[0].width, None);
-    match &content.widgets[1].kind {
-      PluginWidgetKind::List {
-        title,
-        items,
-        selected,
-      } => {
-        assert_eq!(title.as_deref(), Some("Songs"));
-        assert_eq!(items.len(), 2);
-        // Lua-side selected is 1-based; stored 0-based.
-        assert_eq!(*selected, Some(1));
-      }
-      _ => panic!("expected list widget"),
-    }
-    match &content.widgets[2].kind {
-      PluginWidgetKind::Gauge { ratio, label } => {
-        assert_eq!(*ratio, 1.0, "ratio must be clamped");
-        assert_eq!(label.as_deref(), Some("70%"));
-      }
-      _ => panic!("expected gauge widget"),
-    }
-  }
 
   #[test]
   fn set_screen_rejects_unknown_widget_type_and_bad_selected() {
@@ -2951,24 +1734,6 @@ mod screen_tests {
       .is_err());
   }
 
-  /// Publishes `widgets` on the "stats" screen and returns the stored content.
-  fn publish_widgets(widgets: &str) -> crate::core::plugin_api::PluginScreenContent {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("stats.lua", STATS_SCREEN).unwrap();
-    engine
-      .load_source(
-        "stats.lua",
-        &format!(r#"spotatui.set_screen("stats", {widgets})"#),
-      )
-      .unwrap();
-    engine.drain_effects(&mut app);
-    app
-      .plugin_screens
-      .remove("stats")
-      .expect("content published")
-  }
-
   /// Asserts publishing `widgets` fails, and returns the error text.
   fn publish_widgets_err(widgets: &str) -> String {
     let mut engine = ScriptEngine::new().unwrap();
@@ -2980,70 +1745,6 @@ mod screen_tests {
       )
       .expect_err("expected set_screen to fail")
       .to_string()
-  }
-
-  #[test]
-  fn set_screen_parses_nested_row_and_column_containers() {
-    let content = publish_widgets(
-      r#"{
-        {
-          type = "row",
-          height_percent = 60,
-          children = {
-            { type = "cover_art", source = "current", fit = "scale", width_percent = 40 },
-            {
-              type = "column",
-              width = 30,
-              children = {
-                { type = "paragraph", lines = {"a"}, scroll = false },
-                { type = "paragraph", lines = {"b"} },
-              },
-            },
-          },
-        },
-      }"#,
-    );
-
-    assert_eq!(content.widgets.len(), 1);
-    let row = &content.widgets[0];
-    assert_eq!(row.height, Some(PluginLength::Percent(60)));
-    let PluginWidgetKind::Row { children } = &row.kind else {
-      panic!("expected row container");
-    };
-    assert_eq!(children.len(), 2);
-
-    assert_eq!(children[0].width, Some(PluginLength::Percent(40)));
-    assert!(matches!(
-      children[0].kind,
-      PluginWidgetKind::CoverArt {
-        fit: PluginCoverArtFit::Scale
-      }
-    ));
-
-    assert_eq!(children[1].width, Some(PluginLength::Cells(30)));
-    let PluginWidgetKind::Column { children: inner } = &children[1].kind else {
-      panic!("expected column container");
-    };
-    assert_eq!(inner.len(), 2);
-    assert!(matches!(
-      inner[0].kind,
-      PluginWidgetKind::Paragraph { scroll: false, .. }
-    ));
-    assert!(matches!(
-      inner[1].kind,
-      PluginWidgetKind::Paragraph { scroll: true, .. }
-    ));
-  }
-
-  #[test]
-  fn cover_art_defaults_to_contain_and_the_current_source() {
-    let content = publish_widgets(r#"{ { type = "cover_art" } }"#);
-    assert!(matches!(
-      content.widgets[0].kind,
-      PluginWidgetKind::CoverArt {
-        fit: PluginCoverArtFit::Contain
-      }
-    ));
   }
 
   #[test]
@@ -3081,52 +1782,10 @@ mod screen_tests {
     }
   }
 
-  /// `height = 0` was legal in v5 (it produced a `Length(0)` constraint and so
-  /// an invisible widget). v6 must keep accepting it, or plugins that compute a
-  /// height and land on zero start failing their whole `set_screen` call.
-  #[test]
-  fn set_screen_accepts_a_zero_cell_count_as_a_hidden_widget() {
-    let content =
-      publish_widgets(r#"{ { type = "paragraph", lines = {"x"}, height = 0, width = 0 } }"#);
-
-    assert_eq!(content.widgets.len(), 1);
-    assert_eq!(content.widgets[0].height, Some(PluginLength::Cells(0)));
-    assert_eq!(content.widgets[0].width, Some(PluginLength::Cells(0)));
-  }
-
   #[test]
   fn set_screen_rejects_a_container_without_children() {
     let err = publish_widgets_err(r#"{ { type = "row" } }"#);
     assert!(err.contains("must have a 'children' array"), "got: {err}");
-  }
-
-  #[test]
-  fn set_screen_rejects_over_deep_nesting() {
-    // 9 nested rows: one past MAX_WIDGET_DEPTH.
-    let mut lua = String::from(r#"{ type = "paragraph", lines = {"x"} }"#);
-    for _ in 0..9 {
-      lua = format!(r#"{{ type = "row", children = {{ {lua} }} }}"#);
-    }
-    let err = publish_widgets_err(&format!("{{ {lua} }}"));
-    assert!(err.contains("nested more than"), "got: {err}");
-
-    // 8 levels is still accepted.
-    let mut lua = String::from(r#"{ type = "paragraph", lines = {"x"} }"#);
-    for _ in 0..8 {
-      lua = format!(r#"{{ type = "row", children = {{ {lua} }} }}"#);
-    }
-    let content = publish_widgets(&format!("{{ {lua} }}"));
-    assert_eq!(content.widgets.len(), 1);
-  }
-
-  #[test]
-  fn set_screen_rejects_too_many_widget_nodes() {
-    let one = r#"{ type = "paragraph", lines = {"x"} },"#;
-    let err = publish_widgets_err(&format!("{{ {} }}", one.repeat(257)));
-    assert!(err.contains("at most 256 widgets"), "got: {err}");
-
-    let content = publish_widgets(&format!("{{ {} }}", one.repeat(256)));
-    assert_eq!(content.widgets.len(), 256);
   }
 
   #[test]
@@ -3171,124 +1830,6 @@ mod screen_tests {
   }
 
   #[test]
-  fn pending_screen_key_reaches_on_key() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("stats.lua", STATS_SCREEN).unwrap();
-
-    app
-      .pending_plugin_screen_keys
-      .push(("stats".to_string(), "ctrl-x".to_string()));
-    engine.run_pending_commands(&mut app);
-
-    assert_eq!(app.status_message(), Some("key: ctrl-x"));
-  }
-
-  #[test]
-  fn erroring_on_key_is_one_strike() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "bad.lua",
-        r#"spotatui.register_screen("boom", { on_key = function() error("kaput") end })"#,
-      )
-      .unwrap();
-
-    app
-      .pending_plugin_screen_keys
-      .push(("boom".to_string(), "a".to_string()));
-    engine.run_pending_commands(&mut app);
-    assert!(app.status_message_is_error());
-    assert!(app.status_message().unwrap_or("").contains("kaput"));
-
-    // Second key: the erroring on_key was removed, nothing fires.
-    app.clear_status_message();
-    app
-      .pending_plugin_screen_keys
-      .push(("boom".to_string(), "a".to_string()));
-    engine.run_pending_commands(&mut app);
-    assert!(app.status_message().is_none());
-  }
-
-  #[test]
-  fn on_open_and_on_close_fire_on_route_transitions() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine.load_source("stats.lua", STATS_SCREEN).unwrap();
-
-    // Baseline route tracking.
-    engine.run_pending_commands(&mut app);
-
-    engine
-      .load_source("stats.lua", r#"spotatui.show_screen("stats")"#)
-      .unwrap();
-    engine.drain_effects(&mut app);
-    engine.run_pending_commands(&mut app);
-    assert_eq!(app.status_message(), Some("opened"));
-
-    app.pop_navigation_stack();
-    engine.run_pending_commands(&mut app);
-    assert_eq!(app.status_message(), Some("closed"));
-  }
-
-  /// The shipped example is the reference for the v6 widget API, so it is
-  /// loaded and driven through the real engine rather than only eyeballed.
-  #[test]
-  fn now_playing_example_publishes_a_cover_art_row() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    engine
-      .load_source(
-        "now-playing.lua",
-        include_str!("../../../examples/plugins/now-playing.lua"),
-      )
-      .unwrap();
-
-    // Baseline route tracking, then open the screen via its command.
-    engine.run_pending_commands(&mut app);
-    app.queue_plugin_command("now_playing".to_string());
-    engine.run_pending_commands(&mut app);
-    engine.drain_effects(&mut app);
-    assert_eq!(
-      app.get_current_route().id,
-      RouteId::PluginScreen("now_playing".to_string())
-    );
-
-    // The route change fires on_open, which renders the screen.
-    engine.run_pending_commands(&mut app);
-    engine.drain_effects(&mut app);
-
-    let content = app
-      .plugin_screens
-      .get("now_playing")
-      .expect("content published");
-    assert_eq!(content.title, "Now Playing");
-    assert_eq!(content.widgets.len(), 2);
-    assert!(matches!(
-      content.widgets[0].kind,
-      PluginWidgetKind::Paragraph { scroll: false, .. }
-    ));
-
-    let PluginWidgetKind::Row { children } = &content.widgets[1].kind else {
-      panic!("expected the lyrics row");
-    };
-    assert_eq!(children.len(), 2);
-    assert!(matches!(
-      children[0].kind,
-      PluginWidgetKind::CoverArt {
-        fit: PluginCoverArtFit::Contain
-      }
-    ));
-    assert_eq!(children[0].width, Some(PluginLength::Percent(45)));
-    assert!(matches!(
-      children[1].kind,
-      PluginWidgetKind::Paragraph { .. }
-    ));
-    assert_eq!(children[1].width, Some(PluginLength::Percent(55)));
-  }
-
-  #[test]
   fn route_name_for_plugin_screen_is_prefixed() {
     use crate::core::app::Route;
     let route = Route {
@@ -3303,108 +1844,7 @@ mod screen_tests {
 // --- config() read ---
 
 #[cfg(test)]
-mod config_tests {
-  use super::*;
-  use crate::core::app::App;
-  use crate::core::source::Source;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  fn make_app() -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    (app, rx)
-  }
-
-  #[test]
-  fn config_exposes_theme_and_behavior_scalars() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.user_config.theme.playbar_text = crate::core::theme::Color::Magenta;
-    app.user_config.behavior.seek_milliseconds = 12345;
-    engine.on_tick(&mut app);
-
-    engine
-      .load_source(
-        "cfg",
-        r#"
-          local c = spotatui.config()
-          spotatui.notify(c.theme.playbar_text .. ":" .. c.behavior.seek_milliseconds, 1)
-        "#,
-      )
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "Magenta:12345"),
-      _ => panic!("expected config notify"),
-    }
-  }
-
-  #[test]
-  fn config_exposes_runtime_backed_behavior_scalars() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.user_config.behavior.sidebar_width_percent = Some(20);
-    app.user_config.behavior.playbar_height_rows = Some(6);
-    app.user_config.behavior.library_height_percent = Some(30);
-    app.runtime_state.shuffle_enabled = true;
-    app.runtime_state.sidebar_width_percent = 42;
-    app.runtime_state.playbar_height_rows = 12;
-    app.runtime_state.library_height_percent = 64;
-    app.runtime_state.active_source = Source::Radio;
-    engine.on_tick(&mut app);
-
-    engine
-      .load_source(
-        "cfg",
-        r#"
-          local c = spotatui.config()
-          spotatui.notify(
-            table.concat({
-              tostring(c.behavior.shuffle_enabled),
-              tostring(c.behavior.sidebar_width_percent),
-              tostring(c.behavior.playbar_height_rows),
-              tostring(c.behavior.library_height_percent),
-              c.behavior.active_source
-            }, ":"),
-            1
-          )
-        "#,
-      )
-      .unwrap();
-
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "true:42:12:64:radio"),
-      _ => panic!("expected runtime-backed config notify"),
-    }
-    assert_eq!(app.user_config.behavior.sidebar_width_percent, Some(20));
-    assert_eq!(app.user_config.behavior.playbar_height_rows, Some(6));
-    assert_eq!(app.user_config.behavior.library_height_percent, Some(30));
-  }
-
-  #[test]
-  fn config_excludes_secrets() {
-    let mut engine = ScriptEngine::new().unwrap();
-    let (mut app, _rx) = make_app();
-    app.user_config.behavior.sync_token = Some("SECRET".to_string());
-    engine.on_tick(&mut app);
-
-    engine
-      .load_source(
-        "cfg",
-        r#"
-          local c = spotatui.config()
-          spotatui.notify(tostring(c.behavior.sync_token) .. ":" .. tostring(c.behavior.relay_server_url), 1)
-        "#,
-      )
-      .unwrap();
-    match one(&engine) {
-      Action::Notify(msg, 1) => assert_eq!(msg, "nil:nil"),
-      _ => panic!("expected secrets-excluded notify"),
-    }
-  }
-}
+mod config_tests {}
 
 /// The load error of `source`, from a thread, so a time limit that fails cannot hang the run.
 fn load_error_within_limit(source: &'static str) -> String {

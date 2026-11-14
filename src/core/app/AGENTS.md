@@ -1,10 +1,9 @@
 ### The `core/app/` module folder
 
-`App` was one 10,920-line file; it is now 37 files. The struct stays **flat** - all
-171 fields declared once in `src/core/app/mod.rs` (27 of them feature-gated), plus
-the 81 presentation fields grouped in `App.view` - and its ~270 methods are split
-across 36 sibling modules by concern, each with its own `impl App` block. The
-boundaries are organizational, not architectural.
+The struct stays **flat** - every field is declared once in
+`src/core/app/mod.rs`, plus the presentation fields grouped in `App.view` - and
+its methods are split across sibling modules by concern, each with its own
+`impl App` block. The boundaries are organizational, not architectural.
 
 Rules when working in here:
 
@@ -23,62 +22,21 @@ fixtures are `pub(super) fn`s in `test_support.rs`, imported as
 
 ### Playback ownership
 
-- A decoded start (Local/Subsonic/Qobuz/Radio/YouTube) **parks** librespot when
-  spotatui owned the sink (the active Connect device, a Spotify queue slot, a
-  failed backend) and only **pauses** it otherwise (an idle device under a
-  phone, a decoded queue slot over a Spotify context). A paused librespot keeps
-  the native flag true, so driving it directly resumes the wrong player.
-- A park (`App::release_native_for_decoded`, then `App::park_native_backend`)
-  shuts librespot down, removes it from `App` and sets the private
-  `native_parked` marker; the Spotify context and the recovery snapshot stay.
-  A shut-down player never resumes. An explicit Spotify start (unless another
-  device plays the cached playback), a queued Spotify item, Enter on the
-  parked device row, or a bare resume while the parked device held the
-  playback (`App::native_parked_here`) sends a reacquire request
-  (`App::reacquire_parked_backend`), and the recovery loop rebuilds the
-  backend and replays. Without the marker, a start after a park reaches the
-  Web API and the saved-device retry, which can start the phone. The rebuild
-  install refuses a new player while parked under a decoded owner
-  (`App::accept_rebuilt_native_backend`). Any other transport on the parked
-  device answers "Press play to resume Spotify", or "Reconnecting native
-  streaming…" once its rebuild is pending.
-- A decoded start claims the sink (`App::claim_decoded_sink`) before it pauses
-  librespot, and `active_decoded_source()` reads the claim: the owner is
-  `Decoded` from the first line of the start, through a failed start or a lost
-  output device, until the source's queue runs out (the driver's teardown, the
-  queue's exhausted-context resume) or an explicit Spotify start (a URI or a
-  context) reaches `Network::start_playback`, which releases it. A bare resume
-  never releases it, so a media key or Space during a download cannot resume
-  librespot.
-- Every hand-over of the sink away from librespot goes through
-  `App::pause_native_playback` (the park calls it too), never a bare
-  `player.pause()`: it clears the native play intent with the pause, so a
-  backend rebuild under the new owner comes back idle instead of restoring
-  Spotify over it. A path that loads librespot again afterwards re-arms the
-  intent (`play_queued_spotify`, `resume_native_shuffle_session`), or the stall
-  watchdog disarms on the false intent and a stalled load never rebuilds.
-- The decoded *queue* path claims the sink as well (`release_librespot`).
-  `resume_or_finish` releases that claim only where no decoded context resumes
-  (nothing suspended, a Spotify context, a lost device). A resumed decoded
-  context keeps it: only `start_*_queue` sets the claim, `play_index` does not.
-- A native entry point asks one of two predicates before it drives librespot.
-  `App::native_should_drive()` is false under an Apple Music or decoded owner
-  and true under a Spotify queue slot, whose track librespot plays.
-  `App::native_context_should_drive()` is also false under any queue slot; it
-  guards the paths that restore or continue the *cached* context (the restore,
-  the end-of-track continuation, the shuffle-session handlers). The recovery
-  rebuild itself is never refused: every sender removes the player before it
-  sends, so a refusal there loses the backend for the process.
-- While the native queue slot owns the sink, `current_playback_context` names the
-  *suspended* context's track. Inside `core/app/`, resolve the playing *track*
-  through `App::playing_item()` (`core/app/playback_routing.rs`): it answers
-  with the slot's `TrackInfo` (`uri`, `album_id`, `artist_refs`; a slot has
-  no play context) and refuses a decoded owner. Outside `core/app/` read the
-  `PlaybackSnapshot` (`infra/media_metadata.rs`), never the field:
-  `direct_playback_context_reads` counts every other reader and may only fall.
-- Radio is in `active_decoded_source` but deliberately out of
-  `active_queueable_decoded_source` (repeat/shuffle) and
-  `active_source_position_ms` (seek).
+- Two owners can hold the rodio sink: the native queue slot
+  (`queue_now`) and a Qobuz session (`qobuz_playback`). The queue slot wins:
+  while it plays, `qobuz_playback` is a suspended context, not the owner.
+- A Qobuz start (`start_qobuz_queue`) and the queue router both claim the sink
+  (`App::claim_decoded_sink`) before they start the player, and
+  `active_decoded_source()` reads the claim, so the owner holds through the
+  download, a failed start or a lost output device,
+  until the queue runs out (the driver's teardown, the queue's
+  exhausted-context resume) and `release_decoded_sink_claim` runs.
+- `resume_or_finish` releases the claim only where no decoded context resumes.
+  A resumed decoded context keeps it: only `start_*_queue` sets the claim,
+  `play_index` does not.
+- Old `last_session.yml` and queue files can still hold `spotify:` or other
+  removed-source URIs. They deserialize, and the routers ignore them; never
+  assume every queued URI is `qobuz:`.
 
 ### Errors
 
@@ -90,9 +48,7 @@ fixtures are `pub(super) fn`s in `test_support.rs`, imported as
   fires from the tick or a self-refreshing retry loop (so every retry restamps
   the lifetime and the backstop can never win), it is provably unreachable as a
   CLI exit signal, and the failed operation is bookkeeping rather than the thing
-  the user asked for. Two sites qualify today: `flush_state_save`, which
-  latches its report to once per failure run, and the GUI's `visualizer.yml`
-  check (`apply_visualizer_look`), whose `LookFile` reports a read only when
-  its text or error changed. Repeating either report at the retry
-  rate would hold `status_message_is_error` and silently drop every ordinary
-  status message for the rest of the session.
+  the user asked for. One site qualifies today: `flush_state_save`, which
+  latches its report to once per failure run. Repeating that report at the
+  retry rate would hold `status_message_is_error` and silently drop every
+  ordinary status message for the rest of the session.

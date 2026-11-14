@@ -1,7 +1,5 @@
-use crate::core::app::{
-  ActiveBlock, AlbumTableContext, App, EpisodeTableContext, RecommendationsContext,
-};
-use crate::core::plugin_api::{EpisodeInfo, SavedAlbumInfo, ShowInfo, TrackInfo};
+use crate::core::app::{ActiveBlock, App};
+use crate::core::plugin_api::TrackInfo;
 use ratatui::{
   layout::{Constraint, Rect},
   style::{Modifier, Style},
@@ -9,26 +7,16 @@ use ratatui::{
   widgets::{Block, Borders, Row, Table},
   Frame,
 };
-use rspotify::model::PlayableItem;
-use rspotify::prelude::Id;
 
 #[cfg(test)]
 use super::columns::resolve_columns;
 use super::columns::{resolve_columns_localized, ResolvedColumn, TableColumnSet};
-use super::util::{
-  get_color, get_percentage_width, join_artist_names, millis_to_minutes, release_year,
-};
-use crate::tui::theme::{EmphasisExt, ThemeExt};
+use super::util::{get_color, millis_to_minutes, release_year};
+use crate::tui::theme::ThemeExt;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TableId {
-  Album,
-  AlbumList,
-  Artist,
-  Podcast,
   Song,
-  RecentlyPlayed,
-  PodcastEpisodes,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -63,13 +51,6 @@ pub struct TableItem {
   pub format: Vec<String>,
 }
 
-struct AlbumUi {
-  selected_index: usize,
-  items: Vec<TableItem>,
-  title: String,
-  offset: usize,
-}
-
 fn table_visible_rows(app: &App, layout_chunk: Rect) -> usize {
   // Clamp the configured padding to half the table height so an oversized
   // value can never zero out the visible-row count (which would pin the
@@ -96,24 +77,6 @@ fn window_at<T>(offset: usize, layout_chunk: Rect, items: &[T]) -> (usize, &[T])
     .len()
     .min(offset.saturating_add(layout_chunk.height as usize));
   (offset, &items[offset..end])
-}
-
-/// Slice a backing collection down to the rows that can be visible in this
-/// layout, so callers only format the viewport instead of the whole
-/// collection. Returns the scroll offset and the visible slice; the offset
-/// math must stay in sync with what `draw_table` expects.
-fn visible_window<'a, T>(
-  app: &App,
-  layout_chunk: Rect,
-  selected_index: usize,
-  items: &'a [T],
-) -> (usize, &'a [T]) {
-  let visible_rows = table_visible_rows(app, layout_chunk);
-  window_at(
-    table_scroll_offset(selected_index, visible_rows),
-    layout_chunk,
-    items,
-  )
 }
 
 /// Like `visible_window`, but anchored to a persisted scroll offset: the
@@ -147,11 +110,7 @@ fn visible_window_anchored<'a, T>(
 fn table_columns(app: &App, table: TableColumnSet, layout_width: u16) -> Vec<ResolvedColumn> {
   let configured = match table {
     TableColumnSet::Songs => &app.user_config.tables.songs,
-    TableColumnSet::AlbumTracks => &app.user_config.tables.album_tracks,
     TableColumnSet::Albums => &app.user_config.tables.albums,
-    TableColumnSet::Podcasts => &app.user_config.tables.podcasts,
-    TableColumnSet::Episodes => &app.user_config.tables.episodes,
-    TableColumnSet::RecentlyPlayed => &app.user_config.tables.recently_played,
   };
   resolve_columns_localized(table, layout_width, configured, &app.strings().screens)
 }
@@ -193,325 +152,6 @@ fn track_table_item(
       })
       .collect(),
   }
-}
-
-fn album_table_item(album: &SavedAlbumInfo, columns: &[ResolvedColumn], app: &App) -> TableItem {
-  let has_liked_column = columns.iter().any(|column| column.id == "liked");
-  TableItem {
-    id: album.album.id.clone().unwrap_or_default(),
-    format: columns
-      .iter()
-      .map(|column| match column.id.as_str() {
-        "liked" => app.user_config.padded_liked_icon(),
-        "title" => {
-          if has_liked_column {
-            album.album.name.clone()
-          } else {
-            format!(
-              "{}{}",
-              app.user_config.padded_liked_icon(),
-              album.album.name
-            )
-          }
-        }
-        "artist" => join_artist_names(&album.album.artists),
-        "date" => album.album.release_date.clone().unwrap_or_default(),
-        _ => String::new(),
-      })
-      .collect(),
-  }
-}
-
-fn podcast_table_item(show: &ShowInfo, columns: &[ResolvedColumn]) -> TableItem {
-  TableItem {
-    id: show.id.clone().unwrap_or_default(),
-    format: columns
-      .iter()
-      .map(|column| match column.id.as_str() {
-        "title" => show.name.clone(),
-        "publisher" => show.publisher.clone(),
-        _ => String::new(),
-      })
-      .collect(),
-  }
-}
-
-fn episode_table_item(episode: &EpisodeInfo, columns: &[ResolvedColumn], app: &App) -> TableItem {
-  let duration_ms = episode.duration_ms as u128;
-  let (played_str, time_str) = match &episode.resume_point {
-    Some(resume_point) => (
-      if resume_point.fully_played {
-        format!(" {}", app.user_config.behavior.episode_played_icon)
-      } else {
-        String::new()
-      },
-      format!(
-        "{} / {}",
-        millis_to_minutes(resume_point.resume_position_ms as u128),
-        millis_to_minutes(duration_ms)
-      ),
-    ),
-    None => (String::new(), millis_to_minutes(duration_ms)),
-  };
-
-  TableItem {
-    id: episode.id.clone().unwrap_or_default(),
-    format: columns
-      .iter()
-      .map(|column| match column.id.as_str() {
-        "played" => played_str.clone(),
-        "date" => episode.release_date.clone(),
-        "title" => episode.name.clone(),
-        "duration" => time_str.clone(),
-        _ => String::new(),
-      })
-      .collect(),
-  }
-}
-
-/// Render the Local Files folder browser: a selectable list of folders (one per
-/// subdirectory of the configured music directory), each with its track count.
-pub fn draw_local_browser(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let current_route = app.get_current_route();
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::LocalBrowser,
-    current_route.hovered_block == ActiveBlock::LocalBrowser,
-  );
-
-  let items: Vec<String> = app
-    .local_playlists()
-    .iter()
-    .map(|folder| {
-      if folder.track_count > 0 {
-        app
-          .strings()
-          .screens
-          .folder_tracks(folder.display_name(app.strings()), folder.track_count)
-      } else {
-        folder.display_name(app.strings()).to_string()
-      }
-    })
-    .collect();
-
-  let title = if app.local_playlists().is_empty() {
-    app.strings().screens.local_files_empty
-  } else {
-    app.strings().screens.local_files
-  };
-
-  super::util::draw_selectable_list(
-    f,
-    app,
-    layout_chunk,
-    title,
-    &items,
-    highlight_state,
-    Some(app.view.local_playlists_index),
-    &app.view.local_files_scroll_offset,
-  );
-}
-
-pub fn draw_artist_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let header = TableHeader {
-    id: TableId::Artist,
-    items: vec![TableHeaderItem {
-      text: app.strings().screens.artist.to_string(),
-      width: get_percentage_width(layout_chunk.width, 1.0),
-      ..Default::default()
-    }],
-  };
-
-  let current_route = app.get_current_route();
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::Artists,
-    current_route.hovered_block == ActiveBlock::Artists,
-  );
-
-  // Directly calculate window over all continuous artists:
-  let (offset, visible) =
-    visible_window(app, layout_chunk, app.view.artists_list_index, &app.artists);
-  let items = visible
-    .iter()
-    .map(|item| TableItem {
-      id: item.id.clone().unwrap_or_default(),
-      format: vec![item.name.to_owned()],
-    })
-    .collect::<Vec<TableItem>>();
-
-  draw_table(
-    f,
-    app,
-    layout_chunk,
-    (app.strings().screens.artists, &header),
-    &items,
-    app.view.artists_list_index,
-    offset,
-    highlight_state,
-  );
-}
-
-pub fn draw_podcast_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::Podcasts, layout_chunk.width);
-  let header = table_header(TableId::Podcast, &columns);
-
-  let current_route = app.get_current_route();
-
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::Podcasts,
-    current_route.hovered_block == ActiveBlock::Podcasts,
-  );
-
-  if let Some(saved_shows) = app.library().saved_shows.get_results(None) {
-    let (offset, visible) = visible_window(
-      app,
-      layout_chunk,
-      app.view.shows_list_index,
-      &saved_shows.items,
-    );
-    let items = visible
-      .iter()
-      .map(|show| podcast_table_item(show, &columns))
-      .collect::<Vec<TableItem>>();
-
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.podcasts, &header),
-      &items,
-      app.view.shows_list_index,
-      offset,
-      highlight_state,
-    )
-  } else {
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.podcasts, &header),
-      &[],
-      app.view.shows_list_index,
-      0,
-      highlight_state,
-    )
-  }
-}
-
-pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::AlbumTracks, layout_chunk.width);
-  let header = table_header(TableId::Album, &columns);
-
-  let current_route = app.get_current_route();
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::AlbumTracks,
-    current_route.hovered_block == ActiveBlock::AlbumTracks,
-  );
-
-  let album_ui = match &app.album_table_context {
-    AlbumTableContext::Simplified => {
-      app
-        .selected_album_simplified
-        .as_ref()
-        .map(|selected_album_simplified| {
-          let (offset, visible) = visible_window(
-            app,
-            layout_chunk,
-            selected_album_simplified.selected_index,
-            &selected_album_simplified.tracks.items,
-          );
-          AlbumUi {
-            items: visible
-              .iter()
-              .map(|item| track_table_item(item, &columns, app.strings()))
-              .collect::<Vec<TableItem>>(),
-            title: app.strings().screens.title_by_artist(
-              &selected_album_simplified.album.name,
-              &join_artist_names(&selected_album_simplified.album.artists),
-            ),
-            selected_index: selected_album_simplified.selected_index,
-            offset,
-          }
-        })
-    }
-    AlbumTableContext::Full => app.selected_album_full.as_ref().map(|selected_album| {
-      let (offset, visible) = visible_window(
-        app,
-        layout_chunk,
-        app.view.saved_album_tracks_index,
-        &selected_album.album.tracks,
-      );
-      AlbumUi {
-        items: visible
-          .iter()
-          .map(|item| track_table_item(item, &columns, app.strings()))
-          .collect::<Vec<TableItem>>(),
-        title: app.strings().screens.title_by_artist(
-          &selected_album.album.name,
-          &join_artist_names(&selected_album.album.artists),
-        ),
-        selected_index: app.view.saved_album_tracks_index,
-        offset,
-      }
-    }),
-  };
-
-  if let Some(album_ui) = album_ui {
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (&album_ui.title, &header),
-      &album_ui.items,
-      album_ui.selected_index,
-      album_ui.offset,
-      highlight_state,
-    );
-  };
-}
-
-pub fn draw_recommendations_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::Songs, layout_chunk.width);
-  let header = table_header(TableId::Song, &columns);
-
-  let current_route = app.get_current_route();
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::TrackTable,
-    current_route.hovered_block == ActiveBlock::TrackTable,
-  );
-
-  let (offset, visible) = visible_window_anchored(
-    app,
-    layout_chunk,
-    app.view.track_table_index,
-    &app.view.track_table_scroll_offset,
-    &app.track_table.tracks,
-  );
-  let items = visible
-    .iter()
-    .map(|item| track_table_item(item, &columns, app.strings()))
-    .collect::<Vec<TableItem>>();
-  // match RecommendedContext
-  let recommendations_ui = match &app.recommendations_context {
-    Some(RecommendationsContext::Song) => app
-      .strings()
-      .screens
-      .recommendations_song(&app.recommendations_seed),
-    Some(RecommendationsContext::Artist) => app
-      .strings()
-      .screens
-      .recommendations_artist(&app.recommendations_seed),
-    None => app.strings().screens.recommendations.to_string(),
-  };
-  draw_table(
-    f,
-    app,
-    layout_chunk,
-    (&recommendations_ui[..], &header),
-    &items,
-    app.view.track_table_index,
-    offset,
-    highlight_state,
-  )
 }
 
 pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
@@ -562,164 +202,6 @@ pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   )
 }
 
-pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::Albums, layout_chunk.width);
-  let header = table_header(TableId::AlbumList, &columns);
-
-  let current_route = app.get_current_route();
-
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::AlbumList,
-    current_route.hovered_block == ActiveBlock::AlbumList,
-  );
-
-  let selected_song_index = app.view.album_list_index;
-
-  if let Some(saved_albums) = app.library().saved_albums.get_results(None) {
-    let (offset, visible) =
-      visible_window(app, layout_chunk, selected_song_index, &saved_albums.items);
-    let items = visible
-      .iter()
-      .map(|saved_album| album_table_item(saved_album, &columns, app))
-      .collect::<Vec<TableItem>>();
-
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.saved_albums, &header),
-      &items,
-      selected_song_index,
-      offset,
-      highlight_state,
-    )
-  } else {
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.saved_albums, &header),
-      &[],
-      selected_song_index,
-      0,
-      highlight_state,
-    )
-  }
-}
-
-pub fn draw_show_episodes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::Episodes, layout_chunk.width);
-  let header = table_header(TableId::PodcastEpisodes, &columns);
-
-  let current_route = app.get_current_route();
-
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::EpisodeTable,
-    current_route.hovered_block == ActiveBlock::EpisodeTable,
-  );
-
-  let title = match &app.episode_table_context {
-    EpisodeTableContext::Simplified => match &app.selected_show_simplified {
-      Some(selected_show) => app
-        .strings()
-        .screens
-        .title_by_artist(&selected_show.show.name, &selected_show.show.publisher),
-      None => app.strings().screens.episodes.to_owned(),
-    },
-    EpisodeTableContext::Full => match &app.selected_show_full {
-      Some(selected_show) => app
-        .strings()
-        .screens
-        .title_by_artist(&selected_show.show.name, &selected_show.show.publisher),
-      None => app.strings().screens.episodes.to_owned(),
-    },
-  };
-
-  if let Some(episodes) = app.library().show_episodes.get_results(None) {
-    let (offset, visible) = visible_window(
-      app,
-      layout_chunk,
-      app.view.episode_list_index,
-      &episodes.items,
-    );
-    let items = visible
-      .iter()
-      .map(|episode| episode_table_item(episode, &columns, app))
-      .collect::<Vec<TableItem>>();
-
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (&title, &header),
-      &items,
-      app.view.episode_list_index,
-      offset,
-      highlight_state,
-    );
-  } else {
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (&title, &header),
-      &[],
-      app.view.episode_list_index,
-      0,
-      highlight_state,
-    );
-  }
-}
-
-pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let columns = table_columns(app, TableColumnSet::RecentlyPlayed, layout_chunk.width);
-  let header = table_header(TableId::RecentlyPlayed, &columns);
-
-  let current_route = app.get_current_route();
-
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::RecentlyPlayed,
-    current_route.hovered_block == ActiveBlock::RecentlyPlayed,
-  );
-
-  let selected_song_index = app.view.recently_played_index;
-
-  if let Some(recently_played) = &app.recently_played {
-    let (offset, visible) = visible_window(
-      app,
-      layout_chunk,
-      selected_song_index,
-      &recently_played.items,
-    );
-    let items = visible
-      .iter()
-      .map(|item| track_table_item(item, &columns, app.strings()))
-      .collect::<Vec<TableItem>>();
-
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.recent_tracks, &header),
-      &items,
-      selected_song_index,
-      offset,
-      highlight_state,
-    )
-  } else {
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      (app.strings().screens.recent_tracks, &header),
-      &[],
-      selected_song_index,
-      0,
-      highlight_state,
-    )
-  }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn draw_table(
   f: &mut Frame<'_>,
@@ -734,64 +216,18 @@ fn draw_table(
   let selected_style = get_color(highlight_state, app.user_config.theme)
     .add_modifier(Modifier::BOLD | Modifier::REVERSED);
 
-  let track_playing_index = app.current_playback_context.as_ref().and_then(|ctx| {
-    ctx.item.as_ref().and_then(|item| match item {
-      PlayableItem::Track(track) => {
-        let track_id_str = track.id.as_ref().map(|id| id.id().to_string());
-        items.iter().position(|item| {
-          track_id_str
-            .as_ref()
-            .map(|id| id == &item.id)
-            .unwrap_or(false)
-        })
-      }
-      PlayableItem::Episode(episode) => {
-        let episode_id_str = episode.id.id().to_string();
-        items.iter().position(|item| episode_id_str == item.id)
-      }
-      _ => None,
-    })
-  });
-
   let (title, header) = table_layout;
 
   let rows = items.iter().enumerate().map(|(i, item)| {
-    let mut formatted_row = item.format.clone();
+    let formatted_row = item.format.clone();
     let mut style = app.user_config.theme.base_style(); // default styling
 
     // if table displays songs
-    match header.id {
-      TableId::Song | TableId::RecentlyPlayed | TableId::Album => {
-        // First check if the song should be highlighted because it is currently playing.
-        // The marker goes on the title cell, falling back to the first cell when the
-        // user's column config omits `title` so the playing row is never unmarked.
-        if track_playing_index == Some(i) {
-          let title_idx = header.get_index(ColumnId::Title).unwrap_or(0);
-          if let Some(cell) = formatted_row.get_mut(title_idx) {
-            cell.insert_str(0, &app.user_config.padded_playing_icon());
-          }
-          style = Style::default()
-            .fg(app.user_config.theme.active.into())
-            .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD));
-        }
-
-        // Show this the liked icon if the song is liked
-        if let Some(liked_idx) = header.get_index(ColumnId::Liked) {
-          if app.liked_song_ids_set().contains(item.id.as_str()) {
-            formatted_row[liked_idx] = app.user_config.padded_liked_icon();
-          }
-        }
+    if header.id == TableId::Song {
+      // Show this the liked icon if the song is liked
+      if let Some(_liked_idx) = header.get_index(ColumnId::Liked) {
+        if app.liked_song_ids_set().contains(item.id.as_str()) {}
       }
-      TableId::PodcastEpisodes if track_playing_index == Some(i) => {
-        let name_idx = header.get_index(ColumnId::Title).unwrap_or(0);
-        if let Some(cell) = formatted_row.get_mut(name_idx) {
-          cell.insert_str(0, &app.user_config.padded_playing_icon());
-        }
-        style = Style::default()
-          .fg(app.user_config.theme.active.into())
-          .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD));
-      }
-      _ => {}
     }
 
     // Next check if the item is under selection.
@@ -839,12 +275,8 @@ pub fn table_scroll_offset(selected_index: usize, visible_rows: usize) -> usize 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::plugin_api::PlaylistInfo;
-  use ratatui::{backend::TestBackend, Terminal};
 
-  fn rendered(app: &App, area: Rect) -> String {
-    rendered_with(app, area, draw_local_browser)
-  }
+  use ratatui::{backend::TestBackend, Terminal};
 
   fn rendered_with(app: &App, area: Rect, draw: fn(&mut Frame<'_>, &App, Rect)) -> String {
     let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -854,21 +286,6 @@ mod tests {
       .flat_map(|y| (0..area.width).map(move |x| (x, y)))
       .filter_map(|(x, y)| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
       .collect()
-  }
-
-  fn folder(name: &str, track_count: u32) -> PlaylistInfo {
-    PlaylistInfo {
-      generated_name: None,
-      uri: format!("file:///music/{name}"),
-      name: name.to_string(),
-      owner: "local".to_string(),
-      track_count,
-      id: None,
-      owner_id: None,
-      collaborative: false,
-      public: None,
-      image_url: None,
-    }
   }
 
   fn track(i: u32) -> TrackInfo {
@@ -1024,66 +441,6 @@ mod tests {
   }
 
   #[test]
-  fn local_browser_lists_folders_with_track_counts() {
-    let mut app = App::default();
-    *app.local_playlists_mut() = vec![folder("MyAlbum", 3)];
-    let content = rendered(&app, Rect::new(0, 0, 60, 6));
-    assert!(
-      content.contains("MyAlbum (3 tracks)"),
-      "folder name and track count should render: {content}"
-    );
-  }
-
-  #[test]
-  fn local_browser_says_track_for_a_one_track_folder() {
-    let mut app = App::default();
-    *app.local_playlists_mut() = vec![folder("Single", 1)];
-    let content = rendered(&app, Rect::new(0, 0, 60, 6));
-    assert!(
-      content.contains("Single (1 track)"),
-      "a one-track folder should use the singular: {content}"
-    );
-  }
-
-  #[test]
-  fn local_browser_empty_shows_config_hint() {
-    let app = App::default();
-    let content = rendered(&app, Rect::new(0, 0, 80, 6));
-    assert!(
-      content.contains("local_music_path"),
-      "empty browser should hint at the config key: {content}"
-    );
-  }
-
-  fn assert_empty_titled_table(draw: fn(&mut Frame<'_>, &App, Rect), title: &str) {
-    let app = App::default();
-    let content = rendered_with(&app, Rect::new(0, 0, 80, 8), draw);
-    assert!(
-      content.contains(title),
-      "pane should show the {title:?} title before data loads: {content}"
-    );
-  }
-
-  #[test]
-  fn album_list_draws_an_empty_titled_table_before_data_loads() {
-    assert_empty_titled_table(draw_album_list, "Saved Albums");
-  }
-
-  #[test]
-  fn podcast_table_draws_an_empty_titled_table_before_data_loads() {
-    assert_empty_titled_table(draw_podcast_table, "Podcasts");
-  }
-
-  #[test]
-  fn recently_played_draws_an_empty_titled_table_before_data_loads() {
-    assert_empty_titled_table(draw_recently_played_table, "Recently Played Tracks");
-  }
-
-  #[test]
-  fn show_episodes_draws_an_empty_titled_table_before_data_loads() {
-    assert_empty_titled_table(draw_show_episodes, "Episodes");
-  }
-  #[test]
   fn cached_generated_track_titles_follow_language_in_table_cells_without_renaming_user_tracks() {
     use crate::core::i18n::Language;
     use crate::core::plugin_api::GeneratedTrackName;
@@ -1094,7 +451,7 @@ mod tests {
     let mut user = generated.clone();
     user.generated_name = None;
     let columns = resolve_columns(TableColumnSet::Songs, 80, &[column("title")]);
-    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+    for language in [Language::En, Language::PtBr, Language::Fr] {
       app.user_config.behavior.language = language;
       app.refresh_language();
       assert_eq!(

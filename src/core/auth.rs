@@ -3,65 +3,6 @@
 use anyhow::{anyhow, Result};
 use std::{fs, path::Path};
 
-/// A cached Spotify login exists. A build without the `spotify-session`
-/// feature never has one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpotifyLogin(());
-
-impl SpotifyLogin {
-  /// The cached login, if there is one.
-  pub fn cached() -> Option<Self> {
-    #[cfg(feature = "spotify-session")]
-    return crate::infra::spotify::credentials::streaming_credentials_are_cached()
-      .unwrap_or(false)
-      .then_some(Self(()));
-    #[cfg(not(feature = "spotify-session"))]
-    None
-  }
-
-  #[cfg(any(test, feature = "spotify-session"))]
-  pub(crate) fn new() -> Self {
-    Self(())
-  }
-}
-
-/// Logs in through Spotify's pairing page before the UI starts: shows the
-/// code, opens the browser and waits for the approval.
-pub async fn log_in_to_spotify(
-  onboarding: &dyn crate::core::onboarding::Onboarding,
-) -> Result<SpotifyLogin> {
-  #[cfg(feature = "spotify-session")]
-  {
-    use crate::infra::spotify::{credentials, session};
-    let pending = credentials::begin_login().await?;
-    onboarding.info(
-      &onboarding
-        .strings()
-        .onboarding
-        .spotify_login(pending.url(), pending.code()),
-    );
-    if let Err(e) = open::that_detached(pending.url()) {
-      log::warn!("could not open the browser: {e}");
-    }
-    let credentials = pending.finish().await?;
-    session::log_in(credentials)
-      .await
-      .map_err(|reason| anyhow!(reason.message()))?;
-    onboarding.info(onboarding.strings().onboarding.spotify_logged_in);
-    Ok(SpotifyLogin(()))
-  }
-  #[cfg(not(feature = "spotify-session"))]
-  {
-    let _ = onboarding;
-    Err(anyhow!("This build of spotatui has no Spotify support"))
-  }
-}
-
-/// Forgets the cached Spotify login.
-pub async fn forget_spotify_login() {
-  #[cfg(feature = "spotify-session")]
-  crate::infra::spotify::session::forget().await;
-}
 /// Atomically replace `path` with `contents`, written privately (0o600 on Unix).
 ///
 /// The bytes go to a process-unique temporary sibling of the resolved target
@@ -136,20 +77,6 @@ mod tests {
   use std::os::windows::fs::symlink_file;
   use std::path::PathBuf;
 
-  #[test]
-  fn a_test_build_has_no_cached_login() {
-    #[cfg(not(feature = "spotify-session"))]
-    assert_eq!(SpotifyLogin::cached(), None);
-    assert_eq!(SpotifyLogin::new(), SpotifyLogin::new());
-  }
-
-  #[cfg(not(feature = "spotify-session"))]
-  #[tokio::test]
-  async fn a_build_without_spotify_cannot_log_in() {
-    let onboarding = crate::core::test_helpers::ScriptedOnboarding::with_answers(&[]);
-    let error = log_in_to_spotify(&onboarding).await.unwrap_err();
-    assert!(error.to_string().contains("no Spotify support"), "{error}");
-  }
   /// A `config.yml` link in one directory to a target in another (the dotfiles
   /// shape); `None` when the platform refuses to create symlinks.
   fn linked_config(seed: Option<&[u8]>) -> Option<(tempfile::TempDir, PathBuf, PathBuf)> {

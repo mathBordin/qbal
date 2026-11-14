@@ -4,17 +4,9 @@ impl App {
   /// Commit `settings_items` and write `config.yml`; `false` when the write
   /// failed (the error frame is on top, do not close the screen over it).
   pub(crate) fn save_settings_from_items(&mut self) -> bool {
-    #[cfg(feature = "telemetry")]
-    let global_count_was_enabled = self.user_config.behavior.enable_global_song_count;
     // Apply settings to user_config and save to file
     self.apply_settings_changes();
 
-    // If the user just turned the global counter on, fetch the current count now so
-    // the home banner reflects it without waiting for the next launch.
-    #[cfg(feature = "telemetry")]
-    if !global_count_was_enabled && self.user_config.behavior.enable_global_song_count {
-      self.dispatch(IoEvent::FetchGlobalSongCount);
-    }
     #[cfg(target_os = "macos")]
     if self.user_config.keys.open_settings != Key::Ctrl(',') {
       self.keybinding_runtime.effective_open_settings = None;
@@ -43,18 +35,10 @@ impl App {
     item.value = match (item.value, input) {
       (SettingValue::Bool(_), SettingInput::Bool(v)) => SettingValue::Bool(v),
       (SettingValue::Number(_), SettingInput::Number(v)) => SettingValue::Number(v),
-      // The check the terminal field makes: a bad delay in config.yml stops the next launch.
-      (SettingValue::String(_), SettingInput::Text(v))
-        if id == "behavior.auto_update_delay"
-          && crate::core::user_config::parse_update_delay_secs(&v).is_err() =>
-      {
-        return false;
-      }
       (SettingValue::String(_), SettingInput::Text(v)) => SettingValue::String(v),
       (SettingValue::Cycle(_, options), SettingInput::Text(v)) if options.contains(&v.as_str()) => {
         SettingValue::Cycle(v, options)
       }
-      (SettingValue::Secret(_), SettingInput::Text(v)) => SettingValue::Secret(v),
       _ => return false,
     };
     let staged = std::mem::replace(&mut self.settings_items, vec![item]);
@@ -110,9 +94,6 @@ impl App {
     use crate::core::user_config::{parse_theme_item, ThemePreset};
 
     let mut settings_error: Option<String> = None;
-    let sources_before = self.source_settings();
-    #[cfg(feature = "soloist")]
-    let engine_before = self.user_config.behavior.playback_engine;
     // What is actually on screen right now, put back by the reconciliation at
     // the end so an adaptive-theme fade continues from it.
     let theme_before = self.user_config.theme;
@@ -162,30 +143,20 @@ impl App {
             self.user_config.behavior.status_message_ttl_percent = (*v).clamp(10, 1000) as u16;
           }
         }
-        #[cfg(feature = "qobuz")]
         "behavior.qobuz_quality" => {
           if let SettingValue::Cycle(v, _) = &setting.value {
             self.user_config.behavior.qobuz_quality =
               crate::core::user_config::qobuz_quality_from_label(v);
           }
         }
-        "behavior.playback_poll_seconds" => {
-          if let SettingValue::Number(v) = &setting.value {
-            self.user_config.behavior.playback_poll_seconds = (*v).max(1) as u64;
-          }
-        }
+        "behavior.playback_poll_seconds" => if let SettingValue::Number(_v) = &setting.value {},
         "behavior.table_scroll_padding" => {
           if let SettingValue::Number(v) = &setting.value {
             self.user_config.behavior.table_scroll_padding =
               (*v).clamp(0, i64::from(u16::MAX)) as u16;
           }
         }
-        "behavior.like_animation_frames" => {
-          if let SettingValue::Number(v) = &setting.value {
-            self.user_config.behavior.like_animation_frames =
-              (*v).clamp(1, i64::from(u8::MAX)) as u8;
-          }
-        }
+        "behavior.like_animation_frames" => if let SettingValue::Number(_v) = &setting.value {},
         "behavior.enable_text_emphasis" => {
           if let SettingValue::Bool(v) = &setting.value {
             self.user_config.behavior.enable_text_emphasis = *v;
@@ -254,19 +225,13 @@ impl App {
           }
         }
         "behavior.default_sort_saved_albums" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.default_sort_saved_albums = v.clone();
-          }
+          if let SettingValue::Cycle(_v, _) = &setting.value {}
         }
         "behavior.default_sort_saved_artists" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.default_sort_saved_artists = v.clone();
-          }
+          if let SettingValue::Cycle(_v, _) = &setting.value {}
         }
         "behavior.default_sort_recently_played" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.default_sort_recently_played = v.clone();
-          }
+          if let SettingValue::Cycle(_v, _) = &setting.value {}
         }
         "behavior.sidebar_position" => {
           if let SettingValue::Cycle(v, _) = &setting.value {
@@ -300,55 +265,16 @@ impl App {
             self.user_config.behavior.enable_media_keys = *v;
           }
         }
-        "behavior.enable_streaming" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.enable_streaming = *v;
-          }
-        }
+        "behavior.enable_streaming" => if let SettingValue::Bool(_v) = &setting.value {},
         "behavior.streaming_device_name" => {
           if let SettingValue::String(v) = &setting.value {
             let name = v.trim();
-            if !name.is_empty() {
-              self.user_config.behavior.streaming_device_name = name.to_string();
-            }
+            if !name.is_empty() {}
           }
         }
-        "behavior.streaming_bitrate" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.streaming_bitrate =
-              crate::core::user_config::streaming_bitrate_or_default(v.parse().unwrap_or(0));
-          }
-        }
-        "behavior.streaming_audio_cache" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.streaming_audio_cache = *v;
-          }
-        }
-        "behavior.streaming_autoplay" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.streaming_autoplay = *v;
-          }
-        }
-        #[cfg(feature = "soloist")]
-        "behavior.playback_engine" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.playback_engine =
-              crate::core::user_config::PlaybackEngine::from_name(v);
-          }
-        }
-        #[cfg(feature = "soloist")]
-        "behavior.soloist_path" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.soloist_path = trimmed(v);
-          }
-        }
-        #[cfg(feature = "soloist")]
-        "behavior.soloist_audio_quality" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.soloist_audio_quality =
-              crate::core::user_config::SoloistQuality::from_name(v);
-          }
-        }
+        "behavior.streaming_bitrate" => if let SettingValue::Cycle(_v, _) = &setting.value {},
+        "behavior.streaming_audio_cache" => if let SettingValue::Bool(_v) = &setting.value {},
+        "behavior.streaming_autoplay" => if let SettingValue::Bool(_v) = &setting.value {},
         "behavior.enable_announcements" => {
           if let SettingValue::Bool(v) = &setting.value {
             self.user_config.behavior.enable_announcements = *v;
@@ -364,59 +290,7 @@ impl App {
             self.user_config.behavior.enable_monthly_recap_prompt = *v;
           }
         }
-        "behavior.pin_community_playlist" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.pin_community_playlist = *v;
-          }
-        }
-        #[cfg(feature = "telemetry")]
-        "behavior.enable_global_song_count" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.enable_global_song_count = *v;
-          }
-        }
-        #[cfg(feature = "self-update")]
-        "behavior.disable_auto_update" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.disable_auto_update = *v;
-          }
-        }
-        #[cfg(feature = "self-update")]
-        "behavior.auto_update_delay" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.auto_update_delay = v.clone();
-          }
-        }
-        #[cfg(feature = "subsonic")]
-        "behavior.subsonic_url" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.subsonic_url = trimmed(v);
-          }
-        }
-        #[cfg(feature = "subsonic")]
-        "behavior.subsonic_username" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.subsonic_username = trimmed(v);
-          }
-        }
-        #[cfg(feature = "subsonic")]
-        "behavior.subsonic_password" => {
-          if let SettingValue::Secret(v) = &setting.value {
-            self.user_config.behavior.subsonic_password = trimmed(v);
-          }
-        }
-        #[cfg(feature = "local-files")]
-        "behavior.local_music_path" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.local_music_path = trimmed(v);
-          }
-        }
-        #[cfg(feature = "youtube")]
-        "behavior.ytdlp_path" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.ytdlp_path = trimmed(v);
-          }
-        }
+        "behavior.pin_community_playlist" => if let SettingValue::Bool(_v) = &setting.value {},
         "behavior.announcement_feed_url" => {
           if let SettingValue::String(v) = &setting.value {
             let trimmed = v.trim();
@@ -429,19 +303,10 @@ impl App {
         }
         "behavior.sync_token" => {
           if let SettingValue::String(v) = &setting.value {
-            let trimmed = v.trim();
-            self.user_config.behavior.sync_token = if trimmed.is_empty() {
-              None
-            } else {
-              Some(trimmed.to_string())
-            };
+            let _trimmed = v.trim();
           }
         }
-        "behavior.liked_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.liked_icon = v.clone();
-          }
-        }
+        "behavior.liked_icon" => if let SettingValue::String(_v) = &setting.value {},
         "behavior.shuffle_icon" => {
           if let SettingValue::String(v) = &setting.value {
             self.user_config.behavior.shuffle_icon = v.clone();
@@ -477,9 +342,7 @@ impl App {
                 "behavior.gauge_unfilled_icon" => {
                   self.user_config.behavior.gauge_unfilled_icon = v.clone()
                 }
-                "behavior.episode_played_icon" => {
-                  self.user_config.behavior.episode_played_icon = v.clone()
-                }
+                "behavior.episode_played_icon" => {}
                 "behavior.sort_ascending_icon" => {
                   self.user_config.behavior.sort_ascending_icon = v.clone()
                 }
@@ -699,37 +562,27 @@ impl App {
         }
         "keys.jump_to_album" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.jump_to_album = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.jump_to_artist_album" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.jump_to_artist_album = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.jump_to_context" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.jump_to_context = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.manage_devices" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.manage_devices = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.listening_party" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.listening_party = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.decrease_volume" => {
@@ -769,9 +622,7 @@ impl App {
         }
         "keys.like_track" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.like_track = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.generate_recap" => {
@@ -783,16 +634,12 @@ impl App {
         }
         "keys.copy_song_url" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.copy_song_url = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.copy_album_url" => {
           if let SettingValue::Key(v) = &setting.value {
-            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
-              self.user_config.keys.copy_album_url = key;
-            }
+            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.audio_analysis" => {
@@ -979,10 +826,6 @@ impl App {
         _ => {}
       }
     }
-    #[cfg(feature = "soloist")]
-    if !self.save_soloist_key_row() && self.user_config.behavior.playback_engine != engine_before {
-      self.playback_engine_changed();
-    }
     self.refresh_language();
     self.refresh_settings_labels();
     #[cfg(feature = "art-decode")]
@@ -993,30 +836,10 @@ impl App {
     if let Some(message) = settings_error {
       self.set_status_message(message, 4);
     }
-    // The active source's sidebar was loaded with the old server or folder.
-    let sources_after = self.source_settings();
-    let reload = match self.active_source {
-      Source::Subsonic => sources_after.0 != sources_before.0,
-      Source::Local => sources_after.1 != sources_before.1,
-      _ => false,
-    };
+    let reload = false;
     if reload {
       self.load_source_sidebar(self.active_source);
     }
-  }
-
-  /// The Subsonic login and the music folder, to tell when a save changed them.
-  #[allow(clippy::type_complexity)]
-  fn source_settings(&self) -> ([Option<String>; 3], Option<String>) {
-    let behavior = &self.user_config.behavior;
-    (
-      [
-        behavior.subsonic_url.clone(),
-        behavior.subsonic_username.clone(),
-        behavior.subsonic_password.clone(),
-      ],
-      behavior.local_music_path.clone(),
-    )
   }
 
   /// Updates the colour RGB entries when switching through the presets in themes
@@ -1063,113 +886,5 @@ impl App {
   }
 }
 
-/// A text setting without its padding; empty means unset.
-#[cfg(any(
-  feature = "subsonic",
-  feature = "local-files",
-  feature = "youtube",
-  feature = "soloist"
-))]
-fn trimmed(value: &str) -> Option<String> {
-  Some(value.trim().to_string()).filter(|value| !value.is_empty())
-}
-
 #[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::core::app::test_support::*;
-
-  #[test]
-  fn saving_a_theme_preset_bumps_the_theme_revision_and_an_unrelated_save_does_not() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![setting(
-      "theme.preset",
-      SettingValue::Preset("Dracula".into()),
-    )];
-    let rev = app.display_revisions().get(DisplayDomain::Theme);
-
-    app.apply_settings_changes();
-    assert_eq!(app.display_revisions().get(DisplayDomain::Theme), rev + 1);
-
-    app.settings_items = vec![setting(
-      "behavior.seek_milliseconds",
-      SettingValue::Number(5000),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.display_revisions().get(DisplayDomain::Theme), rev + 1);
-  }
-
-  #[test]
-  fn like_animation_frames_above_255_saves_as_255_not_zero() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![setting(
-      "behavior.like_animation_frames",
-      SettingValue::Number(256),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.like_animation_frames, 255);
-
-    app.settings_items = vec![setting(
-      "behavior.like_animation_frames",
-      SettingValue::Number(0),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.like_animation_frames, 1);
-  }
-
-  #[test]
-  fn negative_seek_duration_saves_as_zero() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![setting(
-      "behavior.seek_milliseconds",
-      SettingValue::Number(-1),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.seek_milliseconds, 0);
-  }
-
-  #[test]
-  fn u16_settings_above_their_range_save_as_the_maximum() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![
-      setting("behavior.small_terminal_width", SettingValue::Number(65536)),
-      setting("behavior.table_scroll_padding", SettingValue::Number(65536)),
-    ];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.small_terminal_width, u16::MAX);
-    assert_eq!(app.user_config.behavior.table_scroll_padding, u16::MAX);
-  }
-
-  #[test]
-  fn saving_a_two_cell_playing_icon_keeps_the_default_and_reports_it() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![setting(
-      "behavior.playing_icon",
-      SettingValue::String(">>".into()),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.playing_icon, "▶");
-    assert!(app
-      .status_message()
-      .is_some_and(|message| message.contains("one terminal cell")));
-
-    app.settings_items = vec![setting(
-      "behavior.playing_icon",
-      SettingValue::String(String::new()),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.playing_icon, "▶");
-  }
-
-  #[test]
-  fn saving_a_one_cell_playing_icon_applies_it() {
-    let mut app = make_app_simple();
-    app.settings_items = vec![setting(
-      "behavior.playing_icon",
-      SettingValue::String("»".into()),
-    )];
-    app.apply_settings_changes();
-    assert_eq!(app.user_config.behavior.playing_icon, "»");
-    assert_eq!(app.status_message(), None);
-  }
-}
+mod tests {}

@@ -1,6 +1,4 @@
-use super::analyzer::{
-  create_shared_analyzer, recent_audio, spectrum_for, RecentAudio, SharedAnalyzer, SpectrumData,
-};
+use super::analyzer::{create_shared_analyzer, spectrum_for, SharedAnalyzer, SpectrumData};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 #[cfg(not(target_os = "windows"))]
 use cpal::BufferSize;
@@ -20,12 +18,6 @@ impl AudioCaptureManager {
   /// Returns None if no suitable audio device is found
   pub fn new(display_bars: usize) -> Option<Self> {
     Self::open(display_bars, true)
-  }
-
-  /// Like `new`, but on Linux it never falls back to the default input, which
-  /// can be a microphone.
-  pub fn new_monitor_only(display_bars: usize) -> Option<Self> {
-    Self::open(display_bars, false)
   }
 
   fn open(display_bars: usize, allow_default_input: bool) -> Option<Self> {
@@ -68,15 +60,6 @@ impl AudioCaptureManager {
     }
 
     spectrum_for(&self.analyzer, desired_bars)
-  }
-
-  /// The newest tenth of a second as a mono mix, while the stream lives.
-  pub fn recent_audio(&self) -> Option<RecentAudio> {
-    if !self.active.load(Ordering::Relaxed) {
-      return None;
-    }
-
-    recent_audio(&self.analyzer)
   }
 
   /// Check if audio capture is currently active

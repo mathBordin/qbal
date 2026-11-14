@@ -50,8 +50,6 @@ pub(super) struct NewTimer {
 pub(super) struct DataRequest {
   pub(super) token: u64,
   pub(super) kind: PluginDataKind,
-  /// Search query for `PluginDataKind::Search` requests.
-  pub(super) arg: Option<String>,
 }
 
 /// Stable identifier for a plugin, derived from its load name: strip a

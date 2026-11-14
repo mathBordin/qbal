@@ -1,19 +1,14 @@
 //! Settings copy shared by terminal and browser frontends. Values and config keys stay unchanged.
 
 mod en;
-mod zh_hans;
-mod zh_hant;
+mod fr;
+mod pt_br;
 pub use en::EN;
-pub use zh_hans::ZH_HANS;
-pub use zh_hant::ZH_HANT;
+pub use fr::FR;
+pub use pt_br::PT_BR;
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct SettingsStrings {
-  pub behavior_ytdlp_path_description: &'static str,
-  pub behavior_ytdlp_path_name: &'static str,
-  pub behavior_playback_engine_name: &'static str,
-  pub behavior_playback_engine_description: &'static str,
   pub behavior_soloist_path_name: &'static str,
   pub behavior_soloist_path_description: &'static str,
   pub soloist_download_button: &'static str,
@@ -21,16 +16,6 @@ pub struct SettingsStrings {
   pub behavior_soloist_api_key_name: &'static str,
   pub behavior_soloist_api_key_description: &'static str,
   pub soloist_get_key_button: &'static str,
-  pub behavior_soloist_audio_quality_name: &'static str,
-  pub behavior_soloist_audio_quality_description: &'static str,
-  pub behavior_local_music_path_description: &'static str,
-  pub behavior_local_music_path_name: &'static str,
-  pub behavior_subsonic_password_description: &'static str,
-  pub behavior_subsonic_password_name: &'static str,
-  pub behavior_subsonic_username_description: &'static str,
-  pub behavior_subsonic_username_name: &'static str,
-  pub behavior_subsonic_url_description: &'static str,
-  pub behavior_subsonic_url_name: &'static str,
   pub behavior_language_name: &'static str,
   pub behavior_language_description: &'static str,
   pub behavior_seek_milliseconds_name: &'static str,
@@ -45,12 +30,8 @@ pub struct SettingsStrings {
   pub behavior_status_message_ttl_percent_description: &'static str,
   pub behavior_qobuz_quality_name: &'static str,
   pub behavior_qobuz_quality_description: &'static str,
-  pub behavior_playback_poll_seconds_name: &'static str,
-  pub behavior_playback_poll_seconds_description: &'static str,
   pub behavior_table_scroll_padding_name: &'static str,
   pub behavior_table_scroll_padding_description: &'static str,
-  pub behavior_like_animation_frames_name: &'static str,
-  pub behavior_like_animation_frames_description: &'static str,
   pub behavior_enable_text_emphasis_name: &'static str,
   pub behavior_enable_text_emphasis_description: &'static str,
   pub behavior_show_loading_indicator_name: &'static str,
@@ -71,16 +52,6 @@ pub struct SettingsStrings {
   pub behavior_keepawake_enabled_description: &'static str,
   pub behavior_enable_media_keys_name: &'static str,
   pub behavior_enable_media_keys_description: &'static str,
-  pub behavior_enable_streaming_name: &'static str,
-  pub behavior_enable_streaming_description: &'static str,
-  pub behavior_streaming_device_name_name: &'static str,
-  pub behavior_streaming_device_name_description: &'static str,
-  pub behavior_streaming_bitrate_name: &'static str,
-  pub behavior_streaming_bitrate_description: &'static str,
-  pub behavior_streaming_audio_cache_name: &'static str,
-  pub behavior_streaming_audio_cache_description: &'static str,
-  pub behavior_streaming_autoplay_name: &'static str,
-  pub behavior_streaming_autoplay_description: &'static str,
   pub behavior_startup_behavior_name: &'static str,
   pub behavior_startup_behavior_description: &'static str,
   pub behavior_player_bar_visualizer_name: &'static str,
@@ -89,12 +60,6 @@ pub struct SettingsStrings {
   pub behavior_startup_route_description: &'static str,
   pub behavior_default_sort_playlist_tracks_name: &'static str,
   pub behavior_default_sort_playlist_tracks_description: &'static str,
-  pub behavior_default_sort_saved_albums_name: &'static str,
-  pub behavior_default_sort_saved_albums_description: &'static str,
-  pub behavior_default_sort_saved_artists_name: &'static str,
-  pub behavior_default_sort_saved_artists_description: &'static str,
-  pub behavior_default_sort_recently_played_name: &'static str,
-  pub behavior_default_sort_recently_played_description: &'static str,
   pub behavior_sidebar_position_name: &'static str,
   pub behavior_sidebar_position_description: &'static str,
   pub behavior_playbar_position_name: &'static str,
@@ -109,18 +74,8 @@ pub struct SettingsStrings {
   pub behavior_enable_lyrics_description: &'static str,
   pub behavior_enable_monthly_recap_prompt_name: &'static str,
   pub behavior_enable_monthly_recap_prompt_description: &'static str,
-  pub behavior_pin_community_playlist_name: &'static str,
-  pub behavior_pin_community_playlist_description: &'static str,
-  pub behavior_enable_global_song_count_name: &'static str,
-  pub behavior_enable_global_song_count_description: &'static str,
-  pub behavior_disable_auto_update_name: &'static str,
-  pub behavior_disable_auto_update_description: &'static str,
-  pub behavior_auto_update_delay_name: &'static str,
-  pub behavior_auto_update_delay_description: &'static str,
   pub behavior_announcement_feed_url_name: &'static str,
   pub behavior_announcement_feed_url_description: &'static str,
-  pub behavior_sync_token_name: &'static str,
-  pub behavior_sync_token_description: &'static str,
   pub behavior_draw_cover_art_name: &'static str,
   pub behavior_draw_cover_art_description: &'static str,
   pub behavior_draw_cover_art_forced_name: &'static str,
@@ -133,8 +88,6 @@ pub struct SettingsStrings {
   pub behavior_cover_art_dither_algorithm_description: &'static str,
   pub behavior_cover_art_dither_pixel_scale_name: &'static str,
   pub behavior_cover_art_dither_pixel_scale_description: &'static str,
-  pub behavior_liked_icon_name: &'static str,
-  pub behavior_liked_icon_description: &'static str,
   pub behavior_shuffle_icon_name: &'static str,
   pub behavior_shuffle_icon_description: &'static str,
   pub behavior_repeat_track_icon_name: &'static str,
@@ -151,8 +104,6 @@ pub struct SettingsStrings {
   pub behavior_gauge_unfilled_icon_description: &'static str,
   pub behavior_active_source_icon_name: &'static str,
   pub behavior_active_source_icon_description: &'static str,
-  pub behavior_episode_played_icon_name: &'static str,
-  pub behavior_episode_played_icon_description: &'static str,
   pub behavior_sort_ascending_icon_name: &'static str,
   pub behavior_sort_ascending_icon_description: &'static str,
   pub behavior_sort_descending_icon_name: &'static str,
@@ -201,16 +152,6 @@ pub struct SettingsStrings {
   pub keys_open_settings_description: &'static str,
   pub keys_save_settings_name: &'static str,
   pub keys_save_settings_description: &'static str,
-  pub keys_jump_to_album_name: &'static str,
-  pub keys_jump_to_album_description: &'static str,
-  pub keys_jump_to_artist_album_name: &'static str,
-  pub keys_jump_to_artist_album_description: &'static str,
-  pub keys_jump_to_context_name: &'static str,
-  pub keys_jump_to_context_description: &'static str,
-  pub keys_manage_devices_name: &'static str,
-  pub keys_manage_devices_description: &'static str,
-  pub keys_listening_party_name: &'static str,
-  pub keys_listening_party_description: &'static str,
   pub keys_decrease_volume_name: &'static str,
   pub keys_decrease_volume_description: &'static str,
   pub keys_increase_volume_name: &'static str,
@@ -221,14 +162,8 @@ pub struct SettingsStrings {
   pub keys_show_queue_description: &'static str,
   pub keys_remove_from_queue_name: &'static str,
   pub keys_remove_from_queue_description: &'static str,
-  pub keys_like_track_name: &'static str,
-  pub keys_like_track_description: &'static str,
   pub keys_generate_recap_name: &'static str,
   pub keys_generate_recap_description: &'static str,
-  pub keys_copy_song_url_name: &'static str,
-  pub keys_copy_song_url_description: &'static str,
-  pub keys_copy_album_url_name: &'static str,
-  pub keys_copy_album_url_description: &'static str,
   pub keys_audio_analysis_name: &'static str,
   pub keys_audio_analysis_description: &'static str,
   pub keys_lyrics_view_name: &'static str,
@@ -328,8 +263,8 @@ pub struct SettingsStrings {
   pub option_soloist_lossless: &'static str,
   pub option_auto_color: &'static str,
   pub option_en: &'static str,
-  pub option_zh_hans: &'static str,
-  pub option_zh_hant: &'static str,
+  pub option_pt_br: &'static str,
+  pub option_fr: &'static str,
   pub option_continue: &'static str,
   pub option_play: &'static str,
   pub option_pause: &'static str,
@@ -396,14 +331,6 @@ impl SettingsStrings {
   /// Semantic row ids resolve to display copy, never to persisted values.
   pub fn row_text(&self, id: &str) -> Option<(&'static str, &'static str)> {
     Some(match id {
-      "behavior.ytdlp_path" => (
-        self.behavior_ytdlp_path_name,
-        self.behavior_ytdlp_path_description,
-      ),
-      "behavior.playback_engine" => (
-        self.behavior_playback_engine_name,
-        self.behavior_playback_engine_description,
-      ),
       "behavior.soloist_path" => (
         self.behavior_soloist_path_name,
         self.behavior_soloist_path_description,
@@ -411,26 +338,6 @@ impl SettingsStrings {
       "behavior.soloist_api_key" => (
         self.behavior_soloist_api_key_name,
         self.behavior_soloist_api_key_description,
-      ),
-      "behavior.soloist_audio_quality" => (
-        self.behavior_soloist_audio_quality_name,
-        self.behavior_soloist_audio_quality_description,
-      ),
-      "behavior.local_music_path" => (
-        self.behavior_local_music_path_name,
-        self.behavior_local_music_path_description,
-      ),
-      "behavior.subsonic_password" => (
-        self.behavior_subsonic_password_name,
-        self.behavior_subsonic_password_description,
-      ),
-      "behavior.subsonic_username" => (
-        self.behavior_subsonic_username_name,
-        self.behavior_subsonic_username_description,
-      ),
-      "behavior.subsonic_url" => (
-        self.behavior_subsonic_url_name,
-        self.behavior_subsonic_url_description,
       ),
       "behavior.language" => (
         self.behavior_language_name,
@@ -460,17 +367,9 @@ impl SettingsStrings {
         self.behavior_qobuz_quality_name,
         self.behavior_qobuz_quality_description,
       ),
-      "behavior.playback_poll_seconds" => (
-        self.behavior_playback_poll_seconds_name,
-        self.behavior_playback_poll_seconds_description,
-      ),
       "behavior.table_scroll_padding" => (
         self.behavior_table_scroll_padding_name,
         self.behavior_table_scroll_padding_description,
-      ),
-      "behavior.like_animation_frames" => (
-        self.behavior_like_animation_frames_name,
-        self.behavior_like_animation_frames_description,
       ),
       "behavior.enable_text_emphasis" => (
         self.behavior_enable_text_emphasis_name,
@@ -512,26 +411,6 @@ impl SettingsStrings {
         self.behavior_enable_media_keys_name,
         self.behavior_enable_media_keys_description,
       ),
-      "behavior.enable_streaming" => (
-        self.behavior_enable_streaming_name,
-        self.behavior_enable_streaming_description,
-      ),
-      "behavior.streaming_device_name" => (
-        self.behavior_streaming_device_name_name,
-        self.behavior_streaming_device_name_description,
-      ),
-      "behavior.streaming_bitrate" => (
-        self.behavior_streaming_bitrate_name,
-        self.behavior_streaming_bitrate_description,
-      ),
-      "behavior.streaming_audio_cache" => (
-        self.behavior_streaming_audio_cache_name,
-        self.behavior_streaming_audio_cache_description,
-      ),
-      "behavior.streaming_autoplay" => (
-        self.behavior_streaming_autoplay_name,
-        self.behavior_streaming_autoplay_description,
-      ),
       "behavior.startup_behavior" => (
         self.behavior_startup_behavior_name,
         self.behavior_startup_behavior_description,
@@ -547,18 +426,6 @@ impl SettingsStrings {
       "behavior.default_sort_playlist_tracks" => (
         self.behavior_default_sort_playlist_tracks_name,
         self.behavior_default_sort_playlist_tracks_description,
-      ),
-      "behavior.default_sort_saved_albums" => (
-        self.behavior_default_sort_saved_albums_name,
-        self.behavior_default_sort_saved_albums_description,
-      ),
-      "behavior.default_sort_saved_artists" => (
-        self.behavior_default_sort_saved_artists_name,
-        self.behavior_default_sort_saved_artists_description,
-      ),
-      "behavior.default_sort_recently_played" => (
-        self.behavior_default_sort_recently_played_name,
-        self.behavior_default_sort_recently_played_description,
       ),
       "behavior.sidebar_position" => (
         self.behavior_sidebar_position_name,
@@ -588,29 +455,9 @@ impl SettingsStrings {
         self.behavior_enable_monthly_recap_prompt_name,
         self.behavior_enable_monthly_recap_prompt_description,
       ),
-      "behavior.pin_community_playlist" => (
-        self.behavior_pin_community_playlist_name,
-        self.behavior_pin_community_playlist_description,
-      ),
-      "behavior.enable_global_song_count" => (
-        self.behavior_enable_global_song_count_name,
-        self.behavior_enable_global_song_count_description,
-      ),
-      "behavior.disable_auto_update" => (
-        self.behavior_disable_auto_update_name,
-        self.behavior_disable_auto_update_description,
-      ),
-      "behavior.auto_update_delay" => (
-        self.behavior_auto_update_delay_name,
-        self.behavior_auto_update_delay_description,
-      ),
       "behavior.announcement_feed_url" => (
         self.behavior_announcement_feed_url_name,
         self.behavior_announcement_feed_url_description,
-      ),
-      "behavior.sync_token" => (
-        self.behavior_sync_token_name,
-        self.behavior_sync_token_description,
       ),
       "behavior.draw_cover_art" => (
         self.behavior_draw_cover_art_name,
@@ -635,10 +482,6 @@ impl SettingsStrings {
       "behavior.cover_art_dither_pixel_scale" => (
         self.behavior_cover_art_dither_pixel_scale_name,
         self.behavior_cover_art_dither_pixel_scale_description,
-      ),
-      "behavior.liked_icon" => (
-        self.behavior_liked_icon_name,
-        self.behavior_liked_icon_description,
       ),
       "behavior.shuffle_icon" => (
         self.behavior_shuffle_icon_name,
@@ -671,10 +514,6 @@ impl SettingsStrings {
       "behavior.active_source_icon" => (
         self.behavior_active_source_icon_name,
         self.behavior_active_source_icon_description,
-      ),
-      "behavior.episode_played_icon" => (
-        self.behavior_episode_played_icon_name,
-        self.behavior_episode_played_icon_description,
       ),
       "behavior.sort_ascending_icon" => (
         self.behavior_sort_ascending_icon_name,
@@ -739,26 +578,6 @@ impl SettingsStrings {
         self.keys_save_settings_name,
         self.keys_save_settings_description,
       ),
-      "keys.jump_to_album" => (
-        self.keys_jump_to_album_name,
-        self.keys_jump_to_album_description,
-      ),
-      "keys.jump_to_artist_album" => (
-        self.keys_jump_to_artist_album_name,
-        self.keys_jump_to_artist_album_description,
-      ),
-      "keys.jump_to_context" => (
-        self.keys_jump_to_context_name,
-        self.keys_jump_to_context_description,
-      ),
-      "keys.manage_devices" => (
-        self.keys_manage_devices_name,
-        self.keys_manage_devices_description,
-      ),
-      "keys.listening_party" => (
-        self.keys_listening_party_name,
-        self.keys_listening_party_description,
-      ),
       "keys.decrease_volume" => (
         self.keys_decrease_volume_name,
         self.keys_decrease_volume_description,
@@ -776,18 +595,9 @@ impl SettingsStrings {
         self.keys_remove_from_queue_name,
         self.keys_remove_from_queue_description,
       ),
-      "keys.like_track" => (self.keys_like_track_name, self.keys_like_track_description),
       "keys.generate_recap" => (
         self.keys_generate_recap_name,
         self.keys_generate_recap_description,
-      ),
-      "keys.copy_song_url" => (
-        self.keys_copy_song_url_name,
-        self.keys_copy_song_url_description,
-      ),
-      "keys.copy_album_url" => (
-        self.keys_copy_album_url_name,
-        self.keys_copy_album_url_description,
       ),
       "keys.audio_analysis" => (
         self.keys_audio_analysis_name,
@@ -871,8 +681,8 @@ impl SettingsStrings {
       ("behavior.soloist_audio_quality", "Very high") => self.option_soloist_very_high,
       ("behavior.soloist_audio_quality", "Lossless") => self.option_soloist_lossless,
       ("behavior.language", "en") => self.option_en,
-      ("behavior.language", "zh-Hans") => self.option_zh_hans,
-      ("behavior.language", "zh-Hant") => self.option_zh_hant,
+      ("behavior.language", "pt-BR") => self.option_pt_br,
+      ("behavior.language", "fr") => self.option_fr,
       ("behavior.startup_behavior", "Continue") => self.option_continue,
       ("behavior.startup_behavior", "Play") => self.option_play,
       ("behavior.startup_behavior", "Pause") => self.option_pause,
@@ -892,97 +702,21 @@ impl SettingsStrings {
       ("behavior.player_bar_visualizer", "Spectrum") => self.option_spectrum,
       ("behavior.player_bar_visualizer", "Waveform") => self.option_waveform,
       ("theme.preset", "Custom") => self.option_custom,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "default",
-      ) => self.option_default,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "name",
-      ) => self.option_name,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "name:desc",
-      ) => self.option_name_desc,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "date_added",
-      ) => self.option_date_added,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "date_added:desc",
-      ) => self.option_date_added_desc,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "artist",
-      ) => self.option_artist,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "artist:desc",
-      ) => self.option_artist_desc,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "album",
-      ) => self.option_album,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "album:desc",
-      ) => self.option_album_desc,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "duration",
-      ) => self.option_duration,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "duration:desc",
-      ) => self.option_duration_desc,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "release_date",
-      ) => self.option_release_date,
-      (
-        "behavior.default_sort_playlist_tracks"
-        | "behavior.default_sort_saved_albums"
-        | "behavior.default_sort_saved_artists"
-        | "behavior.default_sort_recently_played",
-        "release_date:desc",
-      ) => self.option_release_date_desc,
+      ("behavior.default_sort_playlist_tracks", "default") => self.option_default,
+      ("behavior.default_sort_playlist_tracks", "name") => self.option_name,
+      ("behavior.default_sort_playlist_tracks", "name:desc") => self.option_name_desc,
+      ("behavior.default_sort_playlist_tracks", "date_added") => self.option_date_added,
+      ("behavior.default_sort_playlist_tracks", "date_added:desc") => self.option_date_added_desc,
+      ("behavior.default_sort_playlist_tracks", "artist") => self.option_artist,
+      ("behavior.default_sort_playlist_tracks", "artist:desc") => self.option_artist_desc,
+      ("behavior.default_sort_playlist_tracks", "album") => self.option_album,
+      ("behavior.default_sort_playlist_tracks", "album:desc") => self.option_album_desc,
+      ("behavior.default_sort_playlist_tracks", "duration") => self.option_duration,
+      ("behavior.default_sort_playlist_tracks", "duration:desc") => self.option_duration_desc,
+      ("behavior.default_sort_playlist_tracks", "release_date") => self.option_release_date,
+      ("behavior.default_sort_playlist_tracks", "release_date:desc") => {
+        self.option_release_date_desc
+      }
       ("theme.preset", "Default (Cyan)") => self.option_preset_default,
       ("theme.preset", "Terminal (ANSI)") => self.option_preset_terminal,
       ("theme.cover_art_dither_color", "auto") => self.option_auto_color,
@@ -1069,11 +803,6 @@ impl SettingsStrings {
     super::format_template(self.icon_width_template, &[("name", name)])
   }
 
-  #[cfg(any(feature = "self-update", test))]
-  pub fn invalid_delay(&self, error: &str) -> String {
-    super::format_template(self.invalid_delay_template, &[("error", error)])
-  }
-
   pub fn invalid_color(&self, error: &str) -> String {
     super::format_template(self.invalid_color_template, &[("error", error)])
   }
@@ -1101,7 +830,7 @@ mod tests {
   #[test]
   fn settings_choice_labels_preserve_raw_tokens_and_unknown_values() {
     let options = crate::core::i18n::Language::OPTIONS;
-    assert_eq!(options, &["auto", "en", "zh-Hans", "zh-Hant"]);
+    assert_eq!(options, &["auto", "en", "pt-BR", "fr"]);
     assert_eq!(
       EN.option_label("behavior.language", "auto"),
       "Auto (system)"
@@ -1110,7 +839,7 @@ mod tests {
       EN.option_label("theme.cover_art_dither_color", "auto"),
       "auto"
     );
-    for strings in [&EN, &ZH_HANS, &ZH_HANT] {
+    for strings in [&EN, &PT_BR, &FR] {
       assert_eq!(
         strings.option_label("behavior.language", "auto"),
         strings.option_auto
@@ -1120,32 +849,32 @@ mod tests {
         strings.option_auto_color
       );
     }
-    assert_eq!(EN.option_label("behavior.language", "zh-Hant"), "繁體中文");
+    assert_eq!(EN.option_label("behavior.language", "fr"), "Français");
     assert_eq!(
-      ZH_HANS.option_label("behavior.language", "auto"),
-      "自动（跟随系统）"
+      PT_BR.option_label("behavior.language", "auto"),
+      "Automático (sistema)"
     );
     assert_eq!(
-      ZH_HANT.option_label("behavior.language", "auto"),
-      "自動（跟隨系統）"
+      FR.option_label("behavior.language", "auto"),
+      "Automatique (système)"
     );
     assert_eq!(
-      ZH_HANT.option_label("behavior.default_sort_playlist_tracks", "date_added:desc"),
-      "加入日期（遞減）"
+      FR.option_label("behavior.default_sort_playlist_tracks", "date_added:desc"),
+      "date d'ajout (décroissant)"
     );
     assert_eq!(
-      ZH_HANS.option_label("behavior.streaming_device_name", "default"),
+      PT_BR.option_label("behavior.streaming_device_name", "default"),
       "default"
     );
     assert_eq!(
-      ZH_HANS.option_label("behavior.startup_route", "{name}"),
+      PT_BR.option_label("behavior.startup_route", "{name}"),
       "{name}"
     );
     assert_eq!(
       EN.option_label("theme.preset", "Default (Cyan)"),
       "Default (Cyan)"
     );
-    assert_eq!(ZH_HANS.option_label("theme.preset", "Nord"), "Nord");
+    assert_eq!(PT_BR.option_label("theme.preset", "Nord"), "Nord");
   }
 
   #[test]
@@ -1155,12 +884,12 @@ mod tests {
       "Key {action} is already assigned to {key}"
     );
     assert_eq!(
-      ZH_HANS.key_conflict("{action}", "{key}"),
-      "按键 {action} 已分配给{key}"
+      PT_BR.key_conflict("{action}", "{key}"),
+      "A tecla {action} já está atribuída a {key}"
     );
     assert_eq!(
-      ZH_HANT.color_unknown("\"{value}\""),
-      "未知顏色 \"{value}\"：請使用 LightBlue 等名稱或 \"r, g, b\""
+      FR.color_unknown("\"{value}\""),
+      "Couleur inconnue \"{value}\" : utilisez un nom comme LightBlue ou « r, g, b »"
     );
   }
 }

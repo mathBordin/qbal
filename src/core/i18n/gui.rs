@@ -1,21 +1,19 @@
 //! Browser UI messages, serialized with the other bindings by the GUI tests.
 
 mod en;
-mod zh_hans;
-mod zh_hant;
+mod fr;
+mod pt_br;
 pub use en::EN;
-pub use zh_hans::ZH_HANS;
-pub use zh_hant::ZH_HANT;
+pub use fr::FR;
+pub use pt_br::PT_BR;
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct GuiStrings {
   pub explicit: &'static str,
   pub secret_not_set: &'static str,
   pub secret_saved: &'static str,
   pub sources: &'static str,
   pub by_spotify: &'static str,
-  pub made_for_you: &'static str,
   pub home: &'static str,
   pub search: &'static str,
   pub discover: &'static str,
@@ -124,8 +122,6 @@ pub struct GuiStrings {
   pub no_followed_artists: &'static str,
   pub recently_played: &'static str,
   pub saved_albums: &'static str,
-  pub your_top_tracks: &'static str,
-  pub artists_mix: &'static str,
   pub save_to_library: &'static str,
   pub following: &'static str,
   pub follow: &'static str,
@@ -144,15 +140,8 @@ pub struct GuiStrings {
   pub discover_intro: &'static str,
   pub discover_needs_spotify: &'static str,
   pub list: &'static str,
-  pub top_artists_mix: &'static str,
   pub range: &'static str,
   pub playing_label: &'static str,
-  pub this_list: &'static str,
-  pub in_this_list: &'static str,
-  pub no_songs: &'static str,
-  pub play_list: &'static str,
-  pub four_weeks: &'static str,
-  pub six_months: &'static str,
   pub all_time: &'static str,
   pub result_type: &'static str,
   pub search_in: &'static str,
@@ -178,7 +167,6 @@ pub struct GuiStrings {
   pub hint_close: &'static str,
   pub hint_move: &'static str,
   pub hint_play: &'static str,
-  pub hint_range: &'static str,
   pub hint_queue: &'static str,
   pub hint_search: &'static str,
   pub hint_sync: &'static str,
@@ -334,10 +322,6 @@ pub struct GuiStrings {
   pub source_radio: &'static str,
   pub source_local_badge: &'static str,
   pub source_radio_badge: &'static str,
-  pub language_auto: &'static str,
-  pub language_en: &'static str,
-  pub language_hans: &'static str,
-  pub language_hant: &'static str,
   pub update_checks_description: &'static str,
   pub update_delay_description: &'static str,
   pub play_named: &'static str,
@@ -368,9 +352,6 @@ pub struct GuiStrings {
   pub no_search_results: &'static str,
   pub search_other_query: &'static str,
   pub from_album: &'static str,
-  pub top_tracks_range: &'static str,
-  pub spotify_songs_count: &'static str,
-  pub queue_count: &'static str,
   pub unmatched_count: &'static str,
   pub matched_count: &'static str,
   pub playlist_one_mirror: &'static str,
@@ -409,12 +390,6 @@ pub struct GuiStrings {
   pub rank_fell: &'static str,
   pub rank_new: &'static str,
   pub date_locale: &'static str,
-  pub source_needs_login: &'static str,
-  pub source_free: &'static str,
-  pub source_youtube_note: &'static str,
-  pub source_subsonic_note: &'static str,
-  pub source_qobuz_note: &'static str,
-  pub source_apple_note: &'static str,
   pub open_browser: &'static str,
   pub start_failed: &'static str,
   pub current_device_kind: &'static str,
@@ -534,58 +509,4 @@ pub struct GuiStrings {
   pub loading_changelog: &'static str,
   pub show_older: &'static str,
   pub announcements: &'static str,
-}
-
-#[cfg(any(feature = "gui", test))]
-impl GuiStrings {
-  pub fn open_browser(&self, url: &str) -> String {
-    super::format_template(self.open_browser, &[("url", url)])
-  }
-
-  pub fn start_failed(&self, error: &str) -> String {
-    super::format_template(self.start_failed, &[("error", error)])
-  }
-
-  /// Friendly GUI sort labels; persisted option tokens stay unchanged.
-  #[cfg(feature = "gui")]
-  pub fn sort_option_label(&self, id: &str, raw: &str) -> Option<&'static str> {
-    let playlist = id == "behavior.default_sort_playlist_tracks";
-    let albums = id == "behavior.default_sort_saved_albums";
-    let artists = id == "behavior.default_sort_saved_artists";
-    if !playlist && !albums && !artists {
-      return None;
-    }
-    Some(match raw {
-      "default" if playlist => self.sort_custom,
-      "default" => self.sort_recent,
-      "name" if playlist => self.sort_title,
-      "name:desc" if playlist => self.sort_title_desc,
-      "name" => self.sort_name,
-      "name:desc" => self.sort_name_desc,
-      "date_added" if !artists => self.sort_date,
-      "date_added:desc" if !artists => self.sort_date_desc,
-      "artist" if !artists => self.sort_artist,
-      "artist:desc" if !artists => self.sort_artist_desc,
-      "album" if playlist => self.sort_album,
-      "album:desc" if playlist => self.sort_album_desc,
-      "duration" if playlist => self.sort_duration,
-      "duration:desc" if playlist => self.sort_duration_desc,
-      "release_date" if albums => self.sort_release,
-      "release_date:desc" if albums => self.sort_release_desc,
-      _ => return None,
-    })
-  }
-
-  #[cfg(feature = "gui")]
-  pub fn source_note(&self, source: crate::core::source::Source) -> &'static str {
-    use crate::core::source::Source;
-    match source {
-      Source::Spotify => self.source_needs_login,
-      Source::YouTube => self.source_youtube_note,
-      Source::Subsonic => self.source_subsonic_note,
-      Source::Qobuz => self.source_qobuz_note,
-      Source::AppleMusic => self.source_apple_note,
-      Source::Radio | Source::Local => self.source_free,
-    }
-  }
 }

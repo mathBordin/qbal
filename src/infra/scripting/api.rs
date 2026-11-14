@@ -142,11 +142,8 @@ pub(super) fn install_api(
   }
 
   {
-    let shared = shared.clone();
-    let search = lua.create_function(move |_, query: String| {
-      shared.effects.borrow_mut().push(Action::Search(query));
-      Ok(())
-    })?;
+    let _shared = shared.clone();
+    let search = lua.create_function(move |_, _query: String| Ok(()))?;
     tbl.set("search", search)?;
   }
 
@@ -320,67 +317,7 @@ pub(super) fn install_api(
     tbl.set("set_theme", set_theme)?;
   }
 
-  // Async data reads: spotatui.get_X(cb) with cb(data, err), like http.
-  install_data_read(
-    lua,
-    &tbl,
-    shared,
-    "get_playlists",
-    PluginDataKind::Playlists,
-  )?;
-  install_data_read(lua, &tbl, shared, "get_queue", PluginDataKind::Queue)?;
-  install_data_read(
-    lua,
-    &tbl,
-    shared,
-    "get_saved_tracks",
-    PluginDataKind::SavedTracks,
-  )?;
-  install_data_read(
-    lua,
-    &tbl,
-    shared,
-    "get_saved_albums",
-    PluginDataKind::SavedAlbums,
-  )?;
-  install_data_read(
-    lua,
-    &tbl,
-    shared,
-    "get_saved_shows",
-    PluginDataKind::SavedShows,
-  )?;
-  install_data_read(
-    lua,
-    &tbl,
-    shared,
-    "get_recently_played",
-    PluginDataKind::RecentlyPlayed,
-  )?;
-  install_data_read(lua, &tbl, shared, "get_devices", PluginDataKind::Devices)?;
   install_data_read(lua, &tbl, shared, "get_lyrics", PluginDataKind::Lyrics)?;
-
-  // spotatui.get_search_results(query, cb): the only data read with an argument.
-  {
-    let lua_inner = lua.clone();
-    let shared = shared.clone();
-    let get_search_results =
-      lua.create_function(move |_, (query, callback): (String, mlua::Function)| {
-        if query.is_empty() {
-          return Err(mlua::Error::RuntimeError(
-            "spotatui.get_search_results: query must be a non-empty string".to_string(),
-          ));
-        }
-        let token = register_callback(&lua_inner, &shared, DATA_CALLBACKS_KEY, callback)?;
-        shared.data_requests.borrow_mut().push(DataRequest {
-          token,
-          kind: PluginDataKind::Search,
-          arg: Some(query),
-        });
-        Ok(())
-      })?;
-    tbl.set("get_search_results", get_search_results)?;
-  }
 
   // Cached synchronous reads, refreshed by the engine when the matching data
   // generation advances.
@@ -424,30 +361,18 @@ pub(super) fn install_api(
 
   install_action(lua, &tbl, shared, "cycle_repeat", || Action::CycleRepeat)?;
 
-  install_string_action(lua, &tbl, shared, "transfer_playback", |device_id| {
-    // `persist: false`: a plugin-initiated transfer must not overwrite the
-    // user's saved device preference (only the interactive device picker
-    // persists).
-    Action::TransferPlayback {
-      device_id,
-      persist: false,
-    }
-  })?;
-
-  // spotatui.play_uri(uri): tracks/episodes play as a uri list, containers as context.
+  // spotatui.play_uri(uri): play one Qobuz track.
   {
     let shared = shared.clone();
     let play_uri = lua.create_function(move |_, uri: String| {
-      let action = if uri.starts_with("spotify:track:") || uri.starts_with("spotify:episode:") {
+      let action = if is_track_uri(&uri) {
         Action::PlayUris {
           uris: vec![uri],
           offset: None,
         }
-      } else if is_context_uri(&uri) {
-        Action::PlayContext { uri, offset: None }
       } else {
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.play_uri: expected a spotify:track/episode/album/playlist/artist/show uri, got '{uri}'"
+          "spotatui.play_uri: expected a qobuz:track uri, got '{uri}'"
         )));
       };
       shared.effects.borrow_mut().push(action);
@@ -455,115 +380,6 @@ pub(super) fn install_api(
     })?;
     tbl.set("play_uri", play_uri)?;
   }
-
-  // spotatui.play_context(uri, offset?): play a container, optionally from an
-  // 0-based track offset.
-  {
-    let shared = shared.clone();
-    let play_context = lua.create_function(move |_, (uri, offset): (String, Option<usize>)| {
-      if !is_context_uri(&uri) {
-        return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.play_context: expected a spotify:album/playlist/artist/show uri, got '{uri}'"
-        )));
-      }
-      shared
-        .effects
-        .borrow_mut()
-        .push(Action::PlayContext { uri, offset });
-      Ok(())
-    })?;
-    tbl.set("play_context", play_context)?;
-  }
-
-  install_string_action(lua, &tbl, shared, "add_to_queue", Action::AddToQueue)?;
-
-  // spotatui.create_playlist(name, uris?)
-  {
-    let shared = shared.clone();
-    let create_playlist =
-      lua.create_function(move |_, (name, uris): (String, Option<mlua::Table>)| {
-        if name.trim().is_empty() {
-          return Err(mlua::Error::RuntimeError(
-            "spotatui.create_playlist: name must be a non-empty string".to_string(),
-          ));
-        }
-        let mut track_ids = Vec::new();
-        if let Some(uris) = uris {
-          for uri in uris.sequence_values::<String>() {
-            track_ids.push(uri?);
-          }
-        }
-        shared.effects.borrow_mut().push(Action::CreatePlaylist {
-          name,
-          track_uris: track_ids,
-        });
-        Ok(())
-      })?;
-    tbl.set("create_playlist", create_playlist)?;
-  }
-
-  // spotatui.playlist_add_track(playlist, track)
-  {
-    let shared = shared.clone();
-    let playlist_add_track =
-      lua.create_function(move |_, (playlist, track): (String, String)| {
-        require_nonempty("spotatui.playlist_add_track", "playlist", &playlist)?;
-        require_nonempty("spotatui.playlist_add_track", "track", &track)?;
-        shared
-          .effects
-          .borrow_mut()
-          .push(Action::AddTrackToPlaylist { playlist, track });
-        Ok(())
-      })?;
-    tbl.set("playlist_add_track", playlist_add_track)?;
-  }
-
-  // spotatui.playlist_remove_track(playlist, track, position) -- 0-based, required.
-  {
-    let shared = shared.clone();
-    let playlist_remove_track =
-      lua.create_function(move |_, (playlist, track, position): (String, String, i64)| {
-        require_nonempty("spotatui.playlist_remove_track", "playlist", &playlist)?;
-        require_nonempty("spotatui.playlist_remove_track", "track", &track)?;
-        let position = usize::try_from(position).map_err(|_| {
-          mlua::Error::RuntimeError(format!(
-            "spotatui.playlist_remove_track: position must be a non-negative (0-based) integer, got {position}"
-          ))
-        })?;
-        shared
-          .effects
-          .borrow_mut()
-          .push(Action::RemoveTrackFromPlaylist {
-            playlist,
-            track,
-            position,
-          });
-        Ok(())
-      })?;
-    tbl.set("playlist_remove_track", playlist_remove_track)?;
-  }
-
-  install_string_action(lua, &tbl, shared, "follow_playlist", Action::FollowPlaylist)?;
-  install_string_action(
-    lua,
-    &tbl,
-    shared,
-    "unfollow_playlist",
-    Action::UnfollowPlaylist,
-  )?;
-  install_string_action(
-    lua,
-    &tbl,
-    shared,
-    "toggle_save_track",
-    Action::ToggleSaveTrack,
-  )?;
-  install_string_action(lua, &tbl, shared, "save_album", Action::SaveAlbum)?;
-  install_string_action(lua, &tbl, shared, "unsave_album", Action::UnsaveAlbum)?;
-  install_string_action(lua, &tbl, shared, "save_show", Action::SaveShow)?;
-  install_string_action(lua, &tbl, shared, "unsave_show", Action::UnsaveShow)?;
-  install_string_action(lua, &tbl, shared, "follow_artist", Action::FollowArtist)?;
-  install_string_action(lua, &tbl, shared, "unfollow_artist", Action::UnfollowArtist)?;
 
   // Timers. Fired from the engine's tick pass, so the effective resolution is
   // the UI tick rate (behavior.tick_rate_milliseconds).
@@ -861,38 +677,8 @@ fn install_timer(
 }
 
 /// True for Spotify container URIs playable as a context.
-fn is_context_uri(uri: &str) -> bool {
-  uri.starts_with("spotify:album:")
-    || uri.starts_with("spotify:playlist:")
-    || uri.starts_with("spotify:artist:")
-    || uri.starts_with("spotify:show:")
-}
-
-fn require_nonempty(function_name: &str, arg_name: &str, value: &str) -> mlua::Result<()> {
-  if value.trim().is_empty() {
-    return Err(mlua::Error::RuntimeError(format!(
-      "{function_name}: {arg_name} must be a non-empty string"
-    )));
-  }
-  Ok(())
-}
-
-/// Install an action taking a single non-empty string argument.
-fn install_string_action(
-  lua: &Lua,
-  tbl: &mlua::Table,
-  shared: &Rc<ScriptShared>,
-  name: &'static str,
-  make: fn(String) -> Action,
-) -> mlua::Result<()> {
-  let shared = shared.clone();
-  let f = lua.create_function(move |_, value: String| {
-    require_nonempty(&format!("spotatui.{name}"), "argument", &value)?;
-    shared.effects.borrow_mut().push(make(value));
-    Ok(())
-  })?;
-  tbl.set(name, f)?;
-  Ok(())
+fn is_track_uri(uri: &str) -> bool {
+  uri.starts_with("qobuz:track:")
 }
 
 /// Install an argument-less async data read: `spotatui.<name>(cb)` registers the
@@ -908,11 +694,10 @@ fn install_data_read(
   let shared = shared.clone();
   let f = lua.create_function(move |_, callback: mlua::Function| {
     let token = register_callback(&lua_inner, &shared, DATA_CALLBACKS_KEY, callback)?;
-    shared.data_requests.borrow_mut().push(DataRequest {
-      token,
-      kind,
-      arg: None,
-    });
+    shared
+      .data_requests
+      .borrow_mut()
+      .push(DataRequest { token, kind });
     Ok(())
   })?;
   tbl.set(name, f)?;

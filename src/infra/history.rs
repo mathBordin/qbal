@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike,
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,16 +17,6 @@ use tokio::task::{JoinHandle, JoinSet};
 const HISTORY_SUBDIR: &str = "history";
 const LISTENS_FILE_NAME: &str = "listens.jsonl";
 const LAST_RECAP_FILE_NAME: &str = "last_recap_at.txt";
-const LAST_SYNCED_FILE_NAME: &str = "last_synced_at.txt";
-const SYNC_BASE_URL: &str = "https://spotatui.com";
-const CLOUD_SYNC_PATH: &str = "/api/sync";
-const NOW_PLAYING_SYNC_PATH: &str = "/api/sync/now-playing";
-/// Heartbeat interval: must be well under the 5-minute online threshold used by the website.
-const NOW_PLAYING_HEARTBEAT_SECS: u64 = 60;
-/// Push immediately when observed progress deviates this far from the progress
-/// expected since the last push (a seek), keeping the widget's bar honest.
-const NOW_PLAYING_SEEK_THRESHOLD_MS: u128 = 5_000;
-const SYNC_BASE_URL_ENV_KEY: &str = "SPOTATUI_SYNC_BASE_URL";
 const MAX_INTERVAL_MS: u64 = 5_000;
 const REPLAY_RESET_THRESHOLD_MS: u128 = 15_000;
 const REPLAY_PREVIOUS_PROGRESS_FLOOR_MS: u128 = 30_000;
@@ -105,108 +95,14 @@ struct HistoryCollector {
   last_observed_at: Option<Instant>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-struct NowPlayingPayload {
-  title: String,
-  artists: Vec<String>,
-  album: String,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  image_url: Option<String>,
-  duration_ms: u32,
-  progress_ms: u64,
-  is_playing: bool,
-  is_live: bool,
-  /// Client Unix millis when `progress_ms` was sampled, so the backend can
-  /// extrapolate the widget's progress bar between heartbeats.
-  progress_at_ms: i64,
-}
-
-impl NowPlayingPayload {
-  fn from_snapshot(snapshot: &PlaybackSnapshot, sampled_at_ms: i64) -> Self {
-    Self {
-      title: snapshot.metadata.title.clone(),
-      artists: snapshot.metadata.artists.clone(),
-      album: snapshot.metadata.album.clone(),
-      image_url: snapshot.metadata.image_url.clone(),
-      duration_ms: snapshot.metadata.duration_ms,
-      progress_ms: snapshot.progress_ms.min(u64::MAX as u128) as u64,
-      is_playing: snapshot.is_playing,
-      is_live: snapshot.is_live,
-      progress_at_ms: sampled_at_ms,
-    }
-  }
-}
-
-#[derive(Debug)]
-enum NowPlayingAction {
-  Push(NowPlayingPayload),
-  Clear,
-}
-
-/// State captured at the last push; `Some` exactly while the cloud holds
-/// now-playing state for this session.
-struct PushedState {
-  title: String,
-  artists: Vec<String>,
-  is_playing: bool,
-  progress_ms: u128,
-  at: Instant,
-}
-
 /// Decides when the cloud now-playing state needs an update. Pushes on track
 /// change, play/pause flip, seek discontinuity, and a heartbeat (also while
 /// paused, so the public widget can show "paused" instead of decaying to
 /// offline); clears once when track playback stops mid-session.
 #[derive(Default)]
-struct NowPlayingTracker {
-  pushed: Option<PushedState>,
-}
+struct NowPlayingTracker {}
 
-impl NowPlayingTracker {
-  fn observe(
-    &mut self,
-    snapshot: Option<&PlaybackSnapshot>,
-    now: Instant,
-  ) -> Option<NowPlayingAction> {
-    let snap = snapshot.filter(|s| s.item_kind == PlaybackItemKind::Track);
-    let Some(snap) = snap else {
-      return self.pushed.take().map(|_| NowPlayingAction::Clear);
-    };
-
-    let should_push = match &self.pushed {
-      None => true,
-      Some(pushed) => {
-        let identity_changed =
-          pushed.title != snap.metadata.title || pushed.artists != snap.metadata.artists;
-        let play_state_changed = pushed.is_playing != snap.is_playing;
-        let heartbeat_due = now.duration_since(pushed.at).as_secs() >= NOW_PLAYING_HEARTBEAT_SECS;
-        let expected_progress = if pushed.is_playing {
-          pushed.progress_ms + now.duration_since(pushed.at).as_millis()
-        } else {
-          pushed.progress_ms
-        };
-        let seek_detected =
-          snap.progress_ms.abs_diff(expected_progress) > NOW_PLAYING_SEEK_THRESHOLD_MS;
-        identity_changed || play_state_changed || heartbeat_due || seek_detected
-      }
-    };
-
-    if should_push {
-      self.pushed = Some(PushedState {
-        title: snap.metadata.title.clone(),
-        artists: snap.metadata.artists.clone(),
-        is_playing: snap.is_playing,
-        progress_ms: snap.progress_ms,
-        at: now,
-      });
-      return Some(NowPlayingAction::Push(NowPlayingPayload::from_snapshot(
-        snap,
-        Utc::now().timestamp_millis(),
-      )));
-    }
-    None
-  }
-}
+impl NowPlayingTracker {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecapPeriod {
@@ -241,18 +137,6 @@ impl RecapPeriod {
       .unwrap_or(0);
     Self::ALL_PERIODS[(index + offset) % Self::ALL_PERIODS.len()]
   }
-
-  /// The inverse of [`parse_recap_period`].
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub fn key(self) -> &'static str {
-    match self {
-      RecapPeriod::SevenDays => "7d",
-      RecapPeriod::ThirtyDays => "30d",
-      RecapPeriod::Month => "month",
-      RecapPeriod::Year => "year",
-      RecapPeriod::All => "all",
-    }
-  }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -271,60 +155,16 @@ pub struct StatsData {
   pub top_artists: Vec<RankedEntry>,
   pub top_albums: Vec<RankedEntry>,
   pub days: Vec<RankedEntry>,
-  /// Qualified plays in each of [`RecapPeriod::ALL_PERIODS`], whatever the selected period.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub period_plays: Vec<(RecapPeriod, usize)>,
-  /// The top five tracks of the last 7 days, whatever the selected period.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub week_tracks: Vec<RankedEntry>,
-  /// One per `top_artists` entry, in the same order.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub artist_ranks: Vec<ArtistRank>,
-  /// Empty for [`RecapPeriod::All`].
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub movements: Vec<ArtistMovement>,
-}
-
-/// An artist's rank over all time next to the selected period.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub struct ArtistRank {
-  /// 1-based, by listened time.
-  pub all_time: Option<u32>,
-  /// The artist's first qualified listen falls inside the period.
-  pub new: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub enum MovementKind {
-  Climb,
-  Fall,
-  New,
-}
-
-/// One artist whose rank in the period differs from its all-time rank.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub struct ArtistMovement {
-  pub name: String,
-  pub kind: MovementKind,
-  /// The all-time rank.
-  pub from: Option<u32>,
-  /// The rank in the period; `None` for an artist the period never played.
-  pub to: Option<u32>,
 }
 
 const STATS_LIST_LIMIT: usize = 20;
-const MOVEMENT_TOP: u32 = 10;
-const WEEK_TRACKS: usize = 5;
 
 /// `filtered` is the selected period's qualified listens and `listens` every recorded one.
 /// Build frontend details from counts and durations in the selected language.
 pub fn build_stats_data_with(
   filtered: &[ListenRecord],
   listens: &[ListenRecord],
-  period: RecapPeriod,
+  _period: RecapPeriod,
   strings: &crate::core::i18n::Strings,
 ) -> StatsData {
   let now = Local::now();
@@ -333,126 +173,22 @@ pub fn build_stats_data_with(
     .filter(|record| record.qualified)
     .cloned()
     .collect();
-  let week: Vec<ListenRecord> = qualified
+  let _week: Vec<ListenRecord> = qualified
     .iter()
     .filter(|record| in_period(record, RecapPeriod::SevenDays, &now))
     .cloned()
     .collect();
   let top_artists = aggregate_top_artists_with(filtered, STATS_LIST_LIMIT, strings);
-  let all_time = aggregate_top_artists_with(&qualified, usize::MAX, strings);
-  let in_period_ranks = aggregate_top_artists_with(filtered, usize::MAX, strings);
+  let _all_time = aggregate_top_artists_with(&qualified, usize::MAX, strings);
+  let _in_period_ranks = aggregate_top_artists_with(filtered, usize::MAX, strings);
   StatsData {
     total_plays: filtered.len(),
     total_time_ms: filtered.iter().map(|record| record.listened_ms).sum(),
     top_tracks: aggregate_top_tracks_with(filtered, STATS_LIST_LIMIT, strings),
-    artist_ranks: artist_ranks(&top_artists, &all_time),
-    movements: if period == RecapPeriod::All {
-      Vec::new()
-    } else {
-      artist_movements(&in_period_ranks, &all_time)
-    },
     top_artists,
     top_albums: aggregate_top_albums_with(filtered, STATS_LIST_LIMIT, strings),
     days: aggregate_days_with(filtered, strings),
-    period_plays: RecapPeriod::ALL_PERIODS
-      .iter()
-      .map(|&each| {
-        let plays = qualified
-          .iter()
-          .filter(|record| in_period(record, each, &now))
-          .count();
-        (each, plays)
-      })
-      .collect(),
-    week_tracks: aggregate_top_tracks_with(&week, WEEK_TRACKS, strings),
   }
-}
-
-fn rank_of(ranking: &[RankedEntry], name: &str) -> Option<u32> {
-  ranking
-    .iter()
-    .position(|entry| entry.display == name)
-    .map(|index| index as u32 + 1)
-}
-
-fn artist_ranks(top: &[RankedEntry], all_time: &[RankedEntry]) -> Vec<ArtistRank> {
-  top
-    .iter()
-    .map(|entry| {
-      let lifetime = all_time.iter().find(|other| other.display == entry.display);
-      ArtistRank {
-        all_time: rank_of(all_time, &entry.display),
-        new: lifetime.is_some_and(|other| other.value == entry.value),
-      }
-    })
-    .collect()
-}
-
-/// The biggest climber into the period's top ten, the biggest faller out of the
-/// all-time top ten, and the first artist new to the period's top ten.
-fn artist_movements(period: &[RankedEntry], all_time: &[RankedEntry]) -> Vec<ArtistMovement> {
-  let top = |ranking: &[RankedEntry]| -> Vec<(String, u32)> {
-    ranking
-      .iter()
-      .take(MOVEMENT_TOP as usize)
-      .enumerate()
-      .map(|(index, entry)| (entry.display.clone(), index as u32 + 1))
-      .collect()
-  };
-  // Only the top ten are compared; ranking the whole period would cost P times A lookups.
-  let ranks = artist_ranks(&period[..period.len().min(MOVEMENT_TOP as usize)], all_time);
-  let mut movements = Vec::new();
-
-  let climber = top(period)
-    .into_iter()
-    .zip(&ranks)
-    .filter(|(_, rank)| !rank.new)
-    .filter_map(|((name, to), rank)| {
-      let from = rank.all_time?;
-      (from > to).then(|| (from - to, name, from, to))
-    })
-    // On a tie, the higher place in the period wins.
-    .max_by(|a, b| a.0.cmp(&b.0).then(b.3.cmp(&a.3)));
-  if let Some((_, name, from, to)) = climber {
-    movements.push(ArtistMovement {
-      name,
-      kind: MovementKind::Climb,
-      from: Some(from),
-      to: Some(to),
-    });
-  }
-
-  let faller = top(all_time)
-    .into_iter()
-    .filter_map(|(name, from)| {
-      let to = rank_of(period, &name);
-      let drop = to.map_or(u32::MAX, |to| to.saturating_sub(from));
-      (drop > 0).then_some((drop, name, from, to))
-    })
-    // Dropping out is the biggest fall; on a tie, the higher all-time place wins.
-    .max_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)));
-  if let Some((_, name, from, to)) = faller {
-    movements.push(ArtistMovement {
-      name,
-      kind: MovementKind::Fall,
-      from: Some(from),
-      to,
-    });
-  }
-
-  if let Some(((name, to), _)) = top(period)
-    .into_iter()
-    .zip(&ranks)
-    .find(|(_, rank)| rank.new)
-  {
-    movements.push(ArtistMovement {
-      name,
-      kind: MovementKind::New,
-      from: None,
-      to: Some(to),
-    });
-  }
-  movements
 }
 
 pub fn compute_streaks(listens: &[ListenRecord]) -> StreakSummary {
@@ -510,32 +246,6 @@ fn streaks_from_days(days: &BTreeSet<NaiveDate>, today: NaiveDate, today_ms: u64
   }
 }
 
-/// Spawn a cloud history sync unless one is already in flight. Overlapping
-/// syncs would race on the append cursor and double-send records; a skipped
-/// sync is harmless because the next trigger (next song or exit) resumes from
-/// the same cursor.
-fn spawn_cloud_history_sync(
-  client: &reqwest::Client,
-  sync_token: &str,
-  in_flight: &Arc<std::sync::atomic::AtomicBool>,
-  network_tasks: &mut JoinSet<()>,
-) {
-  use std::sync::atomic::Ordering;
-
-  if in_flight.swap(true, Ordering::AcqRel) {
-    return;
-  }
-  let client = client.clone();
-  let token = sync_token.to_string();
-  let in_flight = Arc::clone(in_flight);
-  network_tasks.spawn(async move {
-    if let Err(e) = sync_history_to_cloud_with_client(&client, &token).await {
-      log::warn!("failed to sync listening history to cloud: {}", e);
-    }
-    in_flight.store(false, Ordering::Release);
-  });
-}
-
 pub struct HistoryCollectorHandle {
   shutdown_tx: Option<oneshot::Sender<()>>,
   task: JoinHandle<()>,
@@ -567,8 +277,8 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
     let mut collector = HistoryCollector::default();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
     let mut last_auto_check = Instant::now();
-    let http_client = crate::infra::network::requests::shared_http_client().clone();
-    let mut network_tasks = JoinSet::new();
+    let _http_client = crate::infra::network::requests::shared_http_client().clone();
+    let mut network_tasks: JoinSet<()> = JoinSet::new();
 
     // Check on startup
     perform_auto_recap_check(&app).await;
@@ -585,10 +295,7 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
     })
     .await
     {
-      Ok(Ok((totals, playlist_listens))) => {
-        app.lock().await.set_playlist_last_listens(playlist_listens);
-        Some(totals)
-      }
+      Ok(Ok((totals, _playlist_listens))) => Some(totals),
       Ok(Err(error)) => {
         log::warn!("failed to load listens for streak cache: {}", error);
         None
@@ -602,36 +309,10 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
       app.lock().await.listening_streaks = Some(streaks_from_day_totals(totals));
     }
 
-    // Sync history to cloud on startup. This takes the lock properly rather
-    // than `try_lock`: the startup work above ends by acquiring (and releasing)
-    // the app mutex, and tokio's fair mutex hands the freed permit straight to
-    // any queued waiter, so a `try_lock` here intermittently loses to the
-    // render loop. Losing it silently pinned the token to `None` for the whole
-    // process, disabling per-song and now-playing sync and dumping the entire
-    // session onto the exit sync.
-    let mut sync_token_opt: Option<String> =
-      app.lock().await.user_config.behavior.sync_token.clone();
-    log::info!(
-      "cloud sync {} at history collector startup",
-      if sync_token_opt.is_some() {
-        "enabled"
-      } else {
-        "disabled (no sync token configured)"
-      }
-    );
-
-    let history_sync_in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if let Some(ref token) = sync_token_opt {
-      spawn_cloud_history_sync(
-        &http_client,
-        token,
-        &history_sync_in_flight,
-        &mut network_tasks,
-      );
-    }
+    let _history_sync_in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Now-playing tracking state
-    let mut now_playing_tracker = NowPlayingTracker::default();
+    let _now_playing_tracker = NowPlayingTracker::default();
 
     loop {
       tokio::select! {
@@ -649,61 +330,16 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
         perform_auto_recap_check(&app).await;
       }
 
-      // Re-read the token from the guard we already hold: it can be pasted or
-      // cleared in Settings mid-session, and the collector is only spawned once.
-      let (snapshot, latest_token) = if let Ok(app_guard) = app.try_lock() {
-        (
-          tracking_playback_snapshot(&app_guard),
-          app_guard.user_config.behavior.sync_token.clone(),
-        )
+      let snapshot = if let Ok(app_guard) = app.try_lock() {
+        tracking_playback_snapshot(&app_guard)
       } else {
         continue;
       };
-
-      if latest_token != sync_token_opt {
-        log::info!(
-          "cloud sync token {}",
-          if latest_token.is_some() {
-            "configured"
-          } else {
-            "cleared"
-          }
-        );
-        sync_token_opt = latest_token;
-      }
-
-      // Now-playing sync: push on track change, play/pause flip, seek, or
-      // heartbeat; clear once when track playback stops.
-      if let Some(ref token) = sync_token_opt {
-        let action = now_playing_tracker.observe(snapshot.as_ref(), Instant::now());
-        match action {
-          Some(NowPlayingAction::Push(payload)) => {
-            let token_clone = token.clone();
-            let client = http_client.clone();
-            network_tasks.spawn(async move {
-              if let Err(e) = sync_now_playing_to_cloud(&client, &token_clone, &payload).await {
-                log::warn!("failed to sync now-playing: {}", e);
-              }
-            });
-          }
-          Some(NowPlayingAction::Clear) => {
-            let token_clone = token.clone();
-            let client = http_client.clone();
-            network_tasks.spawn(async move {
-              if let Err(e) = clear_now_playing_with_client(&client, &token_clone).await {
-                log::warn!("failed to clear now-playing: {}", e);
-              }
-            });
-          }
-          None => {}
-        }
-      }
 
       match collector.observe(snapshot) {
         Ok(Some(record)) => {
           {
             let mut app = app.lock().await;
-            app.record_playlist_listen(&record);
             app.record_session_play(session_play(&record));
           }
           if record.qualified {
@@ -712,17 +348,6 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
               *totals.entry(date).or_default() += record.listened_ms;
               app.lock().await.listening_streaks = Some(streaks_from_day_totals(totals));
             }
-          }
-          // Push the finished listen to the cloud right away instead of only
-          // at startup/exit; long sessions otherwise pile up records that
-          // stall the exit sync.
-          if let Some(ref token) = sync_token_opt {
-            spawn_cloud_history_sync(
-              &http_client,
-              token,
-              &history_sync_in_flight,
-              &mut network_tasks,
-            );
           }
         }
         Ok(None) => {}
@@ -918,11 +543,7 @@ pub fn load_listens() -> Result<Vec<ListenRecord>> {
 fn latest_playlist_listens(listens: &[ListenRecord]) -> crate::core::sort::PlaylistLastListens {
   let mut latest = crate::core::sort::PlaylistLastListens::new();
   for record in listens {
-    if let Some(uri) = record
-      .context_uri
-      .as_deref()
-      .filter(|uri| uri.starts_with("spotify:playlist:"))
-    {
+    if let Some(uri) = record.context_uri.as_deref().filter(|_uri| false) {
       let last = latest.entry(uri.to_string()).or_insert(record.ended_at);
       *last = (*last).max(record.ended_at);
     }
@@ -1161,10 +782,7 @@ fn qualifies_listen(duration_ms: u32, listened_ms: u64) -> bool {
 
 fn history_source_from_snapshot(snapshot: &PlaybackSnapshot) -> HistoryPlaybackSource {
   match snapshot.source {
-    PlaybackSource::NativeContext => HistoryPlaybackSource::NativeContext,
-    PlaybackSource::NativeRawList => HistoryPlaybackSource::NativeRawList,
     PlaybackSource::ExternalDevice => HistoryPlaybackSource::ExternalDevice,
-    PlaybackSource::AppleMusic => HistoryPlaybackSource::AppleMusic,
   }
 }
 
@@ -2312,12 +1930,9 @@ pub struct RankedEntry {
   pub detail: String,
   pub value: u64,
   pub uri: Option<String>,
-  /// A track's title and artists apart; `None` for other entries.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub parts: Option<(String, String)>,
 }
 
-#[cfg(any(test, feature = "dj-core"))]
+#[cfg(test)]
 pub fn aggregate_top_tracks(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
   aggregate_top_tracks_with(listens, limit, &crate::core::i18n::EN)
 }
@@ -2358,7 +1973,6 @@ pub fn aggregate_top_tracks_with(
           .history_plays(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri,
-        parts: Some((title, artists)),
       })
       .collect(),
     limit,
@@ -2374,7 +1988,7 @@ fn split_artists(combo: &str) -> Vec<String> {
     .collect()
 }
 
-#[cfg(any(test, feature = "dj-core"))]
+#[cfg(test)]
 pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
   aggregate_top_artists_with(listens, limit, &crate::core::i18n::EN)
 }
@@ -2388,10 +2002,7 @@ pub fn aggregate_top_artists_with(
   for record in listens {
     // Spotify credits one artist per entry, so a name such as "Mumford & Sons"
     // stays whole. Other sources arrive as one joined string and are split.
-    let credited_separately = record
-      .item_uri
-      .as_deref()
-      .is_some_and(|uri| uri.starts_with("spotify:"));
+    let credited_separately = record.item_uri.as_deref().is_some_and(|_uri| false);
     for artist_combo in &record.artists {
       let individual_artists = if credited_separately {
         let name = artist_combo.trim();
@@ -2422,14 +2033,13 @@ pub fn aggregate_top_artists_with(
           .history_track_hits(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri: None,
-        parts: None,
       })
       .collect(),
     limit,
   )
 }
 
-#[cfg(any(test, feature = "dj-core"))]
+#[cfg(test)]
 pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
   aggregate_top_albums_with(listens, limit, &crate::core::i18n::EN)
 }
@@ -2460,7 +2070,6 @@ pub fn aggregate_top_albums_with(
           .history_plays(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri: None,
-        parts: None,
       })
       .collect(),
     limit,
@@ -2499,7 +2108,6 @@ fn aggregate_days_in_with<Tz: TimeZone>(
       detail: format_duration_with(listened_ms, strings),
       value: listened_ms,
       uri: None,
-      parts: None,
     })
     .collect::<Vec<_>>()
     .into_iter()
@@ -2523,7 +2131,6 @@ fn aggregate_hours_with(
       detail: format_duration_with(*totals.get(&hour).unwrap_or(&0), strings),
       value: *totals.get(&hour).unwrap_or(&0),
       uri: None,
-      parts: None,
     })
     .collect()
 }
@@ -2710,232 +2317,6 @@ fn js_string(input: &str) -> String {
     .replace("</", "<\\/")
 }
 
-fn last_synced_file_path() -> Result<PathBuf> {
-  history_state_file_path(LAST_SYNCED_FILE_NAME)
-}
-
-#[derive(Clone, Copy, Debug)]
-enum SyncCursor {
-  LegacyTimestamp(DateTime<Utc>),
-  Offset(u64),
-}
-
-fn read_sync_cursor(path: &Path) -> Result<SyncCursor> {
-  let epoch = Utc
-    .timestamp_opt(0, 0)
-    .single()
-    .ok_or_else(|| anyhow!("failed to construct Unix epoch timestamp"))?;
-
-  let Ok(content) = fs::read_to_string(path) else {
-    return Ok(SyncCursor::LegacyTimestamp(epoch));
-  };
-  let content = content.trim();
-
-  if let Some(offset) = content
-    .strip_prefix("offset:")
-    .and_then(|offset| offset.parse::<u64>().ok())
-  {
-    return Ok(SyncCursor::Offset(offset));
-  }
-
-  Ok(SyncCursor::LegacyTimestamp(
-    DateTime::parse_from_rfc3339(content)
-      .map(|timestamp| timestamp.with_timezone(&Utc))
-      .unwrap_or(epoch),
-  ))
-}
-
-/// Load complete JSONL records after the append offset. A legacy timestamp
-/// cursor reads the whole file once, then migrates to the returned offset.
-///
-/// The returned offset stops at the last newline observed. This matters when a
-/// concurrent append has written part, but not all, of its JSON record.
-fn load_sync_batch(path: &Path, cursor: SyncCursor) -> Result<(Vec<ListenRecord>, u64)> {
-  let mut file = match fs::File::open(path) {
-    Ok(file) => file,
-    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
-    Err(error) => return Err(error.into()),
-  };
-  let file_len = file.metadata()?.len();
-  let start_offset = match cursor {
-    SyncCursor::Offset(offset) if offset <= file_len => offset,
-    SyncCursor::Offset(_) | SyncCursor::LegacyTimestamp(_) => 0,
-  };
-  file.seek(SeekFrom::Start(start_offset))?;
-
-  let mut bytes = Vec::new();
-  file.read_to_end(&mut bytes)?;
-  let complete_len = bytes
-    .iter()
-    .rposition(|byte| *byte == b'\n')
-    .map_or(0, |index| index + 1);
-  let next_offset = start_offset + complete_len as u64;
-
-  let mut listens = Vec::new();
-  for line in BufReader::new(&bytes[..complete_len]).lines() {
-    let line = line?;
-    if line.trim().is_empty() {
-      continue;
-    }
-
-    match serde_json::from_str::<ListenRecord>(&line) {
-      Ok(record) => listens.push(record),
-      Err(error) => log::warn!("skipping malformed history line: {}", error),
-    }
-  }
-
-  if let SyncCursor::LegacyTimestamp(last_synced_at) = cursor {
-    listens.retain(|record| record.ended_at > last_synced_at);
-  }
-
-  Ok((listens, next_offset))
-}
-
-fn write_sync_offset(path: &Path, offset: u64) -> Result<()> {
-  if let Some(parent) = path.parent() {
-    fs::create_dir_all(parent)?;
-  }
-  fs::write(path, format!("offset:{offset}"))?;
-  Ok(())
-}
-
-/// Resolve a sync endpoint, honoring the `SPOTATUI_SYNC_BASE_URL` override
-/// (useful for pointing the client at a local backend during development).
-fn resolve_sync_url(path: &str) -> String {
-  let base = match std::env::var(SYNC_BASE_URL_ENV_KEY) {
-    Ok(base) if !base.trim().is_empty() => base.trim().trim_end_matches('/').to_string(),
-    _ => SYNC_BASE_URL.to_string(),
-  };
-  format!("{}{}", base, path)
-}
-
-/// Post the current now-playing state to the cloud dashboard / public widget.
-/// Uses a shared HTTP client to reuse the connection pool across frequent calls.
-async fn sync_now_playing_to_cloud(
-  client: &reqwest::Client,
-  sync_token: &str,
-  payload: &NowPlayingPayload,
-) -> Result<()> {
-  let response = client
-    .post(resolve_sync_url(NOW_PLAYING_SYNC_PATH))
-    .header("Authorization", format!("Bearer {}", sync_token))
-    .json(payload)
-    .send()
-    .await?;
-
-  if !response.status().is_success() {
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    return Err(anyhow!("now-playing sync failed ({}): {}", status, body));
-  }
-  Ok(())
-}
-
-/// Clear the now-playing status (playback stopped or the TUI is exiting).
-async fn clear_now_playing_with_client(client: &reqwest::Client, sync_token: &str) -> Result<()> {
-  let response = client
-    .delete(resolve_sync_url(NOW_PLAYING_SYNC_PATH))
-    .header("Authorization", format!("Bearer {}", sync_token))
-    .send()
-    .await?;
-
-  if !response.status().is_success() {
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    return Err(anyhow!("clear now-playing failed ({}): {}", status, body));
-  }
-  Ok(())
-}
-
-/// Clear the now-playing status when the TUI exits.
-pub async fn clear_now_playing_from_cloud(sync_token: &str) -> Result<()> {
-  clear_now_playing_with_client(
-    crate::infra::network::requests::shared_http_client(),
-    sync_token,
-  )
-  .await
-}
-
-/// Sync new listen records to the cloud using the given HTTP client.
-async fn sync_history_to_cloud_with_client(
-  client: &reqwest::Client,
-  sync_token: &str,
-) -> Result<()> {
-  let path = last_synced_file_path()?;
-
-  // Reading the cursor and parsing the whole listens file is blocking IO on an
-  // ever-growing file; keep it off the runtime worker (matches the streak-cache
-  // load in `spawn_history_collector`).
-  let cursor_path = path.clone();
-  let listens_path = listens_file_path()?;
-  let (new_listens, next_offset) = tokio::task::spawn_blocking(move || {
-    let cursor = read_sync_cursor(&cursor_path)?;
-    load_sync_batch(&listens_path, cursor)
-  })
-  .await??;
-
-  if new_listens.is_empty() {
-    tokio::task::spawn_blocking(move || write_sync_offset(&path, next_offset)).await??;
-    log::info!("no new listening history records to sync");
-    return Ok(());
-  }
-
-  let upload: Vec<ListenRecord> = new_listens.into_iter().map(without_local_paths).collect();
-  let response = client
-    .post(resolve_sync_url(CLOUD_SYNC_PATH))
-    .header("Authorization", format!("Bearer {}", sync_token))
-    .json(&upload)
-    .send()
-    .await?;
-
-  if response.status().is_success() {
-    // Advance by append position rather than timestamp. Any record appended
-    // during this request remains beyond `next_offset` and is picked up by the
-    // next sync even if its clock timestamp is older than this batch.
-    tokio::task::spawn_blocking(move || write_sync_offset(&path, next_offset)).await??;
-    log::info!(
-      "successfully synchronized listening history to cloud ({} tracks)",
-      upload.len()
-    );
-  } else {
-    let status = response.status();
-    let err_body = response.text().await.unwrap_or_default();
-    log::warn!(
-      "failed to synchronize history: {} (status {})",
-      err_body,
-      status
-    );
-    return Err(anyhow!("Sync failed: {}", err_body));
-  }
-
-  Ok(())
-}
-
-/// `record` without a `file:` URI, which is an absolute path with the user name in it.
-fn without_local_paths(mut record: ListenRecord) -> ListenRecord {
-  use crate::core::queue::{queue_item_source, QueueItemSource};
-  let local = |uri: &Option<String>| {
-    uri
-      .as_deref()
-      .is_some_and(|uri| queue_item_source(uri) == QueueItemSource::LocalFile)
-  };
-  if local(&record.item_uri) {
-    record.item_uri = None;
-  }
-  if local(&record.context_uri) {
-    record.context_uri = None;
-  }
-  record
-}
-
-pub async fn sync_history_to_cloud(sync_token: &str) -> Result<()> {
-  sync_history_to_cloud_with_client(
-    crate::infra::network::requests::shared_http_client(),
-    sync_token,
-  )
-  .await
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -2959,65 +2340,6 @@ mod tests {
       source: HistoryPlaybackSource::NativeContext,
       image_url: None,
     }
-  }
-
-  #[test]
-  fn sidebar_playlist_order_uses_latest_listen_context_and_keeps_unplayed_rootlist_tail() {
-    use crate::core::sort::{sort_playlist_slots, SidebarPlaylistOrder};
-    use crate::core::test_helpers::playlist_info;
-    let record = |day, context: Option<&str>| ListenRecord {
-      context_uri: context.map(str::to_string),
-      ..record_at(day, 1_000, false)
-    };
-    // File order and track identity are irrelevant; only playlist contexts count.
-    let listens = vec![
-      record(23, Some("spotify:playlist:p2")),
-      record(21, Some("spotify:playlist:p1")),
-      record(20, Some("spotify:playlist:p2")),
-      record(29, Some("spotify:album:p0")),
-      record(30, None),
-    ];
-    let latest = latest_playlist_listens(&listens);
-    assert_eq!(latest.len(), 2);
-    assert_eq!(latest["spotify:playlist:p2"], listens[0].ended_at);
-    let playlists: Vec<_> = (0..5)
-      .map(|i| playlist_info(&format!("p{i}"), &format!("P{i}"), "me", false))
-      .collect();
-    let mut rootlist: Vec<_> = playlists.iter().collect();
-    sort_playlist_slots(
-      &mut rootlist,
-      SidebarPlaylistOrder::RecentlyPlayed,
-      &latest,
-      |playlist| Some(*playlist),
-    );
-    assert_eq!(
-      rootlist.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-      ["P2", "P1", "P0", "P3", "P4"]
-    );
-
-    let mut app = App::default();
-    app.set_playlist_last_listens(latest);
-    let newest = record(28, Some("spotify:playlist:p1"));
-    app.record_playlist_listen(&newest);
-    // An older incremental record never replaces the latest timestamp.
-    app.record_playlist_listen(&listens[1]);
-    app.record_playlist_listen(&listens[3]);
-    // Exercise the collector-to-display path as well as the pure function.
-    *app.all_playlists_mut() = playlists;
-    *app.playlist_folder_items_mut() = (0..5)
-      .map(|index| crate::core::app::PlaylistFolderItem::Playlist {
-        index,
-        current_id: 0,
-      })
-      .collect();
-    app.apply(crate::core::action::Action::Sort {
-      context: crate::core::sort::SortContext::SidebarPlaylists,
-      field: crate::core::sort::SortField::RecentlyPlayed,
-    });
-    assert!(matches!(
-      app.get_playlist_display_item_at(1),
-      Some(crate::core::app::PlaylistFolderItem::Playlist { index: 1, .. })
-    ));
   }
 
   #[test]
@@ -3084,20 +2406,6 @@ mod tests {
       .into_iter()
       .map(|entry| entry.display)
       .collect()
-  }
-
-  #[test]
-  fn top_artists_keeps_a_spotify_band_name_with_an_ampersand_whole() {
-    let mut r = record_at(20, 100_000, true);
-    r.artists = vec!["Mumford & Sons".into()];
-    assert_eq!(top_artist_names(r), ["Mumford & Sons"]);
-  }
-
-  #[test]
-  fn top_artists_keeps_a_spotify_artist_name_with_a_comma_whole() {
-    let mut r = record_at(20, 100_000, true);
-    r.artists = vec!["Tyler, The Creator".into()];
-    assert_eq!(top_artist_names(r), ["Tyler, The Creator"]);
   }
 
   #[test]
@@ -3236,22 +2544,6 @@ mod tests {
     assert_eq!(titles(&filtered), ["Track 1"]);
   }
 
-  #[test]
-  fn cloud_sync_uses_public_spotatui_domain() {
-    assert_eq!(
-      resolve_sync_url(CLOUD_SYNC_PATH),
-      "https://spotatui.com/api/sync"
-    );
-  }
-
-  #[test]
-  fn now_playing_uses_public_spotatui_domain() {
-    assert_eq!(
-      resolve_sync_url(NOW_PLAYING_SYNC_PATH),
-      "https://spotatui.com/api/sync/now-playing"
-    );
-  }
-
   fn snapshot(title: &str, is_playing: bool) -> PlaybackSnapshot {
     PlaybackSnapshot {
       metadata: crate::infra::media_metadata::PlaybackMetadata {
@@ -3348,161 +2640,6 @@ mod tests {
     assert!(!placeholder.resolves_to(&other));
   }
 
-  #[test]
-  fn now_playing_payload_serializes_contract_fields() {
-    let payload = NowPlayingPayload::from_snapshot(&snapshot("Song", true), 1_700_000_000_000);
-    let value = serde_json::to_value(&payload).unwrap();
-    let object = value.as_object().unwrap();
-    let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
-    keys.sort_unstable();
-    assert_eq!(
-      keys,
-      [
-        "album",
-        "artists",
-        "duration_ms",
-        "image_url",
-        "is_live",
-        "is_playing",
-        "progress_at_ms",
-        "progress_ms",
-        "title",
-      ]
-    );
-    assert_eq!(object["title"], "Song");
-    assert_eq!(object["artists"], serde_json::json!(["Artist"]));
-    assert_eq!(object["progress_at_ms"], 1_700_000_000_000_i64);
-  }
-
-  #[test]
-  fn now_playing_payload_omits_missing_image_url() {
-    let mut snap = snapshot("Song", true);
-    snap.metadata.image_url = None;
-    let value = serde_json::to_value(NowPlayingPayload::from_snapshot(&snap, 0)).unwrap();
-    assert!(value.as_object().unwrap().get("image_url").is_none());
-  }
-
-  #[test]
-  fn now_playing_payload_maps_live_radio_snapshot() {
-    let mut snap = snapshot("SomaFM Groove Salad", true);
-    snap.is_live = true;
-    snap.metadata.duration_ms = 0;
-    snap.metadata.image_url = None;
-    let payload = NowPlayingPayload::from_snapshot(&snap, 5);
-    assert!(payload.is_live);
-    assert_eq!(payload.duration_ms, 0);
-    assert!(payload.image_url.is_none());
-  }
-
-  #[test]
-  fn append_cursor_keeps_out_of_order_record_added_during_sync() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join(LISTENS_FILE_NAME);
-    let first = record_at(21, 120_000, true);
-    append_records_for_test(&path, std::slice::from_ref(&first));
-
-    // This snapshot represents the request body already in flight.
-    let epoch = Utc.timestamp_opt(0, 0).single().unwrap();
-    let (in_flight_batch, synced_offset) =
-      load_sync_batch(&path, SyncCursor::LegacyTimestamp(epoch)).unwrap();
-    assert_eq!(in_flight_batch, vec![first]);
-
-    // A second instance appends an older timestamp before that request
-    // succeeds and persists `synced_offset`.
-    let out_of_order = record_at(20, 90_000, true);
-    append_records_for_test(&path, std::slice::from_ref(&out_of_order));
-
-    let (next_batch, _) = load_sync_batch(&path, SyncCursor::Offset(synced_offset)).unwrap();
-    assert_eq!(next_batch, vec![out_of_order]);
-  }
-
-  fn append_records_for_test(path: &Path, records: &[ListenRecord]) {
-    let mut file = OpenOptions::new()
-      .create(true)
-      .append(true)
-      .open(path)
-      .unwrap();
-    for record in records {
-      serde_json::to_writer(&mut file, record).unwrap();
-      writeln!(file).unwrap();
-    }
-  }
-
-  #[test]
-  fn tracker_pushes_on_track_change_and_not_within_heartbeat() {
-    let mut tracker = NowPlayingTracker::default();
-    let t0 = Instant::now();
-    assert!(matches!(
-      tracker.observe(Some(&snapshot("One", true)), t0),
-      Some(NowPlayingAction::Push(_))
-    ));
-    // Same track one second later, progress advancing in step: no push.
-    let mut later = snapshot("One", true);
-    later.progress_ms = 11_000;
-    assert!(tracker
-      .observe(Some(&later), t0 + std::time::Duration::from_secs(1))
-      .is_none());
-    assert!(matches!(
-      tracker.observe(
-        Some(&snapshot("Two", true)),
-        t0 + std::time::Duration::from_secs(2)
-      ),
-      Some(NowPlayingAction::Push(_))
-    ));
-  }
-
-  #[test]
-  fn tracker_pushes_on_play_pause_flip() {
-    let mut tracker = NowPlayingTracker::default();
-    let t0 = Instant::now();
-    tracker.observe(Some(&snapshot("One", true)), t0);
-    let action = tracker.observe(
-      Some(&snapshot("One", false)),
-      t0 + std::time::Duration::from_secs(1),
-    );
-    assert!(matches!(
-      action,
-      Some(NowPlayingAction::Push(ref payload)) if !payload.is_playing
-    ));
-  }
-
-  #[test]
-  fn tracker_heartbeats_even_when_paused() {
-    let mut tracker = NowPlayingTracker::default();
-    let t0 = Instant::now();
-    tracker.observe(Some(&snapshot("One", false)), t0);
-    let action = tracker.observe(
-      Some(&snapshot("One", false)),
-      t0 + std::time::Duration::from_secs(NOW_PLAYING_HEARTBEAT_SECS + 1),
-    );
-    assert!(matches!(action, Some(NowPlayingAction::Push(_))));
-  }
-
-  #[test]
-  fn tracker_pushes_on_seek_discontinuity() {
-    let mut tracker = NowPlayingTracker::default();
-    let t0 = Instant::now();
-    tracker.observe(Some(&snapshot("One", true)), t0);
-    let mut seeked = snapshot("One", true);
-    seeked.progress_ms = 120_000;
-    let action = tracker.observe(Some(&seeked), t0 + std::time::Duration::from_secs(2));
-    assert!(matches!(action, Some(NowPlayingAction::Push(_))));
-  }
-
-  #[test]
-  fn tracker_clears_once_when_playback_stops() {
-    let mut tracker = NowPlayingTracker::default();
-    let t0 = Instant::now();
-    tracker.observe(Some(&snapshot("One", true)), t0);
-    assert!(matches!(
-      tracker.observe(None, t0 + std::time::Duration::from_secs(1)),
-      Some(NowPlayingAction::Clear)
-    ));
-    assert!(tracker
-      .observe(None, t0 + std::time::Duration::from_secs(2))
-      .is_none());
-  }
-
   fn day(year: i32, month: u32, day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, day).unwrap()
   }
@@ -3590,125 +2727,6 @@ mod tests {
     assert_eq!(stats.top_tracks.len(), 2);
   }
 
-  fn ranked(names: &[(&str, u64)]) -> Vec<RankedEntry> {
-    names
-      .iter()
-      .map(|(name, value)| RankedEntry {
-        display: name.to_string(),
-        detail: String::new(),
-        value: *value,
-        uri: None,
-        parts: None,
-      })
-      .collect()
-  }
-
-  fn listen_days_ago(days: i64, title: &str, qualified: bool) -> ListenRecord {
-    let mut record = record_at(1, 60_000, qualified);
-    record.ended_at = Utc::now() - Duration::days(days);
-    record.title = title.to_string();
-    record.item_id = Some(title.to_string());
-    record
-  }
-
-  #[test]
-  fn the_biggest_climber_into_the_period_top_ten_names_its_all_time_rank() {
-    let all_time = ranked(&[("A", 90), ("B", 80), ("C", 70), ("D", 60)]);
-    let period = ranked(&[("D", 30), ("A", 20), ("B", 10), ("C", 5)]);
-
-    let movements = artist_movements(&period, &all_time);
-
-    assert_eq!(
-      movements[0],
-      ArtistMovement {
-        name: "D".to_string(),
-        kind: MovementKind::Climb,
-        from: Some(4),
-        to: Some(1),
-      }
-    );
-  }
-
-  #[test]
-  fn an_all_time_artist_the_period_never_played_is_the_faller() {
-    let all_time = ranked(&[("A", 90), ("B", 80), ("C", 70)]);
-    let period = ranked(&[("A", 20), ("C", 10)]);
-
-    let fall = artist_movements(&period, &all_time)
-      .into_iter()
-      .find(|movement| movement.kind == MovementKind::Fall)
-      .unwrap();
-
-    assert_eq!(
-      (fall.name.as_str(), fall.from, fall.to),
-      ("B", Some(2), None)
-    );
-  }
-
-  #[test]
-  fn an_artist_whose_listens_all_fall_in_the_period_is_new() {
-    let all_time = ranked(&[("A", 90), ("N", 30)]);
-    let period = ranked(&[("N", 30), ("A", 10)]);
-
-    assert_eq!(
-      artist_ranks(&period, &all_time),
-      [
-        ArtistRank {
-          all_time: Some(2),
-          new: true
-        },
-        ArtistRank {
-          all_time: Some(1),
-          new: false
-        },
-      ]
-    );
-    assert!(artist_movements(&period, &all_time)
-      .iter()
-      .any(|movement| movement.kind == MovementKind::New && movement.name == "N"));
-  }
-
-  #[test]
-  fn period_plays_and_the_week_count_only_qualified_listens() {
-    let listens = vec![
-      listen_days_ago(1, "Fresh", true),
-      listen_days_ago(1, "Skipped", false),
-      listen_days_ago(20, "Older", true),
-      listen_days_ago(400, "Ancient", true),
-    ];
-    let filtered = filter_listens_for_period(&listens, RecapPeriod::All);
-
-    let stats = build_stats_data_with(
-      &filtered,
-      &listens,
-      RecapPeriod::All,
-      &crate::core::i18n::EN,
-    );
-
-    let plays: Vec<_> = stats.period_plays.iter().map(|(_, plays)| *plays).collect();
-    assert_eq!(plays[0], 1);
-    assert_eq!(plays[1], 2);
-    assert_eq!(plays[4], 3);
-    assert_eq!(stats.week_tracks.len(), 1);
-    assert!(stats.movements.is_empty());
-  }
-
-  #[test]
-  fn a_local_file_path_stays_out_of_the_cloud_upload() {
-    let mut record = record_at(3, 60_000, true);
-    record.item_uri = Some("file:///home/alice/Music/a.flac".to_string());
-    record.context_uri = Some("file:///home/alice/Music".to_string());
-    let line = serde_json::to_string(&without_local_paths(record)).unwrap();
-    assert!(!line.contains("alice"), "{line}");
-
-    let mut record = record_at(3, 60_000, true);
-    record.item_uri = Some("spotify:track:abc".to_string());
-    assert_eq!(
-      without_local_paths(record).item_uri.as_deref(),
-      Some("spotify:track:abc")
-    );
-  }
-
   #[test]
   fn the_cover_url_stays_out_of_the_listens_file() {
     let mut record = record_at(3, 60_000, true);
@@ -3718,17 +2736,6 @@ mod tests {
 
     assert!(!line.contains("image_url"));
     assert_eq!(session_play(&record).image_url, record.image_url);
-  }
-
-  #[test]
-  fn top_tracks_carry_the_title_and_the_artists_apart() {
-    let tracks = aggregate_top_tracks(&[record_at(3, 60_000, true)], 5);
-
-    assert_eq!(
-      tracks[0].parts,
-      Some(("Track 3".to_string(), "Artist".to_string()))
-    );
-    assert_eq!(tracks[0].display, "Track 3 - Artist");
   }
 
   #[test]
@@ -3858,7 +2865,7 @@ mod tests {
   #[tokio::test]
   async fn automatic_recap_exports_with_the_current_language_before_offering_the_file() {
     use crate::core::i18n::Language;
-    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+    for language in [Language::En, Language::PtBr, Language::Fr] {
       let dir = tempfile::tempdir().unwrap();
       let output = dir.path().join("recap.html");
       let stamp = dir.path().join("last-recap");
@@ -3884,7 +2891,7 @@ mod tests {
       )
       .await;
       let html = fs::read_to_string(&output).unwrap();
-      assert!(html.contains(&format!("<p>{}</p>", strings.recap.title)));
+      assert!(html.contains(&format!("<p>{}</p>", escape_html(strings.recap.title))));
       assert!(stamp.exists());
       assert!(app.lock().await.recap_prompt().is_some());
     }
@@ -3907,27 +2914,27 @@ mod tests {
 
   #[test]
   fn ranked_details_localize_counts_without_rewriting_titles_or_cli_output() {
-    use crate::core::i18n::{ZH_HANS, ZH_HANT};
+    use crate::core::i18n::{FR, PT_BR};
     let mut record = record_at(7, 1_860_000, true);
     record.title = "{count}".into();
     let records = [record.clone(), record];
     let english = aggregate_top_tracks(&records, 10);
     assert_eq!(english[0].detail, "2 plays · 1h 2m");
-    for strings in [&ZH_HANS, &ZH_HANT] {
+    for strings in [&PT_BR, &FR] {
       let tracks = aggregate_top_tracks_with(&records, 10, strings);
       assert_eq!(tracks[0].display, "{count} - Artist");
       assert_eq!(tracks[0].uri, english[0].uri);
       assert_eq!(tracks[0].value, 3_720_000);
     }
     assert_eq!(
-      aggregate_top_tracks_with(&records, 10, &ZH_HANS)[0].detail,
-      "2 次播放 · 1 小时 2 分钟"
+      aggregate_top_tracks_with(&records, 10, &PT_BR)[0].detail,
+      "2 reproduções · 1h 2min"
     );
     assert_eq!(
-      aggregate_top_artists_with(&records, 10, &ZH_HANT)[0].detail,
-      "曲目播放 2 次 · 1 小時 2 分鐘"
+      aggregate_top_artists_with(&records, 10, &FR)[0].detail,
+      "2 titres · 1 h 2 min"
     );
     assert_eq!(period_label(RecapPeriod::Year), "This Year");
-    assert_eq!(period_label_with(RecapPeriod::Year, &ZH_HANT), "今年");
+    assert_eq!(period_label_with(RecapPeriod::Year, &FR), "Cette année");
   }
 }

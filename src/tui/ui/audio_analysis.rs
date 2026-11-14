@@ -1,4 +1,4 @@
-use crate::core::app::{section_at, ActiveBlock, AnalysisState, App, PITCH_NAMES};
+use crate::core::app::{ActiveBlock, App, PITCH_NAMES};
 use crate::core::pane::Pane;
 use crate::core::user_config::{normalize_tick_rate_milliseconds, VisualizerStyle};
 use crate::tui::layout::{main_layout_margin, visible_pane_area};
@@ -13,6 +13,7 @@ use ratatui::{
 };
 use std::time::Instant;
 
+use crate::core::plugin_api::RepeatState;
 use tui_bar_graph::{BarGraph, BarStyle, ColorMode};
 
 /// The analysis screen's two rows: the info strip and the visualizer block.
@@ -34,7 +35,6 @@ fn visualizer_block<'a>() -> Block<'a> {
 /// This and `visualizer_bar_count` are only called behind the audio-viz
 /// feature gates; slim builds still compile (and test) them. `None` when the
 /// visualizer shows neither full screen nor in a pane.
-#[allow(dead_code)]
 pub fn visualizer_inner_width(app: &App) -> Option<u16> {
   let (root, margin) = if app.get_current_route().active_block == ActiveBlock::Analysis {
     (
@@ -228,7 +228,6 @@ fn retro_style(style: VisualizerStyle) -> Option<retro::Retro> {
 /// The Head Unit readout, from the source-agnostic playback snapshot so it
 /// reads the same for every source.
 fn head_unit_view(app: &App) -> head_unit::HeadUnitView {
-  use rspotify::model::RepeatState;
   match crate::infra::media_metadata::current_playback_snapshot(app) {
     Some(snapshot) => head_unit::HeadUnitView {
       title: Some(snapshot.metadata.title),
@@ -258,41 +257,9 @@ fn draw_pitch(
     app.strings().screens.visualizer_style_hint,
     Style::default().fg(theme.hint.into()),
   );
-  let AnalysisState::Ready(_, analysis) = app.audio_analysis() else {
-    let message = match app.audio_analysis() {
-      AnalysisState::Unavailable(_) => app.strings().screens.pitch_unavailable,
-      AnalysisState::Failed(..) => app.strings().screens.pitch_failed,
-      _ => app.strings().screens.pitch_loading,
-    };
-    f.render_widget(
-      Paragraph::new(Line::from(hint)).block(info_block),
-      info_area,
-    );
-    f.render_widget(
-      Paragraph::new(message).block(chart_block).style(text),
-      chart_area,
-    );
-    return;
-  };
 
-  let position = app.analysis_position_ms(Instant::now()).unwrap_or(0);
-  let mut info = Vec::new();
-  if let Some(section) = section_at(analysis, position) {
-    info.push(Span::styled(
-      format!(
-        "{:.0} BPM ({:.0}%)  {} ({:.0}%)  {}/4 ({:.0}%)",
-        section.tempo,
-        section.tempo_confidence * 100.0,
-        localized_key_label(app, section.key, section.minor),
-        section.key_confidence * 100.0,
-        section.time_signature,
-        section.time_signature_confidence * 100.0
-      ),
-      text,
-    ));
-    info.push(Span::raw("  |  "));
-  }
-  info.push(hint);
+  let _position = app.analysis_position_ms(Instant::now()).unwrap_or(0);
+  let info = vec![hint];
   f.render_widget(
     Paragraph::new(Line::from(info)).block(info_block),
     info_area,
@@ -314,18 +281,6 @@ fn draw_pitch(
     Paragraph::new(pitch_labels(labels_area.width, count)).style(text),
     labels_area,
   );
-}
-
-/// The note names under the pitch bars, each under the bar that carries its pitch class.
-fn localized_key_label(app: &App, key: Option<u8>, minor: Option<bool>) -> String {
-  let Some(name) = key.and_then(|key| PITCH_NAMES.get(usize::from(key))) else {
-    return "?".to_string();
-  };
-  match minor {
-    Some(true) => app.strings().screens.minor_key(name),
-    Some(false) => app.strings().screens.major_key(name),
-    None => name.to_string(),
-  }
 }
 
 fn pitch_labels(width: u16, bars: usize) -> String {
@@ -435,7 +390,6 @@ fn cell_eighths(total_eighths: u32, row: u16) -> u32 {
 /// Cap on the cava style's bar count: the classic cava look at a normal font.
 /// Past this the renderer widens bars to fill the terminal, so dense fonts get
 /// chunky columns instead of one pencil bar per 3 columns.
-#[allow(dead_code)]
 const MAX_CAVA_BARS: usize = 40;
 
 /// cava's own bar geometry, 2 columns of bar plus a 1-column gap. It is the
@@ -447,7 +401,6 @@ const CAVA_BAR_FOOTPRINT: u16 = 3;
 /// Each style has its own geometry; the analyzer clamps counts its sample rate
 /// cannot support, and renderers draw from `bands.len()`, so a stale count
 /// during a resize race only mis-sizes one frame.
-#[allow(dead_code)]
 pub fn visualizer_bar_count(style: VisualizerStyle, inner_width: u16) -> usize {
   let inner_width = usize::from(inner_width);
   match style {
@@ -622,65 +575,6 @@ mod tests {
     );
   }
 
-  fn screen_text(app: &App) -> String {
-    use ratatui::{backend::TestBackend, Terminal};
-
-    let mut terminal = Terminal::new(TestBackend::new(140, 30)).unwrap();
-    terminal.draw(|f| draw(f, app)).unwrap();
-    let buffer = terminal.backend().buffer();
-    (0..30)
-      .flat_map(|y| (0..140).map(move |x| (x, y)))
-      .filter_map(|(x, y)| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
-      .collect()
-  }
-
-  #[test]
-  fn pitch_view_names_tempo_key_and_time_signature() {
-    use crate::core::app::{AnalysisFetch, AnalysisSection, AnalysisSegment, TrackAnalysis};
-
-    let mut app = App::default();
-    app.get_audio_analysis();
-    app.sync_audio_analysis(Some("track1"));
-    app.set_audio_analysis(
-      "track1",
-      AnalysisFetch::Found(TrackAnalysis {
-        sections: vec![AnalysisSection {
-          start_ms: 0,
-          tempo: 123.0,
-          tempo_confidence: 0.82,
-          key: Some(6),
-          key_confidence: 0.64,
-          minor: Some(true),
-          time_signature: 4,
-          time_signature_confidence: 1.0,
-        }],
-        segments: vec![AnalysisSegment {
-          start_ms: 0,
-          loudness_start: 0.0,
-          loudness_max: 0.0,
-          loudness_max_ms: 0,
-          pitches: [1.0; 12],
-        }],
-      }),
-    );
-
-    let content = screen_text(&app);
-
-    for expected in [
-      "Audio Visualization (Spotify Pitch)",
-      "Pitches |",
-      "123 BPM (82%)",
-      "F# minor (64%)",
-      "4/4 (100%)",
-      "C#",
-    ] {
-      assert!(
-        content.contains(expected),
-        "missing {expected:?}: {content}"
-      );
-    }
-  }
-
   #[test]
   fn pitch_labels_run_from_c_under_the_first_bar_to_b_under_the_last() {
     let line = pitch_labels(120, visualizer_bar_count(VisualizerStyle::Cava, 120));
@@ -690,18 +584,5 @@ mod tests {
     assert!(line.trim_end().ends_with('B'), "{line:?}");
     let names: Vec<&str> = line.split_whitespace().collect();
     assert_eq!(names, PITCH_NAMES);
-  }
-
-  #[test]
-  fn pitch_view_says_when_spotify_has_no_analysis() {
-    let mut app = App::default();
-    app.get_audio_analysis();
-    app.sync_audio_analysis(Some("track1"));
-    app.set_audio_analysis("track1", crate::core::app::AnalysisFetch::Missing);
-
-    let content = screen_text(&app);
-
-    assert!(content.contains("Spotify has no pitch analysis for this track"));
-    assert!(!content.contains("No audio capture available"));
   }
 }

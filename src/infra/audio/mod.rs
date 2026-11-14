@@ -8,40 +8,17 @@
 
 // Shared decode/output engine. Gated on `audio-decode`, which `local-files`,
 // `subsonic` and `qobuz` pull in, so the player is reachable from each source.
-#[cfg(feature = "audio-decode")]
 mod player;
-#[cfg(feature = "audio-decode")]
 pub use player::LocalPlayer;
-#[cfg(feature = "qobuz")]
 pub use player::PreparedStream;
-#[cfg(feature = "audio-decode-queue")]
 pub use player::Reopen;
 
 #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
 mod analyzer;
 
-// The GUI player bar's spectrum.
-#[cfg(all(
-  feature = "gui",
-  any(feature = "audio-viz", feature = "audio-viz-cpal")
-))]
-mod winamp;
-#[cfg(all(
-  feature = "gui",
-  any(feature = "audio-viz", feature = "audio-viz-cpal")
-))]
-pub use winamp::{scope, WinampSpectrum};
-
 /// The gain for a volume percent: librespot's `VolumeCtrl::Log` mapping over
 /// a 60 dB range (`1000^(p/100 - 1)`), which the native player uses by default.
 /// 0% is silence, 100% is the file level, and 80% is about -12 dB.
-#[cfg(any(
-  feature = "audio-decode",
-  all(
-    feature = "gui",
-    any(feature = "audio-viz", feature = "audio-viz-cpal")
-  )
-))]
 pub fn volume_gain(percent: u8) -> f32 {
   const DB_RATIO: f64 = 1000.0;
   match percent {
@@ -63,7 +40,6 @@ mod cavacore;
 mod pipewire_capture;
 
 #[cfg(feature = "audio-viz-cpal")]
-#[allow(dead_code)]
 mod capture;
 
 // On Linux with both backends, PipeWire falls back to cpal when no PipeWire
@@ -88,9 +64,6 @@ pub use pipewire_capture::PipeWireCapture as AudioCaptureManager;
 ))]
 pub use capture::AudioCaptureManager;
 
-// Re-export SpectrumData
-#[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-pub use analyzer::RecentAudio;
 #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
 #[allow(unused_imports)]
 pub use analyzer::SpectrumData;
@@ -101,9 +74,9 @@ pub use analyzer::SpectrumData;
   feature = "audio-viz-cpal"
 )))]
 #[derive(Clone, Default)]
-#[allow(dead_code)]
 pub struct SpectrumData {
   pub bands: Vec<f32>,
+  #[cfg_attr(not(feature = "tui"), allow(dead_code))]
   pub wave: Vec<f32>,
 }
 
@@ -111,14 +84,14 @@ pub struct SpectrumData {
   all(feature = "audio-viz", target_os = "linux"),
   feature = "audio-viz-cpal"
 )))]
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub struct AudioCaptureManager;
 
 #[cfg(not(any(
   all(feature = "audio-viz", target_os = "linux"),
   feature = "audio-viz-cpal"
 )))]
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
 impl AudioCaptureManager {
   pub fn new(_display_bars: usize) -> Option<Self> {
     None
@@ -133,16 +106,7 @@ impl AudioCaptureManager {
   }
 }
 
-#[cfg(all(
-  test,
-  any(
-    feature = "audio-decode",
-    all(
-      feature = "gui",
-      any(feature = "audio-viz", feature = "audio-viz-cpal")
-    )
-  )
-))]
+#[cfg(test)]
 mod tests {
   use super::*;
 

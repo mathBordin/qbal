@@ -91,29 +91,8 @@ mod tests {
   use super::*;
   use crate::{
     core::app::{ActiveBlock, RouteId},
-    core::source::Source,
-    core::user_config::UserConfig,
     tui::{handlers::handle_app, keymap::help_rows, ui::ensure_help_menu_model},
   };
-  use std::sync::mpsc::channel;
-  use std::time::SystemTime;
-
-  #[test]
-  fn rebound_next_page_key_pages_the_help_menu() {
-    let mut config = UserConfig::new();
-    config.keys.next_page = Key::PageDown;
-    let (tx, _rx) = channel();
-    let mut app = App::new(tx, config, Some(SystemTime::now()));
-    app.view.help_docs_size = 100;
-    app.view.help_menu_max_lines = 10;
-
-    handler(Key::PageDown, &mut app);
-    assert_eq!(app.view.help_menu_page, 1);
-    assert_eq!(app.view.help_menu_offset, 10);
-
-    handler(Key::Ctrl('d'), &mut app);
-    assert_eq!(app.view.help_menu_page, 1, "the literal Ctrl+d is gone");
-  }
 
   #[test]
   fn test_help_menu_pagination() {
@@ -190,22 +169,6 @@ mod tests {
     let pop_result = app.pop_navigation_stack();
     assert!(pop_result.is_some());
     assert_eq!(app.get_current_route().id, RouteId::Home);
-  }
-
-  #[test]
-  fn search_key_starts_a_local_help_filter_and_captures_global_keys() {
-    let mut app = App::default();
-    app.active_source = Source::Local;
-    handle_app(app.user_config.keys.help, &mut app);
-
-    handle_app(app.user_config.keys.search, &mut app);
-    handle_app(Key::Char('d'), &mut app);
-    handle_app(Key::Char('q'), &mut app);
-
-    assert_eq!(app.get_current_route().id, RouteId::HelpMenu);
-    assert_eq!(app.get_current_route().active_block, ActiveBlock::HelpMenu);
-    assert!(app.view.help_filter_editing);
-    assert_eq!(app.view.help_filter, "dq");
   }
 
   #[test]

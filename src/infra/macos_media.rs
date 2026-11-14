@@ -272,7 +272,6 @@ impl MacMediaManager {
   }
 
   /// Update volume (0-100) - kept for API parity with MPRIS
-  #[allow(dead_code)]
   pub fn set_volume(&self, volume_percent: u8) {
     let _ = self
       .command_tx

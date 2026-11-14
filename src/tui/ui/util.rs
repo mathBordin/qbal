@@ -1,4 +1,4 @@
-use crate::core::app::{ActiveBlock, App, ArtistBlock, SearchResultBlock};
+use crate::core::app::{ActiveBlock, App, SearchResultBlock};
 use crate::core::user_config::Theme;
 use crate::tui::theme::ThemeExt;
 use ratatui::{
@@ -8,7 +8,6 @@ use ratatui::{
   widgets::{Block, BorderType, Borders, List, ListItem, ListState},
   Frame,
 };
-use rspotify::model::artist::SimplifiedArtist;
 use std::cell::Cell;
 use std::time::Duration;
 
@@ -23,23 +22,6 @@ pub fn get_search_results_highlight_state(
       && app.view.search_hovered_block == block_to_match,
   )
 }
-
-pub fn get_artist_highlight_state(app: &App, block_to_match: ArtistBlock) -> (bool, bool) {
-  let current_route = app.get_current_route();
-  if let Some(artist) = &app.artist {
-    let is_hovered = artist.artist_selected_block == block_to_match;
-    let is_selected = current_route.hovered_block == ActiveBlock::ArtistBlock
-      && artist.artist_hovered_block == block_to_match;
-    (is_hovered, is_selected)
-  } else {
-    (false, false)
-  }
-}
-
-/// Prefix for folder rows in the sidebar and the playlist picker. A text
-/// glyph with no emoji presentation, so it takes the theme's text color (an
-/// emoji such as 📁 is drawn as a fixed-color picture no theme can recolor).
-pub const FOLDER_ICON: &str = "\u{25B8}";
 
 /// Bold key hint for help bars, e.g. the "↑/↓" in "↑/↓ Navigate".
 pub fn hint_span(key: &'static str, theme: Theme) -> Span<'static> {
@@ -132,14 +114,6 @@ pub fn cover_art_status(app: &App) -> &'static str {
   }
 }
 
-pub fn create_artist_string(artists: &[SimplifiedArtist]) -> String {
-  artists
-    .iter()
-    .map(|artist| artist.name.to_string())
-    .collect::<Vec<String>>()
-    .join(", ")
-}
-
 /// Join a domain artist list's display names with `", "` for rendering.
 ///
 /// Source-agnostic counterpart to [`create_artist_string`] (which takes the
@@ -148,7 +122,6 @@ pub fn create_artist_string(artists: &[SimplifiedArtist]) -> String {
 /// renderer needs no rspotify types. Note `TrackInfo::artists` is already
 /// `Vec<String>` and can be `.join(", ")` directly.
 // Wired up by the per-screen migration slices, not yet by the binary.
-#[allow(dead_code)]
 pub fn join_artist_names(artists: &[crate::core::plugin_api::ArtistRef]) -> String {
   artists
     .iter()

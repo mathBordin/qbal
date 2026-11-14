@@ -176,10 +176,6 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect, scroll_offset: &
             }
             .to_string()
           }
-          SettingValue::Secret(_) => format!(
-            "{}▏",
-            "•".repeat(app.view.settings_edit_buffer.chars().count())
-          ),
           _ => {
             // Show edit buffer with cursor
             format!("{}▏", app.view.settings_edit_buffer)
@@ -225,7 +221,6 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect, scroll_offset: &
             "◆ {} ◆",
             app.strings().settings.option_label(&setting.id, v)
           ),
-          SettingValue::Secret(_) => setting.value.display(),
         }
       };
 
@@ -509,12 +504,12 @@ mod tests {
   #[test]
   fn chinese_settings_render_localized_choices_without_changing_the_raw_value() {
     let mut app = App::default();
-    app.user_config.behavior.language = crate::core::i18n::Language::ZhHans;
+    app.user_config.behavior.language = crate::core::i18n::Language::PtBr;
     app.refresh_language();
     app.load_settings_for_category();
     let content = rendered(&app).replace(' ', "");
-    assert!(content.contains("语言"), "{content}");
-    assert!(content.contains("简体中文"), "{content}");
+    assert!(content.contains("Idioma"), "{content}");
+    assert!(content.contains("Português(Brasil)"), "{content}");
     assert!(!content.contains("Language:"), "{content}");
     let language = app
       .settings_items
@@ -523,7 +518,7 @@ mod tests {
       .unwrap();
     assert_eq!(
       language.value,
-      SettingValue::Cycle("zh-Hans".to_string(), crate::core::i18n::Language::OPTIONS)
+      SettingValue::Cycle("pt-BR".to_string(), crate::core::i18n::Language::OPTIONS)
     );
   }
 
@@ -544,40 +539,6 @@ mod tests {
   }
 
   #[test]
-  fn a_session_gained_while_settings_is_open_reveals_the_spotify_rows_at_once() {
-    let mut app = filtered_app("", false);
-    let ids = |app: &App| -> Vec<String> {
-      filtered_setting_indices(app)
-        .into_iter()
-        .map(|index| app.settings_items[index].id.clone())
-        .collect()
-    };
-    assert!(!ids(&app).contains(&"behavior.default_sort_saved_albums".to_string()));
-    assert!(ids(&app).contains(&"behavior.default_sort_playlist_tracks".to_string()));
-
-    app.spotify_connected = true;
-    assert!(ids(&app).contains(&"behavior.default_sort_saved_albums".to_string()));
-  }
-
-  #[test]
-  fn a_spotify_only_key_row_carries_a_hint_without_a_session() {
-    let mut app = filtered_app("", false);
-    app.view.settings_category = SettingsCategory::Keybindings;
-    app.load_settings_for_category();
-    app.view.settings_selected_index = app
-      .settings_items
-      .iter()
-      .position(|item| item.id == "keys.like_track")
-      .expect("the like row");
-    let rendered = rendered(&app);
-    assert!(
-      rendered.contains("Like Track: [F]  (needs Spotify)"),
-      "{rendered}"
-    );
-    assert!(!rendered.contains("Back: [q]  ("), "{rendered}");
-  }
-
-  #[test]
   fn the_controls_line_names_the_configured_back_key() {
     let app = filtered_app("", false);
     let default_rendered = rendered(&app);
@@ -594,28 +555,6 @@ mod tests {
       "{rebound_rendered}"
     );
     assert!(!rebound_rendered.contains("Esc/q"), "{rebound_rendered}");
-  }
-
-  #[cfg(feature = "soloist")]
-  #[test]
-  fn only_the_selected_soloist_path_row_names_its_download_key() {
-    let row = |id: &str, name: &str| SettingItem {
-      id: id.to_string(),
-      name: name.to_string(),
-      description: String::new(),
-      value: SettingValue::String(String::new()),
-    };
-    let mut app = filtered_app("", false);
-    app.spotify_connected = true;
-    app.settings_items = vec![
-      row("behavior.soloist_path", "Soloist Path"),
-      row("behavior.ytdlp_path", "yt-dlp Path"),
-    ];
-    app.view.settings_selected_index = 0;
-    let selected = rendered(&app);
-    assert!(selected.contains("[o] Download from Spotify"), "{selected}");
-    app.view.settings_selected_index = 1;
-    assert!(!rendered(&app).contains("Download from Spotify"));
   }
 
   #[test]

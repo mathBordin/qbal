@@ -48,7 +48,7 @@ jobs:
       - name: Measure the counters and raise the floors
         env:
           GATES_BLESS: "1"
-        run: cargo test --locked --no-default-features --features telemetry,tui --lib gates::ratchet_counters_match_the_checked_in_baselines
+        run: cargo test --locked --no-default-features --features tui --lib gates::ratchet_counters_match_the_checked_in_baselines
       - id: result
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

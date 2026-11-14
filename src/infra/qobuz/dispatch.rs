@@ -136,7 +136,6 @@ pub async fn route_qobuz_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
     IoEvent::NextTrack => skip(app, Direction::Next).await,
     IoEvent::PreviousTrack | IoEvent::ForcePreviousTrack => skip(app, Direction::Prev).await,
     IoEvent::ReplayCurrentTrack => replay_current(app).await,
-    IoEvent::Repeat(state) => app.lock().await.set_decoded_repeat_from_state(*state),
     _ => false,
   }
 }
@@ -216,21 +215,6 @@ async fn build_source(
 /// message and returns `None` when logged out.
 pub(crate) async fn build_playback_source(app: &Arc<Mutex<App>>) -> Option<QobuzSource> {
   build_source(app, WhenLoggedOut::Message).await
-}
-
-/// A source for the playlist sync; the caller reports the logged-out case itself.
-pub(crate) async fn build_sync_source(app: &Arc<Mutex<App>>) -> Result<QobuzSource> {
-  let token = sync_token(auth::current_token())?;
-  let constants = constants(app).await.context("Qobuz web player constants")?;
-  Ok(QobuzSource::new(
-    constants.app_id,
-    constants.app_secret,
-    token,
-  ))
-}
-
-fn sync_token(token: Option<String>) -> Result<String> {
-  token.ok_or_else(|| crate::core::playlist_sync::SyncReason::QobuzNotLoggedIn.into())
 }
 
 /// Report a failed call as one status message; a 401 also clears the token.
@@ -437,10 +421,6 @@ async fn player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
 
 /// Release every other backend so only Qobuz holds the output device.
 async fn release_other_backends(app: &Arc<Mutex<App>>) {
-  // Take the sink from native Spotify so no rebuild resumes it under this
-  // source.
-  #[cfg(feature = "streaming")]
-  app.lock().await.release_native_for_decoded();
   // The other decoded sources never see this `qobuz:` start (the pump
   // short-circuits), so their sessions are torn down here.
   let players = app.lock().await.take_decoded_sessions_except(Source::Qobuz);
@@ -1018,25 +998,4 @@ mod tests {
 }
 
 #[cfg(test)]
-mod sync_error_localization_tests {
-  use super::*;
-  #[test]
-  fn a_missing_sync_login_is_structured_and_keeps_the_english_diagnostic() {
-    use crate::core::playlist_sync::SyncReason;
-    let error = sync_token(None).unwrap_err();
-    assert_eq!(error.to_string(), "Qobuz is not logged in");
-    let reason = SyncReason::from_error(&error);
-    assert_eq!(reason, SyncReason::QobuzNotLoggedIn);
-    for strings in [
-      &crate::core::i18n::EN,
-      &crate::core::i18n::ZH_HANS,
-      &crate::core::i18n::ZH_HANT,
-    ] {
-      assert_eq!(
-        reason.render(strings),
-        strings.status.infra.sync_qobuz_not_logged_in
-      );
-    }
-    assert_eq!(sync_token(Some("{token}".into())).unwrap(), "{token}");
-  }
-}
+mod sync_error_localization_tests {}

@@ -4,7 +4,6 @@ pub mod gui;
 pub mod help;
 mod locale;
 mod message;
-pub(crate) use message::LocalizedMessage;
 pub mod onboarding;
 pub mod popups;
 pub mod recap;
@@ -13,12 +12,9 @@ pub mod settings;
 pub mod sidebar;
 pub mod status_app;
 pub mod status_infra;
-pub mod status_runtime;
-pub mod tools;
 pub use locale::{system_language, Language};
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct Strings {
   pub recap: recap::RecapStrings,
   pub onboarding: onboarding::OnboardingStrings,
@@ -38,8 +34,6 @@ pub static EN: Strings = Strings {
   status: StatusStrings {
     app: status_app::EN,
     infra: status_infra::EN,
-    runtime: status_runtime::EN,
-    tools: tools::EN,
   },
   gui: gui::EN,
   screens: screens::EN,
@@ -50,58 +44,51 @@ pub static EN: Strings = Strings {
 
 // Keep ..EN so new English fields compile before their translations are added.
 #[allow(clippy::needless_update)]
-pub static ZH_HANS: Strings = Strings {
-  recap: recap::ZH_HANS,
-  onboarding: onboarding::ZH_HANS,
-  popups: popups::ZH_HANS,
+pub static PT_BR: Strings = Strings {
+  recap: recap::PT_BR,
+  onboarding: onboarding::PT_BR,
+  popups: popups::PT_BR,
   status: StatusStrings {
-    app: status_app::ZH_HANS,
-    infra: status_infra::ZH_HANS,
-    runtime: status_runtime::ZH_HANS,
-    tools: tools::ZH_HANS,
+    app: status_app::PT_BR,
+    infra: status_infra::PT_BR,
   },
-  gui: gui::ZH_HANS,
-  screens: screens::ZH_HANS,
-  settings: settings::ZH_HANS,
-  sidebar: sidebar::ZH_HANS,
-  help: help::ZH_HANS,
+  gui: gui::PT_BR,
+  screens: screens::PT_BR,
+  settings: settings::PT_BR,
+  sidebar: sidebar::PT_BR,
+  help: help::PT_BR,
   ..EN
 };
 
 // Keep ..EN so new English fields compile before their translations are added.
 #[allow(clippy::needless_update)]
-pub static ZH_HANT: Strings = Strings {
-  recap: recap::ZH_HANT,
-  onboarding: onboarding::ZH_HANT,
-  popups: popups::ZH_HANT,
+pub static FR: Strings = Strings {
+  recap: recap::FR,
+  onboarding: onboarding::FR,
+  popups: popups::FR,
   status: StatusStrings {
-    app: status_app::ZH_HANT,
-    infra: status_infra::ZH_HANT,
-    runtime: status_runtime::ZH_HANT,
-    tools: tools::ZH_HANT,
+    app: status_app::FR,
+    infra: status_infra::FR,
   },
-  gui: gui::ZH_HANT,
-  screens: screens::ZH_HANT,
-  settings: settings::ZH_HANT,
-  sidebar: sidebar::ZH_HANT,
-  help: help::ZH_HANT,
+  gui: gui::FR,
+  screens: screens::FR,
+  settings: settings::FR,
+  sidebar: sidebar::FR,
+  help: help::FR,
   ..EN
 };
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct StatusStrings {
-  pub tools: tools::ToolStrings,
   pub app: status_app::AppStatusStrings,
   pub infra: status_infra::InfraStatusStrings,
-  pub runtime: status_runtime::RuntimeStatusStrings,
 }
 
 impl Language {
   pub const fn strings(self) -> &'static Strings {
     match self {
-      Self::ZhHans => &ZH_HANS,
-      Self::ZhHant => &ZH_HANT,
+      Self::PtBr => &PT_BR,
+      Self::Fr => &FR,
       Self::Auto | Self::En => &EN,
     }
   }

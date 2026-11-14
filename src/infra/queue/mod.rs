@@ -19,7 +19,6 @@
 
 pub mod dispatch;
 
-#[cfg(feature = "queue-download")]
 use crate::core::plugin_api::TrackInfo;
 
 /// Snapshot the `TrackInfo`s for `uris` in order from the track table, then
@@ -27,7 +26,6 @@ use crate::core::plugin_api::TrackInfo;
 /// which is what an MCP or AI DJ start usually sends (#716), gets a
 /// placeholder named after the URI, like the native queue's opaque items, so
 /// it still plays and `start_idx` still lines up with `uris`.
-#[cfg(feature = "queue-download")]
 pub fn snapshot_tracks(
   table: &[TrackInfo],
   search: Option<&[TrackInfo]>,
@@ -50,7 +48,6 @@ pub fn snapshot_tracks(
 /// Whether `track` is a row [`snapshot_tracks`] made up for an off-screen URI.
 /// Its `duration_ms` is 0 because the duration is unknown, not because the
 /// track is a livestream.
-#[cfg(feature = "queue-download")]
 pub fn is_placeholder(track: &TrackInfo) -> bool {
   track.artists.is_empty() && track.uri.as_deref() == Some(track.name.as_str())
 }
@@ -58,8 +55,6 @@ pub fn is_placeholder(track: &TrackInfo) -> bool {
 /// The URI of `tracks[index]` when that row is a placeholder, so the source
 /// knows to look its metadata up. YouTube needs no lookup: its download
 /// prints the metadata.
-#[cfg(feature = "queue-download")]
-#[cfg_attr(not(any(feature = "qobuz", feature = "subsonic")), allow(dead_code))]
 pub fn placeholder_uri(tracks: &[TrackInfo], index: usize) -> Option<String> {
   tracks
     .get(index)
@@ -72,7 +67,6 @@ pub fn placeholder_uri(tracks: &[TrackInfo], index: usize) -> Option<String> {
 /// lookup that lands after a skip, a new queue, or a row that already has
 /// real metadata changes nothing. The row keeps `uri`, so routing never moves.
 /// Returns whether the row changed.
-#[cfg(feature = "queue-download")]
 pub fn apply_resolved(
   tracks: &mut [TrackInfo],
   index: usize,
@@ -90,7 +84,6 @@ pub fn apply_resolved(
   true
 }
 
-#[cfg(feature = "queue-download")]
 fn placeholder_track(uri: &str) -> TrackInfo {
   TrackInfo {
     generated_name: None,
@@ -125,7 +118,6 @@ pub enum QueueEnd {
 /// device. `#[allow(dead_code)]` because a slim build (no source features) never
 /// calls it — clippy's slim run does not compile the tests that do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Decision {
   /// Nothing to do (still playing, or a track change is already in flight).
   None,
@@ -147,7 +139,6 @@ pub enum Decision {
 /// e.g. the media-metadata snapshot). `#[allow(dead_code)]` for the same reason
 /// as [`Decision`]: a slim build never constructs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 pub enum RepeatMode {
   /// No repeat: advance then tear down at the end of the context.
   #[default]
@@ -161,7 +152,6 @@ pub enum RepeatMode {
 impl RepeatMode {
   /// The next mode in the user-facing cycle, mirroring Spotify's
   /// Off -> Repeat All -> Repeat One -> Off.
-  #[allow(dead_code)]
   pub fn next(self) -> Self {
     match self {
       RepeatMode::Off => RepeatMode::Context,
@@ -190,7 +180,6 @@ impl RepeatMode {
 ///   tears down.
 /// - `Off` — advance if there is a next track, else tear down (the original
 ///   behavior).
-#[allow(dead_code)]
 pub fn advance_decision(
   finished: bool,
   advancing: bool,
@@ -224,7 +213,6 @@ pub fn advance_decision(
 /// `Off`/`Track` the index clamps and returns `None` at a boundary (a manual
 /// skip past the boundary is then a no-op — repeat-one only affects *auto*
 /// advance, which replays via [`Decision::RepeatTrack`], never this helper).
-#[allow(dead_code)]
 pub fn advance_index(
   current: usize,
   len: usize,
@@ -261,7 +249,6 @@ pub fn advance_index(
 /// rule is that repeat-one affects *auto* advance but not a *manual* skip (see
 /// [`advance_index`]). Both handoffs otherwise resume the context's next track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SuspendCause {
   /// The context's track ended on its own and the queue preempted the context's
   /// own advance.
@@ -295,7 +282,6 @@ pub enum SuspendCause {
 ///
 /// Every other mode defers to [`advance_index`]: `Context` wraps last→first (and
 /// never yields `None`), `Off` clamps to `None` at the end.
-#[allow(dead_code)]
 pub fn resume_index_after_queue(
   current: usize,
   len: usize,
@@ -320,7 +306,6 @@ pub fn resume_index_after_queue(
 /// empty), signalling "no next track" — used to compute `has_next` for
 /// [`advance_decision`] and the resume index when suspending to the native
 /// queue (both of which ignore repeat wrap-around by design).
-#[allow(dead_code)]
 pub fn next_index(current: usize, len: usize) -> Option<usize> {
   advance_index(current, len, RepeatMode::Off, true)
 }
@@ -330,7 +315,6 @@ pub fn next_index(current: usize, len: usize) -> Option<usize> {
 /// of the track now at shuffled position `i`, so restoring needs no equality
 /// checks (correct even with duplicate tracks) and no copy of the queue.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 pub struct ShuffleBackup {
   perm: Vec<usize>,
 }
@@ -341,7 +325,6 @@ impl ShuffleBackup {
   /// is always valid, but one deserialized from a hand-edited or corrupted
   /// `last_session.yml` may not be — [`restore_in_place`] checks this before its
   /// unchecked indexing so a bad file degrades gracefully instead of panicking.
-  #[allow(dead_code)]
   fn is_valid_for(&self, len: usize) -> bool {
     if self.perm.len() != len {
       return false;
@@ -364,7 +347,6 @@ impl ShuffleBackup {
 /// continues uninterrupted; turning it off restores the original order and
 /// points `*index` back at the current track. Idempotent (a redundant on/off
 /// is a no-op).
-#[allow(dead_code)]
 pub fn toggle_shuffle<T>(
   items: &mut Vec<T>,
   index: &mut usize,
@@ -384,7 +366,6 @@ pub fn toggle_shuffle<T>(
 /// Shuffle `items` in place, moving the track at `current` to the front and
 /// randomizing the rest. This is the seam for a future native shuffle
 /// algorithm: change the permutation built here and every source picks it up.
-#[allow(dead_code)]
 fn shuffle_in_place<T>(items: &mut Vec<T>, current: usize) -> ShuffleBackup {
   use rand::seq::SliceRandom;
   let len = items.len();
@@ -408,7 +389,6 @@ fn shuffle_in_place<T>(items: &mut Vec<T>, current: usize) -> ShuffleBackup {
 /// Invert the shuffle permutation in place. `current` is the live index in the
 /// *shuffled* queue; the returned index is the same track's position in the
 /// restored original order.
-#[allow(dead_code)]
 fn restore_in_place<T>(items: &mut Vec<T>, backup: &ShuffleBackup, current: usize) -> usize {
   if !backup.is_valid_for(items.len()) {
     // Either the queue was replaced/resized since the backup (shouldn't happen —
@@ -438,7 +418,6 @@ fn restore_in_place<T>(items: &mut Vec<T>, backup: &ShuffleBackup, current: usiz
 /// Gated on the *queueable* decoded sources rather than `audio-decode`: replay
 /// is the repeat-one path of a finite track list. Internet radio decodes audio
 /// too, but a live stream has no track to re-decode.
-#[cfg(feature = "audio-decode-queue")]
 pub async fn replay_file(
   player: std::sync::Arc<crate::infra::audio::LocalPlayer>,
   path: std::path::PathBuf,
@@ -456,7 +435,6 @@ pub async fn replay_file(
 /// taken by whichever path stages the track (a replay, a `play_index`, or a
 /// download's commit), so the seek and the pause are applied to the track
 /// they belong to, and never as events that race it.
-#[cfg(feature = "audio-decode-queue")]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ResumePoint {
   pub position_ms: u64,
@@ -468,7 +446,6 @@ pub struct ResumePoint {
 ///
 /// **Blocking:** the stage clears the sink and decodes; call it off the async
 /// runtime and off the `App` lock.
-#[cfg(feature = "audio-decode-queue")]
 pub fn restage(
   player: &crate::infra::audio::LocalPlayer,
   path: &std::path::Path,
@@ -486,17 +463,15 @@ pub fn restage(
 }
 
 /// Aborts a background queue download when dropped.
-#[cfg(feature = "queue-download")]
 pub struct DownloadAbortHandle(pub tokio::task::AbortHandle);
 
-#[cfg(feature = "queue-download")]
 impl Drop for DownloadAbortHandle {
   fn drop(&mut self) {
     self.0.abort();
   }
 }
 
-#[cfg(all(test, feature = "queue-download"))]
+#[cfg(test)]
 #[tokio::test]
 async fn dropping_the_abort_handle_cancels_the_download_task() {
   let handle = tokio::spawn(async {
@@ -516,7 +491,6 @@ async fn dropping_the_abort_handle_cancels_the_download_task() {
 /// [`dispatch::try_play_queued`] can play. Internet radio pulls `audio-decode`
 /// in as well, but a live stream is never a queue item, so a radio-only build
 /// can never construct this.
-#[cfg(feature = "audio-decode-queue")]
 pub struct DecodedQueuePlayback {
   /// The output-device sink. Shared (`Arc::ptr_eq`) with the suspended context's
   /// player when there is one, so no second device is opened.
@@ -533,19 +507,14 @@ pub struct DecodedQueuePlayback {
   /// one, and the stale result is silently discarded. Only *read* by the
   /// Subsonic/YouTube fetch-completion path, so a build with neither (e.g. a
   /// local-files-only build) writes it without reading it.
-  #[cfg_attr(not(feature = "queue-download"), allow(dead_code))]
   pub fetch_id: u64,
   /// The tempfile backing a downloaded track (Subsonic / YouTube). `None` for a
   /// local file, which is played straight from disk. Held purely to keep the
   /// file alive on disk for the duration of playback (dropped with the slot), so
   /// it is never read back.
-  #[cfg(feature = "queue-download")]
-  #[allow(dead_code)]
   pub tempfile: Option<tempfile::NamedTempFile>,
   /// The handle to abort the background download task if the slot is cleared
   /// or replaced before the download completes.
-  #[cfg(feature = "queue-download")]
-  #[allow(dead_code)]
   pub abort_handle: Option<DownloadAbortHandle>,
   /// The delivered audio format of a downloaded track (Qobuz, e.g.
   /// `FLAC 24/96`), shown after the artists in the playbar.
@@ -562,23 +531,14 @@ pub struct DecodedQueuePlayback {
 /// `App::queue_owns_playback()` accessor. Note internet radio is deliberately
 /// absent from both halves of the gate: it decodes audio, but a `radio:` URI is
 /// never a queue item, so it can neither fill nor own this slot.
-#[cfg(feature = "queue")]
 pub enum QueueNowPlaying {
-  #[cfg(feature = "audio-decode-queue")]
   Decoded(DecodedQueuePlayback),
-  /// A Spotify track playing via native streaming (`player.load`, no Spirc
-  /// context).
-  #[cfg(feature = "streaming")]
-  Spotify {
-    track: crate::core::plugin_api::TrackInfo,
-  },
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
-  #[cfg(feature = "queue-download")]
   mod snapshot {
     use super::*;
 

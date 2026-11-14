@@ -1,50 +1,19 @@
-### The IoEvent pump: source routing, three lanes, an auth gate
+### The IoEvent pump
 
-`runtime/pump.rs::start_tokio` drains IoEvents serially. The structural gates, all
-worth knowing before adding an event:
+`runtime/pump.rs::start_tokio` drains IoEvents serially:
 
-- **Source routing**: non-Spotify playback is routed by URI scheme *before* the
-  Spotify handler, in this order: the Apple Music router (`applemusic:`; while
-  Music owns playback it also takes the transports) → `route_queue_event` → `route_local_event`
-  (`file:`) → `route_subsonic_event` (`subsonic:`) → `route_qobuz_event`
-  (`qobuz:`) → `route_radio_event` (`radio:`) → `route_youtube_event`
-  (`youtube:`) → `Network::handle_network_event`.
-  This is what keeps `infra/network/` Spotify-only.
-- **Claim gate**: before the routers, `start_playback_has_taker` drops a
-  `StartPlayback` whose URI scheme (`core::queue::queue_item_source`) names no
-  compiled-in source and that no Spotify session can take. The routers'
-  foreign-start teardown arms therefore only run for a real source-to-source
-  handoff.
+- **Routing**: `route_queue_event` (`infra/queue/dispatch.rs`) runs first and
+  owns `AdvanceNativeQueue`/`FinishNativeQueue` plus the transports while the
+  native queue slot plays; then `route_qobuz_event` (`infra/qobuz/dispatch.rs`)
+  takes the `qobuz:` starts, the Qobuz browse/search/login events, and the
+  transports while a Qobuz session owns the sink. An event neither router
+  consumes reaches `Network::handle_network_event`, whose catch-all arm ignores
+  a transport that arrives while nothing plays.
 - **Service lane**: `Network::runs_on_service_lane` lists events that run on a
-  detached task so slow, source-agnostic work cannot head-of-line-block the serial
-  pump. The service lane's `Network` is built with **no Spotify login**
-  (`Network::new(None, ..)`) and must not touch `Network` state. A service-lane
-  handler that needs Spotify (the Spotify lyrics) calls only the free funnel
-  `requests::spotify_api_request_json_for`, which applies the shared rate window
-  and the deadline, and falls back when that call fails.
-- **Spotify lane**: `Network::runs_on_spotify_lane` lists slow Spotify work (the
-  DJ crawl, the DJ tool calls) that runs in order on one worker beside the pump,
-  with a `Network` from `spotify_lane_network` (the pump's client, limits,
-  fallback cache and rate gate, taken per event). In a rate-limit window the
-  pump holds a gated lane event (`DjIndexLibrary`) back before the hand-off, so
-  one flusher keeps the order; `DjToolCall` bypasses the gate and fails at once
-  with the wait, inside its caller's 45 s timeout. Never a transport event, never one that writes `Network` state the pump
-  reads (the login, the search limits). A detached task (the playlist sort and
-  search walks) is the other way off the pump; it needs a staleness check of its
-  own before it writes `App`.
-- **Auth gate**: `Network::event_bypasses_spotify_auth` lists events whose handlers
-  never need a Spotify session.
-- **Replay**: `Network::event_is_transport` lists events that drive whoever owns
-  the sink. One held back by a rate-limit window is stamped with the
-  `PlaybackOwner` at deferral time, dropped at the flush when the owner changed,
-  and otherwise re-sent on the pump's channel so the routers see it.
-  A new IoEvent must be classified against all four lists. One exception skips
-  the hold: while the Soloist engine is the target, the transports it serves over
-  its loopback WebSocket (`soloist_ws_transport`) go through at once.
+  detached task (lyrics, cover art, announcements, listening stats, the recap)
+  so slow work cannot block the serial pump. Their handlers touch only
+  `self.app` and their own HTTP clients.
 
-### Listening Party / sync
-
-`src/infra/network/sync.rs` is pure WebSocket transport (`SyncMessage`,
-`PartyConnection`); lifecycle logic lives in `src/infra/network/mod.rs`. Handlers
-dispatch `StartParty` / `JoinParty` / `SetPartyControlMode` / `LeaveParty`;
-`SyncPlayback` is fired by `App::on_tick` every 2s while hosting, not by a handler.
+A new IoEvent needs a router arm or a `handle_network_event` arm, and a
+decision about the service lane. A detached task needs its own staleness check
+(generation/epoch) before it writes `App`.

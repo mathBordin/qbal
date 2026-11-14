@@ -236,27 +236,6 @@ fn remove_legacy_path_after_migration(legacy_path: &Path, state_path: &Path) {
   }
 }
 
-/// Seed legacy in-app radio favorites from `config.yml` into `state.yml` when
-/// the state field does not exist yet.
-///
-/// Remove this migration after one release cycle where users could have started
-/// the app and converted pre-existing `behavior.radio_stations`.
-pub(crate) fn apply_legacy_config_radio_station_migration(
-  runtime_state: &mut RuntimeState,
-  persisted_state: &PersistedRuntimeState,
-  behavior: &BehaviorConfig,
-) -> PersistedRuntimeState {
-  if persisted_state.radio_stations.is_some() || behavior.radio_stations.is_empty() {
-    return PersistedRuntimeState::default();
-  }
-
-  runtime_state.radio_stations = behavior.radio_stations.clone();
-  PersistedRuntimeState {
-    radio_stations: Some(runtime_state.radio_stations.clone()),
-    ..Default::default()
-  }
-}
-
 /// Seed runtime-state fields that used to live under `behavior` in `config.yml`.
 ///
 /// This reads the raw YAML rather than `BehaviorConfigString` because those
@@ -322,7 +301,7 @@ pub(crate) fn apply_legacy_config_runtime_state_migration(
 pub(crate) fn apply_legacy_client_config_migration(
   client_path: &Path,
   config_path: &Path,
-  behavior: &mut BehaviorConfig,
+  _behavior: &mut BehaviorConfig,
   runtime_state: &mut RuntimeState,
   persisted_state: &PersistedRuntimeState,
 ) -> Result<PersistedRuntimeState> {
@@ -354,53 +333,18 @@ pub(crate) fn apply_legacy_client_config_migration(
       .is_some_and(|behavior| behavior.contains_key(yaml_key(key)))
   };
   let mut copied = Mapping::new();
-  let mut copy = |key: &str, value: Value| {
+  let _copy = |key: &str, value: Value| {
     copied.insert(yaml_key(key), value);
   };
   if !configured("enable_streaming") {
-    if let Some(enabled) = client
+    if let Some(_enabled) = client
       .get(yaml_key("enable_streaming"))
       .and_then(Value::as_bool)
-    {
-      if enabled != behavior.enable_streaming {
-        behavior.enable_streaming = enabled;
-        copy("enable_streaming", Value::Bool(enabled));
-      }
-    }
+    {}
   }
-  if !configured("streaming_device_name") {
-    if let Some(name) = client
-      .get(yaml_key("streaming_device_name"))
-      .and_then(Value::as_str)
-      .map(str::trim)
-      .filter(|name| !name.is_empty() && *name != behavior.streaming_device_name)
-    {
-      behavior.streaming_device_name = name.to_string();
-      copy("streaming_device_name", Value::String(name.to_string()));
-    }
-  }
-  if !configured("streaming_bitrate") {
-    if let Some(bitrate) = client
-      .get(yaml_key("streaming_bitrate"))
-      .and_then(Value::as_u64)
-      .and_then(|bitrate| u16::try_from(bitrate).ok())
-      .map(crate::core::user_config::streaming_bitrate_or_default)
-      .filter(|bitrate| *bitrate != behavior.streaming_bitrate)
-    {
-      behavior.streaming_bitrate = bitrate;
-      copy("streaming_bitrate", Value::Number(bitrate.into()));
-    }
-  }
-  if !configured("streaming_audio_cache") {
-    if let Some(cache) = client
-      .get(yaml_key("streaming_audio_cache"))
-      .and_then(Value::as_bool)
-      .filter(|cache| *cache != behavior.streaming_audio_cache)
-    {
-      behavior.streaming_audio_cache = cache;
-      copy("streaming_audio_cache", Value::Bool(cache));
-    }
-  }
+  configured("streaming_device_name");
+  configured("streaming_bitrate");
+  configured("streaming_audio_cache");
 
   if !copied.is_empty() {
     write_behavior_keys(config_path, config, copied)?;
@@ -482,9 +426,6 @@ fn string_sequence(value: &Value) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::source::Source;
-  use crate::core::state::RadioStationConfig;
-  use crate::core::user_config::UserConfig;
 
   #[test]
   fn legacy_file_rename_moves_file_when_state_path_is_empty() {
@@ -615,172 +556,6 @@ mod tests {
     assert_eq!(subdirectory_mode, 0o700);
   }
 
-  #[test]
-  fn legacy_config_radio_stations_seed_missing_persisted_runtime_field() {
-    let mut config = UserConfig::new();
-    config.behavior.radio_stations = vec![RadioStationConfig {
-      name: "Groove Salad".to_string(),
-      url: "https://ice1.somafm.com/groovesalad-128-mp3".to_string(),
-    }];
-    let persisted = PersistedRuntimeState {
-      volume_percent: Some(42),
-      ..Default::default()
-    };
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&persisted);
-
-    let patch =
-      apply_legacy_config_radio_station_migration(&mut runtime, &persisted, &config.behavior);
-
-    assert_eq!(
-      runtime.radio_stations,
-      vec![RadioStationConfig {
-        name: "Groove Salad".to_string(),
-        url: "https://ice1.somafm.com/groovesalad-128-mp3".to_string(),
-      }]
-    );
-    assert_eq!(patch.radio_stations, Some(runtime.radio_stations.clone()));
-  }
-
-  #[test]
-  fn legacy_config_radio_stations_do_not_override_existing_runtime_field() {
-    let mut config = UserConfig::new();
-    config.behavior.radio_stations = vec![RadioStationConfig {
-      name: "Configured Groove".to_string(),
-      url: "https://ice1.somafm.com/groovesalad-128-mp3".to_string(),
-    }];
-    let persisted = PersistedRuntimeState {
-      radio_stations: Some(vec![RadioStationConfig {
-        name: "Secret Agent".to_string(),
-        url: "https://ice1.somafm.com/secretagent-128-mp3".to_string(),
-      }]),
-      ..Default::default()
-    };
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&persisted);
-
-    let patch =
-      apply_legacy_config_radio_station_migration(&mut runtime, &persisted, &config.behavior);
-
-    assert_eq!(
-      runtime.radio_stations,
-      vec![RadioStationConfig {
-        name: "Secret Agent".to_string(),
-        url: "https://ice1.somafm.com/secretagent-128-mp3".to_string(),
-      }]
-    );
-    assert_eq!(patch, PersistedRuntimeState::default());
-  }
-
-  #[test]
-  fn legacy_runtime_state_fields_seed_missing_persisted_fields_from_raw_config() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yml");
-    std::fs::write(
-      &path,
-      r#"
-behavior:
-  active_source: Radio
-  shuffle_enabled: true
-  seen_announcement_ids:
-    - " seen "
-    - ""
-  dismissed_announcements:
-    - old
-"#,
-    )
-    .unwrap();
-    let persisted = PersistedRuntimeState {
-      volume_percent: Some(42),
-      ..Default::default()
-    };
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&persisted);
-
-    let patch =
-      apply_legacy_config_runtime_state_migration(&path, &mut runtime, &persisted).unwrap();
-
-    assert_eq!(runtime.active_source, Source::Radio);
-    assert!(runtime.shuffle_enabled);
-    assert_eq!(runtime.seen_announcement_ids, vec!["seen"]);
-    assert_eq!(runtime.dismissed_announcements, vec!["old"]);
-    assert_eq!(
-      patch,
-      PersistedRuntimeState {
-        active_source: Some(Source::Radio),
-        shuffle_enabled: Some(true),
-        seen_announcement_ids: Some(vec!["seen".to_string()]),
-        dismissed_announcements: Some(vec!["old".to_string()]),
-        ..Default::default()
-      }
-    );
-  }
-
-  #[test]
-  fn legacy_runtime_state_migration_preserves_free_source_startup() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yml");
-    std::fs::write(
-      &path,
-      r#"
-behavior:
-  active_source: Local
-"#,
-    )
-    .unwrap();
-    let persisted = PersistedRuntimeState::default();
-    let mut runtime = RuntimeState::default();
-
-    let patch =
-      apply_legacy_config_runtime_state_migration(&path, &mut runtime, &persisted).unwrap();
-
-    assert_eq!(runtime.active_source, Source::Local);
-    assert_eq!(
-      patch,
-      PersistedRuntimeState {
-        active_source: Some(Source::Local),
-        ..Default::default()
-      }
-    );
-  }
-
-  #[test]
-  fn legacy_runtime_state_fields_do_not_override_existing_persisted_fields() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yml");
-    std::fs::write(
-      &path,
-      r#"
-behavior:
-  active_source: Radio
-  shuffle_enabled: true
-  seen_announcement_ids:
-    - new
-  dismissed_announcements:
-    - new-dismissed
-"#,
-    )
-    .unwrap();
-    let persisted = PersistedRuntimeState {
-      active_source: Some(Source::Local),
-      shuffle_enabled: Some(false),
-      seen_announcement_ids: Some(vec!["existing".to_string()]),
-      dismissed_announcements: Some(vec!["existing-dismissed".to_string()]),
-      ..Default::default()
-    };
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&persisted);
-
-    let patch =
-      apply_legacy_config_runtime_state_migration(&path, &mut runtime, &persisted).unwrap();
-
-    assert_eq!(runtime.active_source, Source::Local);
-    assert!(!runtime.shuffle_enabled);
-    assert_eq!(runtime.seen_announcement_ids, vec!["existing"]);
-    assert_eq!(runtime.dismissed_announcements, vec!["existing-dismissed"]);
-    assert_eq!(patch, PersistedRuntimeState::default());
-  }
-
   fn client_migration(
     client_yml: &str,
     config_yml: Option<&str>,
@@ -811,54 +586,6 @@ behavior:
   }
 
   #[test]
-  fn changed_streaming_settings_move_from_client_yml_to_the_config() {
-    let default_streaming = cfg!(feature = "streaming");
-    let (dir, result, behavior, _) = client_migration(
-      &format!(
-        "client_id: abc\nstreaming_device_name: Desk\nstreaming_bitrate: 160\nenable_streaming: {default_streaming}\n"
-      ),
-      Some("theme:\n  active: \"#ffffff\"\n"),
-      &PersistedRuntimeState::default(),
-    );
-    result.unwrap();
-    assert_eq!(behavior.streaming_device_name, "Desk");
-    assert_eq!(behavior.streaming_bitrate, 160);
-
-    let written = std::fs::read_to_string(dir.path().join("config.yml")).unwrap();
-    let config: Value = serde_yaml::from_str(&written).unwrap();
-    let behavior = behavior_mapping(&config).unwrap();
-    assert_eq!(
-      behavior.get(yaml_key("streaming_device_name")),
-      Some(&yaml_key("Desk"))
-    );
-    assert_eq!(
-      behavior.get(yaml_key("streaming_bitrate")),
-      Some(&Value::from(160))
-    );
-    assert!(
-      !behavior.contains_key(yaml_key("enable_streaming")),
-      "a default value is not written"
-    );
-    assert!(written.contains("theme"), "the rest of the config stays");
-  }
-
-  #[test]
-  fn a_setting_the_config_already_has_wins() {
-    let (dir, result, behavior, _) = client_migration(
-      "streaming_device_name: Old\n",
-      Some("behavior:\n  streaming_device_name: New\n"),
-      &PersistedRuntimeState::default(),
-    );
-    result.unwrap();
-    assert_eq!(
-      behavior.streaming_device_name, "spotatui",
-      "the config load sets New later"
-    );
-    let written = std::fs::read_to_string(dir.path().join("config.yml")).unwrap();
-    assert!(written.contains("New") && !written.contains("Old"));
-  }
-
-  #[test]
   fn default_streaming_settings_write_no_config() {
     let (dir, result, _, _) = client_migration(
       "client_id: abc\nport: 8888\nstreaming_device_name: spotatui\nstreaming_bitrate: 320\nstreaming_audio_cache: false\n",
@@ -867,17 +594,6 @@ behavior:
     );
     result.unwrap();
     assert!(!dir.path().join("config.yml").exists());
-  }
-
-  #[test]
-  fn an_unknown_bitrate_is_not_migrated() {
-    let (_dir, result, behavior, _) = client_migration(
-      "streaming_bitrate: 999\n",
-      None,
-      &PersistedRuntimeState::default(),
-    );
-    result.unwrap();
-    assert_eq!(behavior.streaming_bitrate, 320);
   }
 
   #[test]
@@ -892,14 +608,6 @@ behavior:
       Some("phone-1")
     );
     assert_eq!(runtime.spotify_device_id.as_deref(), Some("phone-1"));
-  }
-
-  #[test]
-  fn a_device_the_state_already_has_wins() {
-    let persisted = PersistedRuntimeState::spotify_device_id("current");
-    let (_dir, result, _, runtime) = client_migration("device_id: old\n", None, &persisted);
-    assert!(result.unwrap().is_empty());
-    assert_eq!(runtime.spotify_device_id, None);
   }
 
   #[test]

@@ -175,7 +175,6 @@ fn reopen_due(attempts: u8, since_last: Option<Duration>) -> bool {
 }
 
 /// A decoded stream, ready for [`LocalPlayer::play_prepared`].
-#[cfg(any(feature = "internet-radio", feature = "qobuz"))]
 pub struct PreparedStream(Box<dyn rodio::Source + Send>);
 
 impl LocalPlayer {
@@ -258,7 +257,6 @@ impl LocalPlayer {
   /// DAC pulled), as against the OS merely moving its default output somewhere
   /// else. Recovery pauses only for removal — that is what macOS itself does,
   /// and a device the user just *plugged in* should keep playing.
-  #[cfg_attr(not(feature = "audio-decode-queue"), allow(dead_code))]
   pub fn device_removed(&self) -> bool {
     self.sink.lock().unwrap().lost.load(Ordering::Relaxed)
   }
@@ -386,7 +384,6 @@ impl LocalPlayer {
   ///
   /// Radio has no track to restage, so a build with just `internet-radio`
   /// never recovers a device.
-  #[cfg_attr(not(feature = "audio-decode-queue"), allow(dead_code))]
   pub fn recover_device(&self) -> Reopen {
     let attempts = {
       let mut state = self.reopen.lock().unwrap();
@@ -413,32 +410,9 @@ impl LocalPlayer {
     }
   }
 
-  /// Decode the file at `path` and play it, replacing whatever was playing.
-  ///
-  /// The format is detected from the file's content (FLAC/MP3/MP4-AAC/Vorbis/
-  /// WAV are supported by default). Returns an error if the file cannot be
-  /// opened or its format is unsupported.
-  ///
-  /// Only the tempfile-based sources play files; a build with just
-  /// `internet-radio` uses [`prepare_stream`](Self::prepare_stream) plus
-  /// [`play_prepared`](Self::play_prepared) instead, and Qobuz stages.
-  #[cfg_attr(
-    not(any(feature = "local-files", feature = "subsonic", feature = "youtube")),
-    allow(dead_code)
-  )]
-  pub fn play_file(&self, path: &Path) -> Result<()> {
-    self.stage_file(path)?;
-    self.resume();
-    Ok(())
-  }
-
   /// [`play_file`](Self::play_file) without the final play: the track is
   /// queued and the sink left paused, so a caller that must seek first, or
   /// stay paused, never plays a burst of the track's start.
-  #[cfg_attr(
-    not(any(feature = "local-files", feature = "subsonic", feature = "qobuz")),
-    allow(dead_code)
-  )]
   pub fn stage_file(&self, path: &Path) -> Result<()> {
     let stage = self.begin_stage();
     let sink = self.live_player()?;
@@ -476,7 +450,6 @@ impl LocalPlayer {
   ///
   /// **Blocking:** the probe reads from the network reader; call it off the
   /// async runtime (e.g. `spawn_blocking`) like `play_file`.
-  #[cfg(any(feature = "internet-radio", feature = "qobuz"))]
   pub fn prepare_stream<R>(
     reader: R,
     mime_type: Option<&str>,
@@ -500,20 +473,8 @@ impl LocalPlayer {
     Ok(PreparedStream(Box::new(decoder)))
   }
 
-  /// Play a prepared stream, replacing whatever was playing. The clear waits
-  /// for the audio thread to drop the previous source: call it off the `App`
-  /// lock (see `stop_detached`). Fails once the device is gone.
-  #[cfg(any(feature = "internet-radio", feature = "qobuz"))]
-  #[cfg_attr(not(feature = "internet-radio"), allow(dead_code))]
-  pub fn play_prepared(&self, stream: PreparedStream) -> Result<()> {
-    self.stage_prepared(stream)?;
-    self.resume();
-    Ok(())
-  }
-
   /// [`play_prepared`](Self::play_prepared) without the final play, like
   /// [`stage_file`](Self::stage_file).
-  #[cfg(any(feature = "internet-radio", feature = "qobuz"))]
   pub fn stage_prepared(&self, stream: PreparedStream) -> Result<()> {
     let stage = self.begin_stage();
     let sink = self.live_player()?;
@@ -579,10 +540,6 @@ impl LocalPlayer {
   ///
   /// Radio never polls this (an infinite stream has no end-of-track), so it is
   /// dead code in a build with just `internet-radio`.
-  #[cfg_attr(
-    not(any(feature = "local-files", feature = "subsonic", feature = "qobuz")),
-    allow(dead_code)
-  )]
   pub fn is_finished(&self) -> bool {
     self.player().empty()
   }
@@ -591,10 +548,6 @@ impl LocalPlayer {
   ///
   /// Radio consumes `Seek` as a no-op (nothing to seek within a live stream),
   /// so this is dead code in a build with just `internet-radio`.
-  #[cfg_attr(
-    not(any(feature = "local-files", feature = "subsonic", feature = "qobuz")),
-    allow(dead_code)
-  )]
   pub fn seek(&self, pos: Duration) -> Result<()> {
     let sink = self.live_player()?;
     match self.bounded(move || sink.try_seek(pos)) {
@@ -743,109 +696,6 @@ mod tests {
     assert!(reopen_due(DEVICE_REOPEN_ATTEMPTS - 1, long_ago));
     assert!(!reopen_due(DEVICE_REOPEN_ATTEMPTS, long_ago));
   }
-  use std::io::Write;
-
-  /// Write a minimal valid WAV file (44-byte header + silence) that symphonia
-  /// can decode. Mirrors the helper in the parent module's tests.
-  fn write_wav(path: &Path, sample_rate: u32, num_samples: u32) {
-    let data_size = num_samples * 2; // 16-bit mono
-    let file_size = 36 + data_size;
-    let mut f = std::fs::File::create(path).unwrap();
-    f.write_all(b"RIFF").unwrap();
-    f.write_all(&file_size.to_le_bytes()).unwrap();
-    f.write_all(b"WAVE").unwrap();
-    f.write_all(b"fmt ").unwrap();
-    f.write_all(&16u32.to_le_bytes()).unwrap();
-    f.write_all(&1u16.to_le_bytes()).unwrap();
-    f.write_all(&1u16.to_le_bytes()).unwrap();
-    f.write_all(&sample_rate.to_le_bytes()).unwrap();
-    f.write_all(&(sample_rate * 2).to_le_bytes()).unwrap();
-    f.write_all(&2u16.to_le_bytes()).unwrap();
-    f.write_all(&16u16.to_le_bytes()).unwrap();
-    f.write_all(b"data").unwrap();
-    f.write_all(&data_size.to_le_bytes()).unwrap();
-    f.write_all(&vec![0u8; data_size as usize]).unwrap();
-  }
-
-  /// End-to-end smoke test: open the default device, play a generated WAV, and
-  /// confirm the transport responds.
-  ///
-  /// `#[ignore]` because it requires a real audio output device, which is
-  /// absent in CI / headless sandboxes. Run locally with:
-  /// `cargo test --features local-files -- --ignored plays_wav`
-  #[test]
-  #[ignore = "requires an audio output device"]
-  fn plays_wav_through_sink() {
-    let dir = tempfile::tempdir().unwrap();
-    let wav = dir.path().join("sample.wav");
-    write_wav(&wav, 44_100, 44_100); // ~1s of silence
-
-    let player = LocalPlayer::new().expect("open default output device");
-    player.play_file(&wav).expect("play wav");
-
-    assert!(
-      !player.is_paused(),
-      "playback should be running after play_file"
-    );
-    assert!(
-      !player.is_finished(),
-      "a freshly started ~1s track should not be finished immediately"
-    );
-
-    player.pause();
-    assert!(player.is_paused(), "pause should take effect");
-
-    player.stop();
-    assert!(
-      player.is_finished(),
-      "stop should clear the source so the sink reports finished"
-    );
-  }
-
-  /// The anti-hang guarantee. Once the device is gone, the calls that wait on
-  /// the audio thread must refuse rather than block: they run on the serial
-  /// IoEvent pump, so one that never returns takes the whole app down with it,
-  /// searches included. A regression does not fail loudly — it deadlocks — so
-  /// the assertion is a timeout around a worker thread.
-  #[test]
-  #[ignore = "requires an audio output device"]
-  fn a_lost_device_refuses_the_calls_that_wait_on_the_audio_thread() {
-    let dir = tempfile::tempdir().unwrap();
-    let wav = dir.path().join("sample.wav");
-    write_wav(&wav, 44_100, 44_100 * 30); // still playing when the device drops
-
-    let player = Arc::new(LocalPlayer::new().expect("open default output device"));
-    player.play_file(&wav).expect("play wav");
-
-    // Raise exactly the flag cpal's error callback raises on a disconnect.
-    player
-      .sink
-      .lock()
-      .unwrap()
-      .lost
-      .store(true, Ordering::Relaxed);
-    assert!(player.device_lost());
-
-    let (tx, rx) = mpsc::channel();
-    let worker = Arc::clone(&player);
-    let path = wav.clone();
-    std::thread::spawn(move || {
-      let refused = (
-        worker.play_file(&path).is_err(),
-        worker.seek(Duration::from_secs(1)).is_err(),
-      );
-      worker.stop(); // must return instead of draining a sink nothing feeds
-      let _ = tx.send(refused);
-    });
-
-    match rx.recv_timeout(Duration::from_secs(5)) {
-      Ok((play_refused, seek_refused)) => {
-        assert!(play_refused, "play_file should refuse a lost device");
-        assert!(seek_refused, "seek should refuse a lost device");
-      }
-      Err(_) => panic!("a transport call blocked on the dead audio thread"),
-    }
-  }
 
   /// The detector that matters most in practice. cpal reports nothing when the
   /// OS moves its default output elsewhere — the stream stays bound to a device
@@ -932,65 +782,6 @@ mod tests {
     assert!(
       !player.device_lost(),
       "the ceiling must never be charged to the fresh sink"
-    );
-  }
-
-  /// Recovery: a reopened sink is alive, empty, paused and at the volume the
-  /// dead one had, ready for the driver to restage the track onto.
-  #[test]
-  #[ignore = "requires an audio output device"]
-  fn reopening_gives_a_live_empty_sink_at_the_same_volume() {
-    let dir = tempfile::tempdir().unwrap();
-    let wav = dir.path().join("sample.wav");
-    write_wav(&wav, 44_100, 44_100);
-
-    let player = LocalPlayer::new().expect("open default output device");
-    player.set_volume(40);
-    player.play_file(&wav).expect("play wav");
-    player
-      .sink
-      .lock()
-      .unwrap()
-      .lost
-      .store(true, Ordering::Relaxed);
-
-    player.reopen().expect("reopen on the default device");
-
-    assert!(!player.device_lost(), "the fresh sink starts alive");
-    assert!(player.is_finished(), "the fresh sink starts empty");
-    assert!(player.is_paused(), "the fresh sink waits to be restaged");
-    let gain = player.player().volume();
-    assert!(
-      (gain - volume_gain(40)).abs() < 0.0001,
-      "a device change should not also be a volume jump: {gain}"
-    );
-    // And it is usable: the restage the driver dispatches must land.
-    player
-      .play_file(&wav)
-      .expect("reopened sink accepts a track");
-  }
-
-  #[test]
-  #[ignore = "requires an audio output device"]
-  fn position_advances_while_playing() {
-    let dir = tempfile::tempdir().unwrap();
-    let wav = dir.path().join("sample.wav");
-    write_wav(&wav, 44_100, 44_100 * 3); // ~3s
-
-    let player = LocalPlayer::new().expect("open default output device");
-    let start = player.position();
-    player.play_file(&wav).expect("play wav");
-
-    std::thread::sleep(Duration::from_millis(600));
-    let after = player.position();
-
-    assert!(
-      after >= Duration::from_millis(300),
-      "position should advance to roughly playback time, got {after:?} (started at {start:?})"
-    );
-    assert!(
-      after < Duration::from_secs(3),
-      "position should not exceed the track duration, got {after:?}"
     );
   }
 }

@@ -7,7 +7,6 @@
 
 #[cfg(feature = "art-decode")]
 use crate::core::art::CoverArtStatus;
-#[cfg(feature = "audio-decode-queue")]
 use crate::infra::queue::{advance_decision, Decision, RepeatMode};
 use std::time::{Duration, Instant};
 
@@ -56,7 +55,6 @@ pub(super) fn session_persist_action(
 /// `advancing` is the atomic check-and-set flag that guarantees one dispatch
 /// per finished track: the sink stays empty for the whole decode/download of
 /// the next item, so without it every tick in that window would re-dispatch.
-#[cfg(feature = "audio-decode-queue")]
 pub(super) fn native_queue_advance_due(finished: bool, advancing: bool) -> bool {
   finished && !advancing
 }
@@ -64,7 +62,6 @@ pub(super) fn native_queue_advance_due(finished: bool, advancing: bool) -> bool 
 /// What the tick does about a decoded-source session, as plain data so the
 /// glue between [`advance_decision`] and the dispatch/suspend/teardown calls
 /// is testable without a sink.
-#[cfg(feature = "audio-decode-queue")]
 #[derive(Debug, PartialEq)]
 pub(super) enum DecodedAdvance {
   /// Mark the session advancing and dispatch the track change: replay the
@@ -81,7 +78,6 @@ pub(super) enum DecodedAdvance {
 
 /// Decoded-source auto-advance for one tick, composing [`advance_decision`]
 /// (the shared end-of-track policy) with the action the driver takes on it.
-#[cfg(feature = "audio-decode-queue")]
 pub(super) fn decoded_advance(
   finished: bool,
   advancing: bool,
@@ -278,7 +274,6 @@ mod tests {
     );
   }
 
-  #[cfg(feature = "audio-decode-queue")]
   mod decoded {
     use super::*;
 

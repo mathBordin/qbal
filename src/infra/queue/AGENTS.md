@@ -1,4 +1,4 @@
-### Alternative sources (Local / Subsonic / Radio / YouTube / Qobuz)
+### Decoded playback (Qobuz)
 
 - Repeat/shuffle for decoded sources live in the pure module
   `src/infra/queue/mod.rs` (`advance_decision`, `resume_index_after_queue`, …);

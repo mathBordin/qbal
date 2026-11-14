@@ -8,7 +8,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::core::app::{App, LyricsStatus, PluginDataKind};
 use crate::core::plugin_api;
-use crate::infra::network::IoEvent;
 
 use crate::core::action::Action;
 
@@ -59,9 +58,6 @@ pub struct ScriptEngine {
   pending_data: Vec<PendingDataRequest>,
   /// Armed plugin timers, fired from the tick pass.
   timers: Vec<ActiveTimer>,
-  /// Generations backing the cached sync reads at their last refresh.
-  /// `u64::MAX` sentinels force the first refresh.
-  last_cache_gens: [u64; PluginDataKind::COUNT],
   /// Last throttled storage flush.
   last_storage_flush: Option<std::time::Instant>,
   http_rx: UnboundedReceiver<HttpResult>,
@@ -150,7 +146,6 @@ impl ScriptEngine {
       search_gen_advanced: false,
       pending_data: Vec::new(),
       timers: Vec::new(),
-      last_cache_gens: [u64::MAX; PluginDataKind::COUNT],
       last_storage_flush: None,
       http_rx,
       #[cfg(test)]
@@ -606,23 +601,6 @@ impl ScriptEngine {
       }
 
       let requested_gen = app.plugin_data_generations.get(req.kind);
-      let event = match req.kind {
-        PluginDataKind::Playlists => Some(IoEvent::GetPlaylists),
-        PluginDataKind::Queue => Some(IoEvent::GetQueue),
-        PluginDataKind::Search => Some(IoEvent::GetSearchResults(
-          req.arg.clone().unwrap_or_default(),
-          app.get_user_country(),
-        )),
-        PluginDataKind::SavedTracks => Some(IoEvent::GetCurrentSavedTracks(None)),
-        PluginDataKind::SavedAlbums => Some(IoEvent::GetCurrentUserSavedAlbums(None)),
-        PluginDataKind::SavedShows => Some(IoEvent::GetCurrentUserSavedShows(None)),
-        PluginDataKind::RecentlyPlayed => Some(IoEvent::GetRecentlyPlayedSilent),
-        PluginDataKind::Devices => Some(IoEvent::GetDevicesSilent),
-        PluginDataKind::Lyrics => None,
-      };
-      if let Some(event) = event {
-        app.dispatch(event);
-      }
       self.pending_data.push(PendingDataRequest {
         token: req.token,
         kind: req.kind,
@@ -884,7 +862,7 @@ impl ScriptEngine {
   /// Refresh the caches backing the synchronous reads (`spotatui.playlists()`
   /// etc.) when their data generation advanced since the last refresh.
   fn refresh_data_caches(&mut self, app: &App) {
-    let refresh = |slot: &mut u64, kind: PluginDataKind| -> bool {
+    let _refresh = |slot: &mut u64, kind: PluginDataKind| -> bool {
       let current = app.plugin_data_generations.get(kind);
       if *slot == current {
         return false;
@@ -893,39 +871,10 @@ impl ScriptEngine {
       true
     };
 
-    if refresh(
-      &mut self.last_cache_gens[PluginDataKind::Playlists.index()],
-      PluginDataKind::Playlists,
-    ) {
-      *self.shared.playlists_cache.borrow_mut() = plugin_api::playlists_snapshot(app);
-    }
-    if refresh(
-      &mut self.last_cache_gens[PluginDataKind::Queue.index()],
-      PluginDataKind::Queue,
-    ) {
-      *self.shared.queue_cache.borrow_mut() = plugin_api::queue_snapshot(app);
-    }
     // Config has no generation counter (theme/settings can change from many
     // places); rebuilding the small snapshot each pass is cheap.
     *self.shared.config_cache.borrow_mut() =
       plugin_api::config_snapshot(&app.user_config, &app.runtime_state);
-
-    let search_was = self.last_cache_gens[PluginDataKind::Search.index()];
-    if refresh(
-      &mut self.last_cache_gens[PluginDataKind::Search.index()],
-      PluginDataKind::Search,
-    ) {
-      *self.shared.search_results_cache.borrow_mut() = plugin_api::search_results_snapshot(app);
-      // Feed the `search_results` event, but not off the startup sentinel.
-      if search_was != u64::MAX {
-        self.search_gen_advanced = true;
-      }
-    }
-  }
-
-  #[cfg(test)]
-  pub(super) fn process_data_requests_for_test(&mut self, app: &mut App, now: std::time::Instant) {
-    self.process_data_requests_at(app, now);
   }
 
   fn drain_http_callbacks(&mut self) {
@@ -1085,16 +1034,6 @@ pub(super) fn snapshot_to_lua<T: serde::Serialize>(lua: &Lua, value: &T) -> mlua
 /// Serialize the plugin-facing snapshot for a data kind from `App` state.
 fn data_value_for(lua: &Lua, kind: PluginDataKind, app: &App) -> mlua::Result<Value> {
   match kind {
-    PluginDataKind::Playlists => snapshot_to_lua(lua, &plugin_api::playlists_snapshot(app)),
-    PluginDataKind::Queue => snapshot_to_lua(lua, &plugin_api::queue_snapshot(app)),
-    PluginDataKind::Search => snapshot_to_lua(lua, &plugin_api::search_results_snapshot(app)),
-    PluginDataKind::SavedTracks => snapshot_to_lua(lua, &plugin_api::saved_tracks_snapshot(app)),
-    PluginDataKind::SavedAlbums => snapshot_to_lua(lua, &plugin_api::saved_albums_snapshot(app)),
-    PluginDataKind::SavedShows => snapshot_to_lua(lua, &plugin_api::saved_shows_snapshot(app)),
-    PluginDataKind::RecentlyPlayed => {
-      snapshot_to_lua(lua, &plugin_api::recently_played_snapshot(app))
-    }
-    PluginDataKind::Devices => snapshot_to_lua(lua, &plugin_api::device_list(app)),
     PluginDataKind::Lyrics => snapshot_to_lua(lua, &plugin_api::lyrics_snapshot(app)),
   }
 }

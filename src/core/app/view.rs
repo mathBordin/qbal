@@ -48,15 +48,8 @@ pub struct ViewState {
   // Sidebar, library and table cursors
   pub home_scroll: u16,
   pub selected_playlist_index: Option<usize>,
-  pub active_playlist_index: Option<usize>,
-  pub saved_album_tracks_index: usize,
   pub album_list_index: usize,
-  pub artists_list_index: usize,
-  pub shows_list_index: usize,
-  pub episode_list_index: usize,
   pub queue_selected_index: usize,
-  /// Cursor in the Local Files folder list.
-  pub local_playlists_index: usize,
   /// Hold the last sidebar block the user was on.
   /// Defaults to [`SidebarBlock::Library`]
   pub last_sidebar_block: SidebarBlock,
@@ -74,8 +67,6 @@ pub struct ViewState {
   pub track_table_scroll_offset: Cell<usize>,
   /// The sidebar row the cursor is on, by identity.
   pub library_selected: LibraryTarget,
-  /// The row under the cursor in the Recently Played table.
-  pub recently_played_index: usize,
   // The search screen: one cursor per result block, plus its focus.
   pub search_selected_album_index: Option<usize>,
   pub search_selected_artists_index: Option<usize>,
@@ -84,13 +75,6 @@ pub struct ViewState {
   pub search_selected_shows_index: Option<usize>,
   pub search_hovered_block: SearchResultBlock,
   pub search_selected_block: SearchResultBlock,
-
-  // The `d` device/source picker
-  pub selected_device_index: Option<usize>,
-  /// Cursor within the Source panel of the `d` picker (index into [`Source::picker_sources`]).
-  pub source_list_index: usize,
-  /// Which panel of the `d` picker currently has focus.
-  pub source_device_focus: SourceFocus,
 
   // Help menu
   pub help_docs_size: u32,
@@ -129,15 +113,9 @@ pub struct ViewState {
   /// prompt opens; only read while the prompt is visible.
   pub settings_unsaved_prompt_save_selected: bool,
 
-  // Discover and Stats screens
-  /// Selected index in the Discover view
-  pub discover_selected_index: usize,
   /// Selected index in the Stats screen's Top Tracks list
   pub stats_selected_track: usize,
 
-  // Playlist sync screen and its picker
-  /// Cursor in the link list.
-  pub playlist_sync_selected_link: usize,
   /// Cursor in the mirror picker dialog.
   pub playlist_sync_picker_index: usize,
 
@@ -155,14 +133,6 @@ pub struct ViewState {
   /// Global animation tick counter, incremented every tick.
   pub animation_tick: u64,
 
-  // Listening party inputs
-  /// Input buffer for the party join code
-  pub party_input: Vec<char>,
-  /// Cursor position in party code input
-  pub party_input_idx: usize,
-  /// Input buffer for the required party guest name
-  pub party_join_name: Vec<char>,
-
   // Add-to-playlist picker dialog
   /// Selected playlist index in the add-to-playlist picker dialog
   pub playlist_picker_selected_index: usize,
@@ -172,35 +142,6 @@ pub struct ViewState {
   pub playlist_picker_filter: String,
   /// Whether typed keys are currently editing [`Self::playlist_picker_filter`]
   pub playlist_picker_filter_editing: bool,
-
-  // Friends screen state
-  /// Cursor position in the friends list
-  pub friend_selected_index: usize,
-  /// Active filter (All / Online)
-  pub friend_filter: FriendFilter,
-  /// Inline search / filter input on the Friends screen
-  pub friend_search_input: Vec<char>,
-  /// Whether the "Add Friend" overlay dialog is open
-  pub friend_add_dialog_visible: bool,
-  /// Which tab is active inside the add-friend dialog
-  pub friend_add_mode: FriendAddMode,
-  /// Input buffer for the "add by friend code" text field
-  pub friend_add_input: Vec<char>,
-  /// Input buffer for the "search by username" text field in the add dialog
-  pub friend_user_search_input: Vec<char>,
-  /// Selected row in the user-search results list
-  pub friend_user_search_selected: usize,
-
-  // Create Playlist form state
-  pub create_playlist_name: Vec<char>,
-  pub create_playlist_name_idx: usize,
-  pub create_playlist_name_cursor: u16,
-  pub create_playlist_stage: CreatePlaylistStage,
-  pub create_playlist_search_input: Vec<char>,
-  pub create_playlist_search_idx: usize,
-  pub create_playlist_search_cursor: u16,
-  pub create_playlist_selected_result: usize,
-  pub create_playlist_focus: CreatePlaylistFocus,
 
   // Plugin surfaces
   /// Vertical scroll for the focused plugin screen.
@@ -215,11 +156,6 @@ pub struct ViewState {
   pub search_shows_scroll_offset: Cell<usize>,
   pub library_scroll_offset: Cell<usize>,
   pub playlist_scroll_offset: Cell<usize>,
-  pub local_files_scroll_offset: Cell<usize>,
-  pub artist_top_tracks_scroll_offset: Cell<usize>,
-  pub artist_albums_scroll_offset: Cell<usize>,
-  pub artist_related_artists_scroll_offset: Cell<usize>,
-  pub playlist_sync_scroll_offset: Cell<usize>,
   pub settings_scroll_offset: Cell<usize>,
 }
 

@@ -107,7 +107,6 @@ impl PipeWireCapture {
   }
 
   /// The newest tenth of a second as a mono mix, while the stream lives.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
   pub fn recent_audio(&self) -> Option<RecentAudio> {
     if !self.active.load(Ordering::Relaxed) {
       return None;

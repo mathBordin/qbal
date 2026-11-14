@@ -15,9 +15,6 @@ use std::{
 #[derive(Debug, Clone, Copy)]
 /// Configuration for event handling.
 pub struct EventConfig {
-  /// The key that is used to exit the application.
-  #[allow(dead_code)]
-  pub exit_key: Key,
   /// The tick rate at which the application will sent an tick event.
   pub tick_rate: Duration,
 }
@@ -25,7 +22,6 @@ pub struct EventConfig {
 impl Default for EventConfig {
   fn default() -> EventConfig {
     EventConfig {
-      exit_key: Key::Ctrl('c'),
       tick_rate: Duration::from_millis(DEFAULT_TICK_RATE_MILLISECONDS),
     }
   }
@@ -75,7 +71,6 @@ impl Events {
   pub fn new(tick_rate: u64) -> Events {
     Events::with_config(EventConfig {
       tick_rate: Duration::from_millis(tick_rate),
-      ..Default::default()
     })
   }
 

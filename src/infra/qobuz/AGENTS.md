@@ -1,4 +1,4 @@
-### Alternative sources (Local / Subsonic / Radio / YouTube / Qobuz)
+### Decoded playback (Qobuz)
 
 - Qobuz (`src/infra/qobuz/`) plays each track through the web player's
   encrypted CMAF stream while it downloads: `stream/progressive.rs` is a

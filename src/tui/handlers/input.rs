@@ -1,9 +1,8 @@
 extern crate unicode_width;
 
-use crate::core::action::{Action, OpenTarget};
+use crate::core::action::Action;
 use crate::core::app::{ActiveBlock, App, InputContext, RouteId};
 use crate::tui::event::Key;
-use rspotify::prelude::Id;
 use std::convert::TryInto;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -147,19 +146,6 @@ fn process_playlist_track_search(app: &mut App, input: String) {
 
   if query.is_empty() {
     app.clear_playlist_track_filter();
-    return;
-  }
-
-  if let Some(playlist_id) = app.current_playlist_track_table_id() {
-    if app.try_search_playlist_tracks_from_cached_pages(&playlist_id, &query) {
-      return;
-    }
-
-    // Otherwise, dispatch background task
-    app.apply(Action::SearchPlaylistTracks {
-      playlist_id: playlist_id.id().to_string(),
-      query,
-    });
   }
 }
 
@@ -192,43 +178,29 @@ fn spotify_resource_id(base: &str, uri: &str, sep: &str, resource_type: &str) ->
 }
 
 // Returns true if the input was successfully processed as a Spotify URI.
-fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> bool {
-  let (album_id, matched) = spotify_resource_id(base, input, sep, "album");
+fn attempt_process_uri(_app: &mut App, input: &str, base: &str, sep: &str) -> bool {
+  let (_album_id, matched) = spotify_resource_id(base, input, sep, "album");
   if matched {
-    app.apply(Action::Open(OpenTarget::Album {
-      id: album_id,
-      from_search: false,
-    }));
     return true;
   }
 
-  let (artist_id, matched) = spotify_resource_id(base, input, sep, "artist");
+  let (_artist_id, matched) = spotify_resource_id(base, input, sep, "artist");
   if matched {
-    app.apply(Action::Open(OpenTarget::Artist {
-      id: artist_id,
-      name: String::new(),
-    }));
     return true;
   }
 
-  let (track_id, matched) = spotify_resource_id(base, input, sep, "track");
+  let (_track_id, matched) = spotify_resource_id(base, input, sep, "track");
   if matched {
-    app.apply(Action::Open(OpenTarget::TrackAlbum(track_id)));
     return true;
   }
 
-  let (playlist_id, matched) = spotify_resource_id(base, input, sep, "playlist");
+  let (_playlist_id, matched) = spotify_resource_id(base, input, sep, "playlist");
   if matched {
-    app.apply(Action::Open(OpenTarget::Playlist {
-      id: playlist_id,
-      from_search: false,
-    }));
     return true;
   }
 
-  let (show_id, matched) = spotify_resource_id(base, input, sep, "show");
+  let (_show_id, matched) = spotify_resource_id(base, input, sep, "show");
   if matched {
-    app.apply(Action::Open(OpenTarget::Show(show_id)));
     return true;
   }
 
@@ -245,13 +217,6 @@ fn compute_character_width(character: char) -> u16 {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::pagination::Paged;
-  use crate::core::plugin_api::TrackInfo;
-  use crate::core::test_helpers::full_track;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::network::IoEvent;
-  use rspotify::model::idtypes::PlaylistId;
-  use rspotify::prelude::Id;
 
   fn str_to_vec_char(s: &str) -> Vec<char> {
     String::from(s).chars().collect()
@@ -373,98 +338,6 @@ mod tests {
   }
 
   #[test]
-  fn playlist_search_enter_dispatches_playlist_search() {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut app = App::new(
-      tx,
-      crate::core::user_config::UserConfig::new(),
-      Some(std::time::SystemTime::now()),
-    );
-    let playlist_id = PlaylistId::from_id("37i9dQZF1DX4WYpdgoIcn6")
-      .unwrap()
-      .into_static();
-
-    app.track_table.context = Some(crate::core::app::TrackTableContext::MyPlaylists);
-    app.playlist_track_table_id = Some(playlist_id.clone());
-    app.view.input_context = InputContext::PlaylistTrackSearch;
-    app.view.input = str_to_vec_char("queen rock");
-    app.view.input_idx = app.view.input.len();
-    app.view.input_cursor_position = app.view.input.len() as u16;
-
-    handler(Key::Enter, &mut app);
-
-    match rx.recv().unwrap() {
-      IoEvent::SearchPlaylistTracks(id, query) => {
-        assert_eq!(id, playlist_id.id());
-        assert_eq!(query, "queen rock");
-      }
-      _ => panic!("unexpected event"),
-    }
-    assert_eq!(app.view.input_context, InputContext::GlobalSearch);
-    assert_eq!(
-      app.get_current_route().active_block,
-      ActiveBlock::TrackTable
-    );
-    assert_eq!(
-      app.pending_playlist_track_search,
-      Some("queen rock".to_string())
-    );
-    assert_eq!(
-      app.status_message(),
-      Some("Searching playlist for \"queen rock\"...")
-    );
-  }
-
-  #[test]
-  fn empty_playlist_search_clears_filter_without_dispatching() {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut app = App::new(
-      tx,
-      crate::core::user_config::UserConfig::new(),
-      Some(std::time::SystemTime::now()),
-    );
-    let playlist_id = PlaylistId::from_id("37i9dQZF1DX4WYpdgoIcn6")
-      .unwrap()
-      .into_static();
-
-    app.track_table.context = Some(crate::core::app::TrackTableContext::MyPlaylists);
-    app.playlist_track_table_id = Some(playlist_id);
-    app.view.input_context = InputContext::PlaylistTrackSearch;
-    app.active_playlist_track_filter = Some("old".to_string());
-
-    handler(Key::Enter, &mut app);
-
-    assert!(app.active_playlist_track_filter.is_none());
-    assert!(rx.try_recv().is_err());
-  }
-
-  /// A Liked Songs table over a one-page cache whose ids are all liked, which
-  /// is what the saved-track search reads.
-  fn app_with_liked_songs_cache(ids: &[&str]) -> (App, std::sync::mpsc::Receiver<IoEvent>) {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(std::time::SystemTime::now()));
-    let items = ids
-      .iter()
-      .enumerate()
-      .map(|(index, id)| TrackInfo::from(&full_track(id, &format!("Track {index}"))))
-      .collect();
-    app.library_mut().saved_tracks.upsert_page_by_offset(Paged {
-      items,
-      limit: ids.len() as u32,
-      next: None,
-      offset: 0,
-      previous: None,
-      total: ids.len() as u32,
-    });
-    for id in ids {
-      app.liked_song_ids_set_mut().insert(id.to_string());
-    }
-    // Loading the continuous table is what names the context SavedTracks.
-    app.set_saved_tracks_to_table_continuous();
-    (app, rx)
-  }
-
-  #[test]
   fn saved_track_search_esc_returns_focus_to_track_table() {
     let mut app = App::default();
     app.view.input_context = InputContext::SavedTrackSearch;
@@ -475,103 +348,6 @@ mod tests {
     assert_eq!(current_route.active_block, ActiveBlock::TrackTable);
     assert_eq!(current_route.hovered_block, ActiveBlock::TrackTable);
     assert_eq!(app.view.input_context, InputContext::GlobalSearch);
-  }
-
-  #[test]
-  fn saved_track_search_enter_filters_the_cached_liked_rows() {
-    let (mut app, rx) = app_with_liked_songs_cache(&[
-      "0000000000000000000001",
-      "0000000000000000000002",
-      "0000000000000000000003",
-    ]);
-    app.view.input_context = InputContext::SavedTrackSearch;
-    app.view.input = str_to_vec_char("Track 1");
-    app.view.input_idx = app.view.input.len();
-    app.view.input_cursor_position = app.view.input.len() as u16;
-
-    handler(Key::Enter, &mut app);
-
-    assert!(app.is_saved_track_filter_active());
-    assert_eq!(
-      app
-        .track_table
-        .tracks
-        .iter()
-        .map(|track| track.name.as_str())
-        .collect::<Vec<_>>(),
-      vec!["Track 1"]
-    );
-    assert_eq!(app.view.input_context, InputContext::GlobalSearch);
-    assert_eq!(
-      app.get_current_route().active_block,
-      ActiveBlock::TrackTable
-    );
-    assert!(
-      rx.try_recv().is_err(),
-      "the cached pages answer the search; nothing is dispatched"
-    );
-  }
-
-  #[test]
-  fn empty_saved_track_search_clears_the_filter_without_dispatching() {
-    let (mut app, rx) = app_with_liked_songs_cache(&[
-      "0000000000000000000001",
-      "0000000000000000000002",
-      "0000000000000000000003",
-    ]);
-    app.view.input_context = InputContext::SavedTrackSearch;
-    assert!(app.try_search_saved_tracks_from_cached_pages("Track 1"));
-
-    handler(Key::Enter, &mut app);
-
-    assert!(!app.is_saved_track_filter_active());
-    assert_eq!(app.track_table.tracks.len(), 3, "the cached rows come back");
-    assert!(rx.try_recv().is_err());
-  }
-
-  #[test]
-  fn saved_track_search_without_a_complete_cache_leaves_the_table_alone() {
-    let (mut app, rx) = app_with_liked_songs_cache(&["0000000000000000000001"]);
-    // The table still has a page to fetch, so the cache cannot answer yet.
-    app.saved_tracks_mut().pages[0].next = Some("next".to_string());
-    app.view.input_context = InputContext::SavedTrackSearch;
-    app.view.input = str_to_vec_char("Track 0");
-    app.view.input_idx = app.view.input.len();
-    app.view.input_cursor_position = app.view.input.len() as u16;
-
-    handler(Key::Enter, &mut app);
-
-    assert!(!app.is_saved_track_filter_active());
-    assert_eq!(app.track_table.tracks.len(), 1);
-    assert!(rx.try_recv().is_err());
-  }
-
-  #[test]
-  fn search_enter_on_search_route_moves_focus_to_results() {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut app = App::new(
-      tx,
-      crate::core::user_config::UserConfig::new(),
-      Some(std::time::SystemTime::now()),
-    );
-
-    // Already on the Search route with focus in the input box. This is the case
-    // that previously left focus trapped in the search box on submit (#191).
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::Input);
-    app.view.input = str_to_vec_char("daft punk");
-    app.view.input_idx = app.view.input.len();
-    app.view.input_cursor_position = app.view.input.len() as u16;
-
-    handler(Key::Enter, &mut app);
-
-    match rx.recv().unwrap() {
-      IoEvent::GetSearchResults(query, _) => assert_eq!(query, "daft punk"),
-      _ => panic!("unexpected event"),
-    }
-
-    let route = app.get_current_route();
-    assert_eq!(route.active_block, ActiveBlock::SearchResultBlock);
-    assert_eq!(route.hovered_block, ActiveBlock::SearchResultBlock);
   }
 
   #[test]

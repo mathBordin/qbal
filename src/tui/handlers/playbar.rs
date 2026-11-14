@@ -19,18 +19,8 @@ pub fn handler(key: Key, app: &mut App) {
   };
 }
 
-pub(crate) fn handle_action_key(key: Key, app: &mut App) -> bool {
-  match key {
-    k if k == app.user_config.keys.like_track => {
-      handle_control(PlaybarControl::Like, app);
-      true
-    }
-    Key::Char('w') => {
-      app.apply(Action::OpenAddPlayingTrackDialog);
-      true
-    }
-    _ => false,
-  }
+pub(crate) fn handle_action_key(key: Key, _app: &mut App) -> bool {
+  matches!(key, Key::Char('w'))
 }
 
 /// Open or close the now playing panel. Opening it on a terminal too narrow to
@@ -40,7 +30,6 @@ fn toggle_now_playing_panel(app: &mut App) {
   if !app.view.now_playing_panel {
     return;
   }
-  app.request_up_next();
   let too_narrow = content_width_without_now_playing(app).is_some_and(|width| {
     now_playing_hidden_reason(app, width) == Some(NowPlayingHidden::TooNarrow)
   });
@@ -56,7 +45,6 @@ pub(crate) fn handle_control(control: PlaybarControl, app: &mut App) {
     PlaybarControl::Next => app.apply(Action::NextTrack),
     PlaybarControl::Shuffle => app.apply(Action::ToggleShuffle),
     PlaybarControl::Repeat => app.apply(Action::CycleRepeat),
-    PlaybarControl::Like => app.apply(Action::ToggleSaveCurrentItem),
     PlaybarControl::VolumeDown => app.apply(Action::VolumeDown),
     PlaybarControl::VolumeUp => app.apply(Action::VolumeUp),
   };
@@ -117,38 +105,5 @@ mod tests {
       app.status_message(),
       Some(app.strings().screens.now_playing_too_narrow)
     );
-  }
-
-  #[test]
-  fn on_add_current_track_without_playback_sets_status_message() {
-    let mut app = App::default();
-    app.set_current_route_state(Some(ActiveBlock::PlayBar), Some(ActiveBlock::PlayBar));
-
-    handler(Key::Char('w'), &mut app);
-
-    assert_eq!(app.status_message(), Some("No track currently playing"));
-  }
-
-  #[test]
-  fn an_origin_from_another_route_is_ignored_when_leaving_the_playbar() {
-    let mut app = App::default();
-    app.set_current_route_state(Some(ActiveBlock::Home), Some(ActiveBlock::Home));
-    common_key_events::remember_playbar_origin(&mut app);
-    app.set_current_route_state(Some(ActiveBlock::PlayBar), Some(ActiveBlock::PlayBar));
-
-    app.push_navigation_stack(RouteId::AlbumTracks, ActiveBlock::AlbumTracks);
-    common_key_events::remember_playbar_origin(&mut app);
-    app.set_current_route_state(Some(ActiveBlock::PlayBar), Some(ActiveBlock::PlayBar));
-    assert_eq!(
-      app.pop_navigation_stack().map(|route| route.id),
-      Some(RouteId::AlbumTracks)
-    );
-
-    handler(Key::Up, &mut app);
-
-    let route = app.get_current_route();
-    assert_eq!(route.id, RouteId::Home);
-    assert_eq!(route.active_block, ActiveBlock::Empty);
-    assert_eq!(route.hovered_block, ActiveBlock::MyPlaylists);
   }
 }

@@ -28,23 +28,12 @@ pub struct SpectrumData {
   /// visualizers trace.
   pub wave: Vec<f32>,
   /// How many capture frames came in so far: unchanged means no new audio.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
   pub written: u64,
 }
 
 /// Points in `SpectrumData::wave`, and the stretch of audio they cover.
 const WAVE_POINTS: usize = 480;
 const WAVE_SECONDS: f32 = 0.05;
-
-/// The newest samples of the capture as a mono mix from -1 to 1, oldest first,
-/// for a frontend that runs its own analysis.
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub struct RecentAudio {
-  pub samples: Vec<f32>,
-  pub sample_rate: u32,
-  /// How many frames came in so far: unchanged means no new audio.
-  pub written: u64,
-}
 
 /// Audio analyzer wrapping the vendored cavacore engine: log-spaced per-bar
 /// cutoffs over bass/mid/treble FFTs, integral smoothing, gravity fall-off and
@@ -108,17 +97,6 @@ impl AudioAnalyzer {
     }
   }
 
-  /// Adopt the rate the audio server actually negotiated. Only the PipeWire
-  /// backend renegotiates after construction, so cpal builds never call this.
-  #[allow(dead_code)]
-  pub fn set_sample_rate(&mut self, sample_rate: u32) {
-    let sample_rate = clamp_sample_rate(sample_rate);
-    if sample_rate != self.sample_rate {
-      let bars_per_channel = clamp_bars_per_channel(sample_rate, self.bars_per_channel);
-      *self = Self::with_plan(sample_rate, bars_per_channel);
-    }
-  }
-
   /// Push interleaved capture frames. Owning the channel rule here keeps both
   /// capture backends from restating it: channels 0/1 pass through to cava's
   /// stereo pipeline, a mono device duplicates. Deinterleaving and the 16-bit
@@ -163,15 +141,6 @@ impl AudioAnalyzer {
     self.spectrum.written = self.written;
 
     self.spectrum.clone()
-  }
-
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub fn recent(&self) -> RecentAudio {
-    RecentAudio {
-      samples: self.recent.iter().copied().collect(),
-      sample_rate: self.sample_rate,
-      written: self.written,
-    }
   }
 }
 
@@ -249,12 +218,6 @@ pub fn spectrum_for(analyzer: &SharedAnalyzer, desired_bars: usize) -> Option<Sp
   Some(analyzer.process())
 }
 
-/// The newest tenth of a second, without running cava.
-#[cfg_attr(not(feature = "gui"), allow(dead_code))]
-pub fn recent_audio(analyzer: &SharedAnalyzer) -> Option<RecentAudio> {
-  Some(analyzer.lock().ok()?.recent())
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -264,19 +227,6 @@ mod tests {
     let mut analyzer = AudioAnalyzer::new(48_000, 12);
     analyzer.push_frames(&[1.0, -0.5], 2);
     assert_eq!(analyzer.pending, vec![32_768.0, -16_384.0]);
-  }
-
-  #[test]
-  fn a_new_band_count_keeps_the_recent_audio_and_its_count() {
-    let mut analyzer = AudioAnalyzer::new(48_000, 12);
-    analyzer.push_frames(&[0.5, 0.5, -0.25, -0.25], 2);
-
-    analyzer.set_bars(40);
-
-    let recent = analyzer.recent();
-    assert_eq!(recent.written, 2);
-    assert_eq!(recent.samples, vec![0.5, -0.25]);
-    assert!(analyzer.pending.is_empty());
   }
 
   #[test]
@@ -345,28 +295,6 @@ mod tests {
   }
 
   #[test]
-  fn degenerate_sample_rates_never_panic_the_builder() {
-    for rate in [0, 1, 2, 3, 4, 7_999] {
-      let mut analyzer = AudioAnalyzer::new(rate, 12);
-      analyzer.set_sample_rate(5);
-      let _ = analyzer.process();
-    }
-  }
-
-  #[test]
-  fn recent_audio_is_a_mono_mix_oldest_first_with_a_count_of_frames() {
-    let mut analyzer = AudioAnalyzer::new(48_000, 12);
-    analyzer.push_frames(&[1.0, 0.0, -0.5, -0.5], 2);
-    analyzer.push_frames(&[0.25, 0.25], 2);
-
-    let recent = analyzer.recent();
-
-    assert_eq!(recent.samples, vec![0.5, -0.5, 0.25]);
-    assert_eq!(recent.sample_rate, 48_000);
-    assert_eq!(recent.written, 3);
-  }
-
-  #[test]
   fn the_wave_is_the_newest_stretch_thinned_and_oldest_first() {
     let recent: VecDeque<f32> = (0..10_000).map(|i| i as f32).collect();
     let mut wave = Vec::new();
@@ -379,27 +307,5 @@ mod tests {
 
     thin_wave(&VecDeque::new(), 48_000, &mut wave);
     assert!(wave.is_empty());
-  }
-
-  #[test]
-  fn recent_audio_keeps_only_the_newest_tenth_of_a_second() {
-    let mut analyzer = AudioAnalyzer::new(8_000, 12);
-    analyzer.push_frames(&vec![1.0; 2 * 900], 2);
-    analyzer.push_frames(&[0.25, 0.25], 2);
-
-    let recent = analyzer.recent();
-
-    assert_eq!(recent.samples.len(), 800);
-    assert_eq!(recent.samples.last(), Some(&0.25));
-  }
-
-  #[test]
-  fn sample_rate_change_rebuilds_without_panicking() {
-    let mut analyzer = AudioAnalyzer::new(48_000, 12);
-    analyzer.push_frames(&[0.5; 256], 2);
-    analyzer.set_sample_rate(44_100);
-
-    let spectrum = analyzer.process();
-    assert_eq!(spectrum.bands.len(), 12);
   }
 }

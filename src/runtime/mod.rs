@@ -8,22 +8,12 @@
 
 mod bootstrap;
 mod cli;
-#[cfg(feature = "gui")]
-mod gui;
-#[cfg(any(feature = "tui", feature = "gui"))]
+#[cfg(feature = "tui")]
 mod instance;
 mod logging;
 mod pump;
-#[cfg(any(feature = "tui", feature = "gui"))]
+#[cfg(feature = "tui")]
 mod startup;
-#[cfg(any(feature = "streaming", test))]
-mod streaming;
-
-#[cfg(feature = "gui")]
-pub use gui::{
-  run_gui, run_gui_hosted, GuiHost, MediaCommand, MediaLink, MediaState, SetWindow, UpdateLink,
-  WindowMode,
-};
 
 use crate::core::migrations::apply_legacy_state_file_migrations;
 use anyhow::{anyhow, Result};
@@ -33,68 +23,13 @@ use std::io;
 use std::sync::Arc;
 
 /// Console implementation of the first-launch surface for builds without the
-/// terminal frontend. CLI subcommands can still reach the Spotify login
-/// (`--reconfigure-auth`), whose lines are plain stdout;
-/// mirrors `ConsoleOnboarding` minus the interactive source picker, which is
-/// unreachable here (the picker only runs on a UI launch, and headless builds
-/// bail out before boot in that case).
+/// terminal frontend. There is no interactive picker to show here: the only
+/// source is Qobuz, and a headless build has no UI launch to run one from.
 #[cfg(not(feature = "tui"))]
 struct HeadlessOnboarding;
 
 #[cfg(not(feature = "tui"))]
-impl crate::core::onboarding::Onboarding for HeadlessOnboarding {
-  fn info(&self, text: &str) {
-    println!("{text}");
-  }
-
-  fn progress(&self, text: &str) {
-    use std::io::Write;
-    print!("{text}");
-    let _ = io::stdout().flush();
-  }
-
-  fn prompt_line(&self, prompt: &str) -> Result<String> {
-    use std::io::Write;
-    print!("{prompt}");
-    let _ = io::stdout().flush();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input)
-  }
-
-  fn is_interactive(&self) -> bool {
-    use std::io::IsTerminal;
-    io::stdin().is_terminal() && io::stdout().is_terminal()
-  }
-
-  fn ask(
-    &self,
-    prompt: &crate::core::onboarding::OnboardingPrompt,
-  ) -> Result<crate::core::onboarding::OnboardingAnswer> {
-    use crate::core::onboarding::{confirm_answer, confirm_console_text, OnboardingPrompt};
-    // Both bootstrap prompts are UI-launch-only and headless builds bail out
-    // before boot there; keep a plain console fallback if this is reached.
-    let OnboardingPrompt::Confirm {
-      title,
-      body,
-      question,
-    } = prompt;
-    println!("{}", confirm_console_text(title, body, question));
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(confirm_answer(&input))
-  }
-
-  fn pick_sources(
-    &self,
-    _options: &[crate::core::source::Source],
-  ) -> Result<Option<Vec<crate::core::source::Source>>> {
-    // Only a UI launch runs the first-run picker, and headless builds return
-    // before boot in that case; fall through to the Spotify wizard if this is
-    // ever reached anyway.
-    Ok(None)
-  }
-}
+impl crate::core::onboarding::Onboarding for HeadlessOnboarding {}
 
 pub async fn run_cli() -> Result<()> {
   let result = run_cli_inner().await;
@@ -167,16 +102,14 @@ async fn run_cli_inner() -> Result<()> {
     return Ok(());
   }
 
-  // Handle self-update command (doesn't need Spotify auth)
-  if cli::handle_self_update_command(&matches).await? {
-    return Ok(());
-  }
-
-  let mut instance_lock = None;
+  // Held until this function returns, so a second UI launch is refused while
+  // this one runs.
   #[cfg(feature = "tui")]
-  if instance::takes_lock(matches.subcommand_name()) {
-    instance_lock = instance::acquire()?;
-  }
+  let _instance_lock = if instance::takes_lock(matches.subcommand_name()) {
+    instance::acquire()?
+  } else {
+    None
+  };
 
   if let Err(e) = apply_legacy_state_file_migrations() {
     log::warn!("[state] failed to migrate legacy app data files: {e}");
@@ -184,22 +117,6 @@ async fn run_cli_inner() -> Result<()> {
 
   if let Some(history_matches) = matches.subcommand_matches("history") {
     println!("{}", crate::cli::handle_history_matches(history_matches)?);
-    return Ok(());
-  }
-
-  // The MCP server owns stdout for the protocol, so it must return before any
-  // other startup path can print to it — and it needs no Spotify auth of its
-  // own, since the running TUI holds the session.
-  #[cfg(feature = "mcp-server")]
-  if let Some(mcp_matches) = matches.subcommand_matches("mcp") {
-    // `status` is the safe probe an agent (or a human) can run; bare `mcp` is the
-    // server and blocks on stdin until the client closes it.
-    if let Some(status_matches) = mcp_matches.subcommand_matches("status") {
-      let (report, code) = crate::infra::mcp::run_status(status_matches.get_flag("json")).await;
-      println!("{report}");
-      std::process::exit(code);
-    }
-    crate::infra::mcp::run_relay().await?;
     return Ok(());
   }
 
@@ -228,36 +145,30 @@ async fn run_cli_inner() -> Result<()> {
   #[cfg(not(feature = "tui"))]
   let onboarding: Arc<dyn crate::core::onboarding::Onboarding> = Arc::new(HeadlessOnboarding);
 
-  let boot = bootstrap::boot(cli::boot_options(&matches), onboarding, &mut instance_lock).await?;
+  let boot = bootstrap::boot(cli::boot_options(&matches), onboarding).await?;
 
-  // Work with the cli (not really async)
-  if let Some(cmd) = matches.subcommand_name() {
-    info!("running in cli mode with command: {}", cmd);
-    // Safe, because we checked if the subcommand is present at runtime
-    let m = matches.subcommand_matches(cmd).unwrap();
-    cli::run_subcommand(boot, cmd, m).await?;
-  // Launch the UI (async)
-  } else {
-    #[cfg(feature = "tui")]
+  // Every subcommand returned above; what is left is the UI launch.
+  #[cfg(feature = "tui")]
+  {
     startup::launch_ui(boot).await?;
-    #[cfg(not(feature = "tui"))]
+    // On stderr, same reasoning as the "Logging to:" notice in `setup_logging`:
+    // stdout is reserved for program output (history HTML). `--completions`,
+    // `update`, `history`, `plugin`, and the headless no-subcommand error all
+    // return earlier and skip it. The failure case is covered by `run_cli`.
+    eprintln!(
+      "{}",
+      logging::exit_log_notice(
+        &crate::core::paths::app_log_path(),
+        log::max_level() >= log::LevelFilter::Debug,
+      )
+    );
+    Ok(())
+  }
+  #[cfg(not(feature = "tui"))]
+  {
+    let _ = boot;
     unreachable!("headless builds reject a UI launch before boot");
   }
-
-  // On stderr, same reasoning as the "Logging to:" notice in `setup_logging`:
-  // stdout is reserved for program output (history HTML, MCP JSON-RPC). Only
-  // reached by the CLI-subcommand and UI-launch paths above; `--completions`,
-  // `update`, `history`, `mcp`, `plugin`, and the headless no-subcommand error
-  // all return earlier and skip it. The failure case is covered by `run_cli`.
-  eprintln!(
-    "{}",
-    logging::exit_log_notice(
-      &crate::core::paths::app_log_path(),
-      log::max_level() >= log::LevelFilter::Debug,
-    )
-  );
-
-  Ok(())
 }
 
 /// A second UI launch refused by the instance lock is expected, not a failure to report.

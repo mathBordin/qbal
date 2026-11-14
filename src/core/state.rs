@@ -43,12 +43,6 @@ impl QobuzBundleCache {
   }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RadioStationAddOutcome {
-  Added,
-  AlreadyExists,
-}
-
 /// Live runtime/app-managed state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeState {
@@ -165,57 +159,6 @@ impl RuntimeState {
     }
   }
 
-  pub fn add_radio_station(
-    &mut self,
-    name: impl AsRef<str>,
-    url: impl AsRef<str>,
-  ) -> Result<RadioStationAddOutcome> {
-    let name = name.as_ref().trim();
-    let url = url.as_ref().trim();
-
-    if name.is_empty() {
-      return Err(anyhow!("Radio station name is empty"));
-    }
-    if url.is_empty() {
-      return Err(anyhow!("Radio station URL is empty"));
-    }
-
-    if self
-      .radio_stations
-      .iter()
-      .any(|station| station.url.trim() == url)
-    {
-      return Ok(RadioStationAddOutcome::AlreadyExists);
-    }
-
-    self.radio_stations.push(RadioStationConfig {
-      name: name.to_string(),
-      url: url.to_string(),
-    });
-
-    Ok(RadioStationAddOutcome::Added)
-  }
-
-  pub fn remove_radio_station_by_url(
-    &mut self,
-    url: impl AsRef<str>,
-  ) -> Result<Option<RadioStationConfig>> {
-    let url = url.as_ref().trim();
-    if url.is_empty() {
-      return Err(anyhow!("Radio station URL is empty"));
-    }
-
-    let Some(index) = self
-      .radio_stations
-      .iter()
-      .position(|station| station.url.trim() == url)
-    else {
-      return Ok(None);
-    };
-
-    Ok(Some(self.radio_stations.remove(index)))
-  }
-
   pub fn mark_announcement_seen(&mut self, announcement_id: impl Into<String>) {
     let id = announcement_id.into();
     if id.is_empty() {
@@ -291,6 +234,8 @@ impl PersistedRuntimeState {
     }
   }
 
+  // Written only by the Linux MPRIS shuffle handler.
+  #[cfg_attr(not(all(feature = "mpris", target_os = "linux")), allow(dead_code))]
   pub fn shuffle_enabled(shuffle_enabled: bool) -> Self {
     Self {
       shuffle_enabled: Some(shuffle_enabled),
@@ -301,13 +246,6 @@ impl PersistedRuntimeState {
   pub fn active_source(active_source: Source) -> Self {
     Self {
       active_source: Some(active_source),
-      ..Default::default()
-    }
-  }
-
-  pub fn playlist_sidebar_order(playlist_sidebar_order: SidebarPlaylistOrder) -> Self {
-    Self {
-      playlist_sidebar_order: Some(playlist_sidebar_order),
       ..Default::default()
     }
   }
@@ -351,14 +289,6 @@ impl PersistedRuntimeState {
     }
   }
 
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  pub fn gui_pane_layout(gui_pane_layout: &GuiLayout) -> Self {
-    Self {
-      gui_pane_layout: Some(gui_pane_layout.sanitized()),
-      ..Default::default()
-    }
-  }
-
   pub fn pitch_view_chosen(pitch_view_chosen: bool) -> Self {
     Self {
       pitch_view_chosen: Some(pitch_view_chosen),
@@ -366,32 +296,9 @@ impl PersistedRuntimeState {
     }
   }
 
-  pub fn radio_station(radio_station: RadioStationConfig) -> Self {
-    Self {
-      radio_stations: Some(vec![radio_station]),
-      ..Default::default()
-    }
-  }
-
-  pub fn community_pin_prompt_shown(community_pin_prompt_shown: bool) -> Self {
-    Self {
-      community_pin_prompt_shown: Some(community_pin_prompt_shown),
-      ..Default::default()
-    }
-  }
-
-  #[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
   pub fn qobuz_bundle_cache(qobuz_bundle_cache: QobuzBundleCache) -> Self {
     Self {
       qobuz_bundle_cache: Some(qobuz_bundle_cache),
-      ..Default::default()
-    }
-  }
-
-  #[cfg_attr(not(feature = "spotify-session"), allow(dead_code))]
-  pub fn spotify_device_id(device_id: &str) -> Self {
-    Self {
-      spotify_device_id: sanitized_device_id(Some(device_id)),
       ..Default::default()
     }
   }
@@ -530,19 +437,6 @@ fn load_for_save(path: &Path) -> Result<PersistedRuntimeState> {
 pub fn save(path: &Path, state: &PersistedRuntimeState) -> Result<()> {
   let mut merged = load_for_save(path)?;
   merge_state_patch(&mut merged, state);
-  write_state(path, &merged)
-}
-
-/// Remove a radio station without sending a stale full station list.
-pub fn save_removing_radio_station(path: &Path, url: &str) -> Result<()> {
-  let mut merged = load_for_save(path)?;
-  if let Some(stations) = &mut merged.radio_stations {
-    let url = url.trim();
-    stations.retain(|station| station.url.trim() != url);
-    *stations = sanitized_radio_stations(stations);
-  } else {
-    merged.radio_stations = Some(Vec::new());
-  }
   write_state(path, &merged)
 }
 
@@ -943,197 +837,6 @@ mod tests {
   }
 
   #[test]
-  fn playlist_sidebar_order_sparse_save_preserves_concurrent_fields() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-    save(
-      &path,
-      &PersistedRuntimeState {
-        volume_percent: Some(20),
-        active_source: Some(Source::Radio),
-        ..Default::default()
-      },
-    )
-    .unwrap();
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&load(&path).unwrap());
-
-    // Another instance updates the file after this runtime loaded its state.
-    save(
-      &path,
-      &PersistedRuntimeState {
-        volume_percent: Some(73),
-        shuffle_enabled: Some(true),
-        ..Default::default()
-      },
-    )
-    .unwrap();
-    runtime.playlist_sidebar_order = SidebarPlaylistOrder::Name;
-    save(
-      &path,
-      &PersistedRuntimeState::playlist_sidebar_order(runtime.playlist_sidebar_order),
-    )
-    .unwrap();
-
-    assert_eq!(
-      load(&path).unwrap(),
-      PersistedRuntimeState {
-        volume_percent: Some(73),
-        shuffle_enabled: Some(true),
-        active_source: Some(Source::Radio),
-        playlist_sidebar_order: Some(SidebarPlaylistOrder::Name),
-        ..Default::default()
-      }
-    );
-  }
-
-  #[test]
-  fn unrelated_sparse_saves_preserve_playlist_sidebar_order() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    for order in [
-      SidebarPlaylistOrder::RecentlyPlayed,
-      SidebarPlaylistOrder::Name,
-    ] {
-      save(&path, &PersistedRuntimeState::playlist_sidebar_order(order)).unwrap();
-      let mut runtime = RuntimeState {
-        playlist_sidebar_order: order,
-        ..RuntimeState::default()
-      };
-
-      for patch in [
-        PersistedRuntimeState::volume_percent(42),
-        PersistedRuntimeState::active_source(Source::Radio),
-        PersistedRuntimeState::shuffle_enabled(true),
-      ] {
-        runtime.apply_persisted(&patch);
-        assert_eq!(runtime.playlist_sidebar_order, order);
-        save(&path, &patch).unwrap();
-        assert_eq!(load(&path).unwrap().playlist_sidebar_order, Some(order));
-      }
-    }
-  }
-
-  #[test]
-  fn playlist_sidebar_order_patches_merge_and_restore_spotify() {
-    let mut merged = PersistedRuntimeState::default();
-    assert!(merged.is_empty());
-
-    for order in [
-      SidebarPlaylistOrder::RecentlyPlayed,
-      SidebarPlaylistOrder::Name,
-      SidebarPlaylistOrder::Spotify,
-    ] {
-      let patch = PersistedRuntimeState::playlist_sidebar_order(order);
-      assert!(!patch.is_empty());
-      assert_eq!(
-        patch,
-        PersistedRuntimeState {
-          playlist_sidebar_order: Some(order),
-          ..Default::default()
-        }
-      );
-      merged.merge_patch(&patch);
-      assert_eq!(merged, patch);
-    }
-  }
-
-  #[test]
-  fn state_round_trips_all_runtime_attributes() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("spotatui").join("state.yml");
-    let state = PersistedRuntimeState {
-      volume_percent: Some(42),
-      shuffle_enabled: Some(true),
-      active_source: Some(Source::Radio),
-      playlist_sidebar_order: Some(SidebarPlaylistOrder::RecentlyPlayed),
-      seen_announcement_ids: Some(vec!["a".to_string(), "b".to_string()]),
-      dismissed_announcements: Some(vec!["old".to_string()]),
-      sidebar_width_percent: Some(25),
-      playbar_height_rows: Some(7),
-      library_height_percent: Some(35),
-      pane_layout: Some(lyrics_beside_main()),
-      gui_pane_layout: Some(GuiLayout::default()),
-      pitch_view_chosen: Some(false),
-      radio_stations: Some(vec![RadioStationConfig {
-        name: "Station".to_string(),
-        url: "https://example.test/stream".to_string(),
-      }]),
-      community_pin_prompt_shown: Some(true),
-      qobuz_bundle_cache: Some(QobuzBundleCache {
-        bundle_version: "8.2.0-b034".to_string(),
-        app_id: "123456789".to_string(),
-        app_secret: "s".repeat(32),
-        oauth_key: "k".to_string(),
-      }),
-      spotify_device_id: Some("device-a".to_string()),
-    };
-
-    save(&path, &state).unwrap();
-
-    let yaml = std::fs::read_to_string(&path).unwrap();
-    assert!(yaml.contains("active_source: Radio"));
-    assert_eq!(load(&path).unwrap(), state);
-
-    #[cfg(unix)]
-    {
-      use std::os::unix::fs::PermissionsExt;
-      let dir_mode = std::fs::metadata(path.parent().unwrap())
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-      let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-      assert_eq!(dir_mode, 0o700);
-      assert_eq!(file_mode, 0o600);
-    }
-  }
-
-  #[test]
-  fn the_spotify_device_id_saves_as_a_sparse_patch() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-    save(&path, &PersistedRuntimeState::volume_percent(42)).unwrap();
-
-    save(
-      &path,
-      &PersistedRuntimeState::spotify_device_id(" device-a "),
-    )
-    .unwrap();
-
-    let saved = load(&path).unwrap();
-    assert_eq!(saved.spotify_device_id.as_deref(), Some("device-a"));
-    assert_eq!(saved.volume_percent, Some(42));
-  }
-
-  #[test]
-  fn a_later_spotify_device_id_replaces_the_earlier_one() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-    save(&path, &PersistedRuntimeState::spotify_device_id("device-a")).unwrap();
-    save(&path, &PersistedRuntimeState::spotify_device_id("device-b")).unwrap();
-
-    assert_eq!(
-      load(&path).unwrap().spotify_device_id.as_deref(),
-      Some("device-b")
-    );
-  }
-
-  #[test]
-  fn a_blank_spotify_device_id_is_no_patch() {
-    let patch = PersistedRuntimeState::spotify_device_id("   ");
-    assert!(patch.is_empty());
-
-    let mut runtime = RuntimeState {
-      spotify_device_id: Some("kept".to_string()),
-      ..RuntimeState::default()
-    };
-    runtime.apply_persisted(&patch);
-    assert_eq!(runtime.spotify_device_id.as_deref(), Some("kept"));
-  }
-
-  #[test]
   fn an_old_state_file_with_key_tiers_still_loads() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state.yml");
@@ -1144,19 +847,6 @@ mod tests {
     .unwrap();
 
     assert_eq!(load(&path).unwrap().volume_percent, Some(30));
-  }
-  #[test]
-  fn community_pin_prompt_shown_round_trips() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    save(
-      &path,
-      &PersistedRuntimeState::community_pin_prompt_shown(true),
-    )
-    .unwrap();
-
-    assert_eq!(load(&path).unwrap().community_pin_prompt_shown, Some(true));
   }
 
   #[test]
@@ -1205,56 +895,6 @@ mod tests {
     assert_eq!(
       load(&path).unwrap().playbar_height_rows,
       Some(MAX_PLAYBAR_ROWS)
-    );
-  }
-
-  #[test]
-  fn state_save_merges_sparse_patches_without_clobbering_unmentioned_fields() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    let existing = PersistedRuntimeState {
-      volume_percent: Some(20),
-      active_source: Some(Source::Radio),
-      seen_announcement_ids: Some(vec!["first".to_string()]),
-      radio_stations: Some(vec![RadioStationConfig {
-        name: "Alpha".to_string(),
-        url: "https://example.test/alpha".to_string(),
-      }]),
-      ..Default::default()
-    };
-    save(&path, &existing).unwrap();
-
-    let patch = PersistedRuntimeState {
-      shuffle_enabled: Some(true),
-      seen_announcement_ids: Some(vec!["second".to_string()]),
-      radio_stations: Some(vec![RadioStationConfig {
-        name: "Beta".to_string(),
-        url: "https://example.test/beta".to_string(),
-      }]),
-      ..Default::default()
-    };
-    save(&path, &patch).unwrap();
-
-    assert_eq!(
-      load(&path).unwrap(),
-      PersistedRuntimeState {
-        volume_percent: Some(20),
-        shuffle_enabled: Some(true),
-        active_source: Some(Source::Radio),
-        seen_announcement_ids: Some(vec!["first".to_string(), "second".to_string()]),
-        radio_stations: Some(vec![
-          RadioStationConfig {
-            name: "Alpha".to_string(),
-            url: "https://example.test/alpha".to_string(),
-          },
-          RadioStationConfig {
-            name: "Beta".to_string(),
-            url: "https://example.test/beta".to_string(),
-          },
-        ]),
-        ..Default::default()
-      }
     );
   }
 
@@ -1320,64 +960,6 @@ mod tests {
   }
 
   #[test]
-  fn radio_station_removal_preserves_other_runtime_state() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    save(
-      &path,
-      &PersistedRuntimeState {
-        volume_percent: Some(55),
-        radio_stations: Some(vec![
-          RadioStationConfig {
-            name: "Alpha".to_string(),
-            url: "https://example.test/alpha".to_string(),
-          },
-          RadioStationConfig {
-            name: "Beta".to_string(),
-            url: "https://example.test/beta".to_string(),
-          },
-        ]),
-        ..Default::default()
-      },
-    )
-    .unwrap();
-
-    save_removing_radio_station(&path, " https://example.test/alpha ").unwrap();
-
-    assert_eq!(
-      load(&path).unwrap(),
-      PersistedRuntimeState {
-        volume_percent: Some(55),
-        radio_stations: Some(vec![RadioStationConfig {
-          name: "Beta".to_string(),
-          url: "https://example.test/beta".to_string(),
-        }]),
-        ..Default::default()
-      }
-    );
-  }
-
-  #[test]
-  fn persisted_runtime_state_builds_sparse_patches() {
-    let mut patch = PersistedRuntimeState::volume_percent(120);
-    patch.merge_patch(&PersistedRuntimeState::active_source(Source::Subsonic));
-    patch.merge_patch(&PersistedRuntimeState::playbar_height_rows(
-      MAX_PLAYBAR_ROWS + 10,
-    ));
-
-    assert_eq!(
-      patch,
-      PersistedRuntimeState {
-        volume_percent: Some(100),
-        active_source: Some(Source::Subsonic),
-        playbar_height_rows: Some(MAX_PLAYBAR_ROWS),
-        ..Default::default()
-      }
-    );
-  }
-
-  #[test]
   fn applying_a_persisted_device_id_trims_it_and_keeps_an_absent_one() {
     let mut runtime = RuntimeState {
       spotify_device_id: Some("existing".to_string()),
@@ -1396,77 +978,5 @@ mod tests {
       runtime.to_persisted().spotify_device_id.as_deref(),
       Some("new")
     );
-  }
-  #[test]
-  fn runtime_state_applies_and_sanitizes_persisted_values() {
-    let state = PersistedRuntimeState {
-      volume_percent: Some(150),
-      active_source: Some(Source::Subsonic),
-      seen_announcement_ids: Some(vec![" seen ".to_string(), " ".to_string()]),
-      sidebar_width_percent: Some(120),
-      playbar_height_rows: Some(MAX_PLAYBAR_ROWS + 10),
-      library_height_percent: Some(101),
-      radio_stations: Some(vec![
-        RadioStationConfig {
-          name: " Good ".to_string(),
-          url: " https://example.test ".to_string(),
-        },
-        RadioStationConfig {
-          name: "Duplicate".to_string(),
-          url: "https://example.test".to_string(),
-        },
-        RadioStationConfig {
-          name: "Broken".to_string(),
-          url: " ".to_string(),
-        },
-      ]),
-      ..Default::default()
-    };
-
-    let mut runtime = RuntimeState::default();
-    runtime.apply_persisted(&state);
-
-    assert_eq!(runtime.volume_percent, 100);
-    assert_eq!(runtime.active_source, Source::Subsonic);
-    assert_eq!(runtime.seen_announcement_ids, vec!["seen"]);
-    assert_eq!(runtime.sidebar_width_percent, 100);
-    assert_eq!(runtime.playbar_height_rows, MAX_PLAYBAR_ROWS);
-    assert_eq!(runtime.library_height_percent, 100);
-    assert_eq!(
-      runtime.radio_stations,
-      vec![RadioStationConfig {
-        name: "Good".to_string(),
-        url: "https://example.test".to_string(),
-      }]
-    );
-  }
-
-  #[test]
-  fn radio_station_helpers_trim_dedupe_and_remove() {
-    let mut runtime = RuntimeState::default();
-
-    assert_eq!(
-      runtime
-        .add_radio_station(" Groove ", " https://example.test/stream ")
-        .unwrap(),
-      RadioStationAddOutcome::Added
-    );
-    assert_eq!(runtime.radio_stations[0].name, "Groove");
-    assert_eq!(runtime.radio_stations[0].url, "https://example.test/stream");
-    assert_eq!(
-      runtime
-        .add_radio_station("Duplicate", "https://example.test/stream")
-        .unwrap(),
-      RadioStationAddOutcome::AlreadyExists
-    );
-
-    let removed = runtime
-      .remove_radio_station_by_url(" https://example.test/stream ")
-      .unwrap();
-    assert_eq!(
-      removed.map(|station| station.name),
-      Some("Groove".to_string())
-    );
-    assert!(runtime.radio_stations.is_empty());
   }
 }

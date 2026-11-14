@@ -2,7 +2,6 @@ use super::*;
 
 /// One finished play since this process started, for the Session screen.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct SessionPlay {
   /// Unix milliseconds.
   pub started_at_ms: u64,
@@ -28,10 +27,5 @@ impl App {
     }
     self.session_plays.push(play);
     self.display_revisions.bump(DisplayDomain::Session);
-  }
-
-  #[cfg(feature = "gui")]
-  pub(crate) fn session_plays(&self) -> &[SessionPlay] {
-    &self.session_plays
   }
 }

@@ -1,6 +1,5 @@
 use crate::core::format::Template;
 use crate::core::input::{Arrow, Key};
-use crate::core::state::{sanitized_radio_stations, RadioStationConfig};
 // Re-exported so existing `crate::core::user_config::{Theme, ...}` importers
 // keep working now that the theme types live in `core/theme.rs`.
 pub use crate::core::theme::{color_to_string, parse_theme_item, Theme, ThemePreset};
@@ -10,31 +9,6 @@ use std::collections::HashMap;
 use std::{fs, path::PathBuf};
 
 const FILE_NAME: &str = "config.yml";
-
-/// The Connect name of a fresh install; on Android with the phone's model, so a
-/// phone and a desktop spotatui on one account have different names.
-fn default_device_name() -> String {
-  #[cfg(target_os = "android")]
-  if let Some(model) = android_model() {
-    return format!("spotatui ({model})");
-  }
-  "spotatui".to_string()
-}
-
-#[cfg(target_os = "android")]
-fn android_model() -> Option<String> {
-  let mut value = [0 as libc::c_char; libc::PROP_VALUE_MAX as usize];
-  // SAFETY: the buffer holds PROP_VALUE_MAX bytes, the most the call writes.
-  let len =
-    unsafe { libc::__system_property_get(c"ro.product.model".as_ptr(), value.as_mut_ptr()) };
-  let bytes = value[..usize::try_from(len).ok()?]
-    .iter()
-    .map(|&c| c as u8)
-    .collect();
-  String::from_utf8(bytes)
-    .ok()
-    .filter(|model| !model.trim().is_empty())
-}
 
 pub const DEFAULT_TICK_RATE_MILLISECONDS: u64 = 250;
 pub const DEFAULT_ANIMATION_TICK_RATE_MILLISECONDS: u64 = 16;
@@ -92,14 +66,12 @@ pub fn normalize_tick_rate_milliseconds(value: i64) -> u64 {
 /// The Qobuz `format_id` values, in the order of [`QOBUZ_QUALITY_LABELS`].
 const QOBUZ_QUALITY_IDS: [u8; 4] = [5, 6, 7, 27];
 /// Settings-screen labels for the Qobuz qualities, in [`QOBUZ_QUALITY_IDS`] order.
-#[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
 pub const QOBUZ_QUALITY_LABELS: &[&str] = &["MP3 320", "FLAC 16/44.1", "FLAC 24/96", "FLAC 24/192"];
 /// The default quality (FLAC 16/44.1) as an index into both tables.
 const QOBUZ_QUALITY_DEFAULT_INDEX: usize = 1;
 const QOBUZ_QUALITY_DEFAULT: u8 = QOBUZ_QUALITY_IDS[QOBUZ_QUALITY_DEFAULT_INDEX];
 
 /// The settings label of a Qobuz `format_id` (unknown ids read as the default).
-#[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
 pub fn qobuz_quality_label(quality: u8) -> &'static str {
   let index = QOBUZ_QUALITY_IDS
     .iter()
@@ -109,7 +81,6 @@ pub fn qobuz_quality_label(quality: u8) -> &'static str {
 }
 
 /// The Qobuz `format_id` behind a settings label (unknown labels read as the default).
-#[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
 pub fn qobuz_quality_from_label(label: &str) -> u8 {
   let index = QOBUZ_QUALITY_LABELS
     .iter()
@@ -118,65 +89,11 @@ pub fn qobuz_quality_from_label(label: &str) -> u8 {
   QOBUZ_QUALITY_IDS[index]
 }
 
-/// A configured Qobuz quality, or the default for an unknown id.
-/// The native streaming bitrates librespot offers, in kbps.
-pub const STREAMING_BITRATES: &[&str] = &["96", "160", "320"];
-const STREAMING_BITRATE_DEFAULT: u16 = 320;
-
-pub fn streaming_bitrate_or_default(bitrate: u16) -> u16 {
-  if STREAMING_BITRATES.contains(&bitrate.to_string().as_str()) {
-    bitrate
-  } else {
-    STREAMING_BITRATE_DEFAULT
-  }
-}
-
 fn qobuz_quality_or_default(quality: u8) -> u8 {
   if QOBUZ_QUALITY_IDS.contains(&quality) {
     quality
   } else {
     QOBUZ_QUALITY_DEFAULT
-  }
-}
-
-/// Parse a human-readable update delay into seconds.
-/// Accepts: "0", "30s", "10m", "2h", "7d", or a bare second count.
-pub fn parse_update_delay_secs(value: &str) -> Result<u64, String> {
-  let value = value.trim();
-  if value == "0" || value.is_empty() {
-    return Ok(0);
-  }
-
-  for (suffix, multiplier, label) in [
-    ("d", 86400_u64, "days"),
-    ("h", 3600_u64, "hours"),
-    ("m", 60_u64, "minutes"),
-    ("s", 1_u64, "seconds"),
-  ] {
-    if let Some(amount) = value.strip_suffix(suffix) {
-      return amount
-        .trim()
-        .parse::<u64>()
-        .map(|v| v * multiplier)
-        .map_err(|_| format!("Invalid {label} value"));
-    }
-  }
-
-  value
-    .parse::<u64>()
-    .map_err(|_| "Invalid numeric value or unknown suffix".to_string())
-}
-
-#[cfg(feature = "self-update")]
-pub fn format_update_delay_secs(secs: u64) -> String {
-  if secs >= 86400 {
-    format!("{}d", secs / 86400)
-  } else if secs >= 3600 {
-    format!("{}h", secs / 3600)
-  } else if secs >= 60 {
-    format!("{}m", secs / 60)
-  } else {
-    format!("{}s", secs)
   }
 }
 
@@ -213,7 +130,6 @@ pub struct UserTheme {
 
 /// Available audio visualizer styles
 #[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum VisualizerStyle {
   /// Cava mode: cava's engine and mirrored stereo layout drawn in eighth blocks
   ///
@@ -334,83 +250,6 @@ impl StartupBehavior {
       "Play" => StartupBehavior::Play,
       "Pause" => StartupBehavior::Pause,
       _ => StartupBehavior::Continue,
-    }
-  }
-}
-
-/// What plays the audio behind spotatui's own Connect device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlaybackEngine {
-  #[default]
-  Librespot,
-  /// Spotify Soloist, a binary the user downloads from Spotify.
-  Soloist,
-}
-
-#[cfg(feature = "soloist")]
-impl PlaybackEngine {
-  pub fn name(self) -> &'static str {
-    match self {
-      PlaybackEngine::Librespot => "librespot",
-      PlaybackEngine::Soloist => "Soloist",
-    }
-  }
-
-  pub fn options() -> &'static [&'static str] {
-    &["librespot", "Soloist"]
-  }
-
-  pub fn from_name(name: &str) -> Self {
-    match name {
-      "Soloist" => PlaybackEngine::Soloist,
-      _ => PlaybackEngine::Librespot,
-    }
-  }
-}
-
-/// The stream quality Soloist asks for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SoloistQuality {
-  Normal,
-  High,
-  VeryHigh,
-  #[default]
-  Lossless,
-}
-
-#[cfg(feature = "soloist")]
-impl SoloistQuality {
-  pub fn name(self) -> &'static str {
-    match self {
-      SoloistQuality::Normal => "Normal",
-      SoloistQuality::High => "High",
-      SoloistQuality::VeryHigh => "Very high",
-      SoloistQuality::Lossless => "Lossless",
-    }
-  }
-
-  pub fn options() -> &'static [&'static str] {
-    &["Normal", "High", "Very high", "Lossless"]
-  }
-
-  pub fn from_name(name: &str) -> Self {
-    match name {
-      "Normal" => SoloistQuality::Normal,
-      "High" => SoloistQuality::High,
-      "Very high" => SoloistQuality::VeryHigh,
-      _ => SoloistQuality::Lossless,
-    }
-  }
-
-  /// Spotify's `audio.play_bitrate_enumeration`; only 5 (FLAC) is measured on Soloist.
-  pub fn enumeration(self) -> u8 {
-    match self {
-      SoloistQuality::Normal => 2,
-      SoloistQuality::High => 3,
-      SoloistQuality::VeryHigh => 4,
-      SoloistQuality::Lossless => 5,
     }
   }
 }
@@ -599,20 +438,6 @@ pub struct KeyBindingsString {
   previous_page: Option<String>,
   jump_to_start: Option<String>,
   jump_to_end: Option<String>,
-  jump_to_album: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  dj_open: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  dj_toggle_auto_queue: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  dj_vibe_shift: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  dj_toggle_fresh_only: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  dj_pick_model: Option<String>,
-  jump_to_artist_album: Option<String>,
-  jump_to_context: Option<String>,
-  manage_devices: Option<String>,
   decrease_volume: Option<String>,
   increase_volume: Option<String>,
   toggle_playback: Option<String>,
@@ -626,8 +451,6 @@ pub struct KeyBindingsString {
   repeat: Option<String>,
   search: Option<String>,
   submit: Option<String>,
-  copy_song_url: Option<String>,
-  copy_album_url: Option<String>,
   audio_analysis: Option<String>,
   #[serde(alias = "basic_view")]
   lyrics_view: Option<String>,
@@ -638,8 +461,6 @@ pub struct KeyBindingsString {
   remove_from_queue: Option<String>,
   open_settings: Option<String>,
   save_settings: Option<String>,
-  listening_party: Option<String>,
-  like_track: Option<String>,
   generate_recap: Option<String>,
   detach_pane: Option<String>,
   close_pane: Option<String>,
@@ -668,27 +489,6 @@ pub struct KeyBindings {
   pub previous_page: Key,
   pub jump_to_start: Key,
   pub jump_to_end: Key,
-  pub jump_to_album: Key,
-  /// Open the AI DJ screen. A global binding rather than only a sidebar row: the
-  /// Library panel is not drawn for non-Spotify sources, so the row alone would
-  /// make the DJ unreachable there.
-  #[cfg(feature = "ai-dj")]
-  pub dj_open: Key,
-  #[cfg(feature = "ai-dj")]
-  pub dj_toggle_auto_queue: Key,
-  #[cfg(feature = "ai-dj")]
-  pub dj_vibe_shift: Key,
-  /// Toggle "only tracks I do not already have" for DJ recommendations.
-  #[cfg(feature = "ai-dj")]
-  pub dj_toggle_fresh_only: Key,
-  /// Reopen the "which AI, which model" picker. Which brain the DJ uses is the one
-  /// setting that costs money (or quota) per turn, so it has to be changeable
-  /// without hand-editing YAML.
-  #[cfg(feature = "ai-dj")]
-  pub dj_pick_model: Key,
-  pub jump_to_artist_album: Key,
-  pub jump_to_context: Key,
-  pub manage_devices: Key,
   pub decrease_volume: Key,
   pub increase_volume: Key,
   pub toggle_playback: Key,
@@ -702,8 +502,6 @@ pub struct KeyBindings {
   pub repeat: Key,
   pub search: Key,
   pub submit: Key,
-  pub copy_song_url: Key,
-  pub copy_album_url: Key,
   pub audio_analysis: Key,
   pub lyrics_view: Key,
   pub miniplayer_view: Key,
@@ -713,8 +511,6 @@ pub struct KeyBindings {
   pub remove_from_queue: Key,
   pub open_settings: Key,
   pub save_settings: Key,
-  pub listening_party: Key,
-  pub like_track: Key,
   pub generate_recap: Key,
   pub detach_pane: Key,
   pub close_pane: Key,
@@ -746,7 +542,6 @@ pub struct BehaviorConfigString {
   pub show_loading_indicator: Option<bool>,
   pub enforce_wide_search_bar: Option<bool>,
   pub group_folders_first: Option<bool>,
-  pub enable_global_song_count: Option<bool>,
   pub disable_mouse_inputs: Option<bool>,
   pub enable_discord_rpc: Option<bool>,
   pub discord_rpc_client_id: Option<String>,
@@ -754,8 +549,6 @@ pub struct BehaviorConfigString {
   pub enable_lyrics: Option<bool>,
   pub announcement_feed_url: Option<String>,
   pub enable_monthly_recap_prompt: Option<bool>,
-  pub pin_community_playlist: Option<bool>,
-  pub liked_icon: Option<String>,
   pub shuffle_icon: Option<String>,
   pub repeat_track_icon: Option<String>,
   pub repeat_context_icon: Option<String>,
@@ -764,11 +557,8 @@ pub struct BehaviorConfigString {
   pub set_window_title: Option<bool>,
   pub visualizer_style: Option<VisualizerStyle>,
   pub player_bar_visualizer: Option<PlayerBarVisualizer>,
-  pub relay_server_url: Option<String>,
   pub stop_after_current_track: Option<bool>,
   pub startup_behavior: Option<StartupBehavior>,
-  pub disable_auto_update: Option<bool>,
-  pub auto_update_delay: Option<String>,
   #[cfg(feature = "art-decode")]
   pub draw_cover_art: Option<bool>,
   #[cfg(feature = "art-decode")]
@@ -783,70 +573,22 @@ pub struct BehaviorConfigString {
   pub cover_art_dither_algorithm: Option<String>,
   #[cfg(feature = "cover-art")]
   pub cover_art_dither_pixel_scale: Option<i64>,
-  #[cfg(feature = "mcp-server")]
-  pub mcp_enabled: Option<bool>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_backend: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_command: Option<Vec<String>>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_prompt_via: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_timeout_secs: Option<u64>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_model: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_model: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_base_url: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_api_key: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_batch_size: Option<usize>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_history_period: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_avoid_library: Option<bool>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_configured: Option<bool>,
   pub keepawake_enabled: Option<bool>,
   pub enable_media_keys: Option<bool>,
-  pub enable_streaming: Option<bool>,
-  pub streaming_device_name: Option<String>,
-  pub streaming_bitrate: Option<u16>,
-  pub streaming_audio_cache: Option<bool>,
-  pub streaming_autoplay: Option<bool>,
-  pub sync_token: Option<String>,
-  pub local_music_path: Option<String>,
-  pub subsonic_url: Option<String>,
-  pub subsonic_username: Option<String>,
-  pub subsonic_password: Option<String>,
-  pub ytdlp_path: Option<String>,
-  pub playback_engine: Option<PlaybackEngine>,
-  pub soloist_path: Option<String>,
-  pub soloist_audio_quality: Option<SoloistQuality>,
   pub qobuz_quality: Option<u8>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub radio_stations: Option<Vec<RadioStationConfig>>,
   // --- Phase 2: icons / glyphs / labels (defaults = today's glyphs) ---
   pub gauge_filled_icon: Option<String>,
   pub gauge_unfilled_icon: Option<String>,
   pub active_source_icon: Option<String>,
-  pub episode_played_icon: Option<String>,
   pub sort_ascending_icon: Option<String>,
   pub sort_descending_icon: Option<String>,
   pub list_highlight_icon: Option<String>,
   pub playbar_control_labels: Option<HashMap<String, String>>,
   // --- Phase 3: behavior constants / startup / sort ---
   pub status_message_ttl_percent: Option<u16>,
-  pub playback_poll_seconds: Option<u64>,
   pub table_scroll_padding: Option<u16>,
-  pub like_animation_frames: Option<u8>,
   pub startup_route: Option<String>,
   pub default_sort_playlist_tracks: Option<String>,
-  pub default_sort_saved_albums: Option<String>,
-  pub default_sort_saved_artists: Option<String>,
-  pub default_sort_recently_played: Option<String>,
   // --- Phase 6: layout arrangement ---
   pub sidebar_position: Option<String>,
   pub playbar_position: Option<String>,
@@ -878,7 +620,6 @@ pub struct BehaviorConfig {
   pub show_loading_indicator: bool,
   pub enforce_wide_search_bar: bool,
   pub group_folders_first: bool,
-  pub enable_global_song_count: bool,
   pub disable_mouse_inputs: bool,
   pub enable_discord_rpc: bool,
   pub discord_rpc_client_id: Option<String>,
@@ -886,10 +627,6 @@ pub struct BehaviorConfig {
   pub enable_lyrics: bool,
   pub announcement_feed_url: Option<String>,
   pub enable_monthly_recap_prompt: bool,
-  /// Pin the public "spotatui community" playlist to the top of the Spotify
-  /// playlists sidebar.
-  pub pin_community_playlist: bool,
-  pub liked_icon: String,
   pub shuffle_icon: String,
   pub repeat_track_icon: String,
   pub repeat_context_icon: String,
@@ -898,11 +635,8 @@ pub struct BehaviorConfig {
   pub set_window_title: bool,
   pub visualizer_style: VisualizerStyle,
   pub player_bar_visualizer: PlayerBarVisualizer,
-  pub relay_server_url: String,
   pub stop_after_current_track: bool,
   pub startup_behavior: StartupBehavior,
-  pub disable_auto_update: bool,
-  pub auto_update_delay: String,
   #[cfg(feature = "art-decode")]
   pub draw_cover_art: bool,
   #[cfg(feature = "art-decode")]
@@ -919,130 +653,18 @@ pub struct BehaviorConfig {
   pub cover_art_dither_algorithm: String,
   #[cfg(feature = "cover-art")]
   pub cover_art_dither_pixel_scale: u8,
-  /// Whether to open the local MCP control socket so `spotatui mcp` (and through
-  /// it Claude Code, Codex, or any MCP client) can drive playback.
-  ///
-  /// Off by default. Opening a socket that can control the player and read
-  /// listening history is a security-posture change, so it is a deliberate act;
-  /// the socket binds loopback-only and requires the token from
-  /// `~/.config/spotatui/mcp.json`.
-  #[cfg(feature = "mcp-server")]
-  pub mcp_enabled: bool,
-  /// Which DJ brain to use: `agent_cli`, `anthropic`, or `openai_compat`.
-  #[cfg(feature = "ai-dj")]
-  pub dj_backend: String,
-  /// argv for the `agent_cli` backend. A config field rather than a hardcoded
-  /// table so any headless agent works and spotatui never tracks their flags.
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_command: Vec<String>,
-  /// How the prompt reaches that CLI: `stdin` or `arg`.
-  ///
-  /// `None` means "unset: the preset decides". It has to be optional, because a
-  /// resolved `String` here can never fall through to the preset's own mode, and
-  /// getting it wrong is not cosmetic: `agy` ignores stdin entirely, so a prompt
-  /// written there is silently dropped and the DJ answers something else.
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_prompt_via: Option<String>,
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_timeout_secs: u64,
-  /// Model for the `agent_cli` backend, passed as that CLI's own model flag
-  /// (`claude --model haiku`).
-  ///
-  /// Separate from [`Self::dj_model`] on purpose: they are different namespaces.
-  /// `dj_model` is an API model id billed per token; this is a CLI alias spent
-  /// against the subscription the CLI is already logged into. One field would make
-  /// `claude-haiku-4-5` and `haiku` interchangeable, and they are not.
-  #[cfg(feature = "ai-dj")]
-  pub dj_agent_model: Option<String>,
-  /// Model id for the API backends (`anthropic`, `openai_compat`).
-  #[cfg(feature = "ai-dj")]
-  pub dj_model: Option<String>,
-  /// Base URL for `openai_compat`. Defaults to Ollama's local endpoint.
-  #[cfg(feature = "ai-dj")]
-  pub dj_base_url: Option<String>,
-  /// API key for the HTTP backends.
-  ///
-  /// **Stored in plaintext in the YAML config** — prefer the
-  /// `SPOTATUI_DJ_API_KEY` environment variable, which overrides this field at
-  /// request time and is never written to disk. The config directory is `0700`
-  /// on unix and carries a `.gitignore`, but a plaintext secret is still a
-  /// plaintext secret.
-  #[cfg(feature = "ai-dj")]
-  pub dj_api_key: Option<String>,
-  /// How many tracks the DJ queues per round. Clamped to the resolver's cap.
-  #[cfg(feature = "ai-dj")]
-  pub dj_batch_size: usize,
-  /// History window the taste brief summarises: `7d`, `30d`, `month`, `year`,
-  /// `all`.
-  #[cfg(feature = "ai-dj")]
-  pub dj_history_period: String,
-  /// Start the DJ in "only tracks I do not already have" mode: reject anything in
-  /// Liked Songs or the listener's own playlists instead of recommending it.
-  ///
-  /// Only the starting value; the DJ screen toggles it per session, because which
-  /// mode is wanted depends on the ask. Turning it on costs one crawl of every
-  /// playlist the first time it is used in a session.
-  #[cfg(feature = "ai-dj")]
-  pub dj_avoid_library: bool,
-  /// Whether the DJ's backend and model have ever been chosen deliberately.
-  ///
-  /// `Option<bool>`, not `bool`. Key *presence* cannot be the signal: `save_config`
-  /// writes every `dj_*` key unconditionally as `Some(...)`, and it saves from hot
-  /// paths (volume, shuffle, sidebar resize, shutdown, first run), so every install
-  /// that has ever changed its volume already has the whole `dj_*` block on disk.
-  /// A bare `bool` is worse still: the first unrelated save would write `false` and
-  /// pin it there forever. Only the `Option` fields survive `build_behavior`
-  /// untouched, so this round-trips as `null` until the picker sets it.
-  #[cfg(feature = "ai-dj")]
-  pub dj_configured: Option<bool>,
   pub keepawake_enabled: bool,
   /// When false, spotatui ignores OS media-control commands (headphone
   /// play/pause/skip buttons, media keys, MPRIS/SMTC/Now Playing, playerctl).
   /// It still publishes track metadata to the OS; it just stops reacting.
   pub enable_media_keys: bool,
-  /// Register spotatui as a Spotify Connect device and play through librespot.
-  pub enable_streaming: bool,
-  /// The Connect device name other Spotify apps show.
-  pub streaming_device_name: String,
-  /// Native streaming bitrate in kbps: 96, 160 or 320.
-  pub streaming_bitrate: u16,
-  /// Keep played audio in the cache directory.
-  pub streaming_audio_cache: bool,
-  /// Play related songs when a list ends. Spotify keeps this per device,
-  /// so librespot cannot read it from the account.
-  pub streaming_autoplay: bool,
-  pub sync_token: Option<String>,
-  /// Filesystem path to the local music library root (browsed by the Local
-  /// Files screen). Defaults to the OS music directory; `None` if unavailable.
-  pub local_music_path: Option<String>,
-  /// Base URL of the Subsonic/OpenSubsonic server (e.g.
-  /// `https://demo.navidrome.org`). `None` until configured.
-  pub subsonic_url: Option<String>,
-  /// Subsonic account username.
-  pub subsonic_username: Option<String>,
-  /// Subsonic account password. **Stored in plaintext in the YAML config** —
-  /// prefer the `SPOTATUI_SUBSONIC_PASSWORD` environment variable, which
-  /// overrides this field at connection time and is never written to disk.
-  pub subsonic_password: Option<String>,
-  /// Path to the `yt-dlp` binary used by the YouTube source. `None` resolves
-  /// plain `yt-dlp` through `$PATH`.
-  pub ytdlp_path: Option<String>,
-  /// What plays behind the Native Streaming device; a change in Settings switches at once.
-  pub playback_engine: PlaybackEngine,
-  /// Path to the Soloist binary the user downloaded from Spotify.
-  pub soloist_path: Option<String>,
-  pub soloist_audio_quality: SoloistQuality,
   /// Qobuz stream quality: 5 (MP3 320), 6 (FLAC 16/44.1), 7 (FLAC 24/96),
   /// 27 (FLAC 24/192). Default 6.
   pub qobuz_quality: u8,
-  /// User-authored stations shown alongside stations saved at runtime.
-  /// In-app favorite/remove actions mutate `state.yml`, not this list.
-  pub radio_stations: Vec<RadioStationConfig>,
   // --- Phase 2: icons / glyphs / labels ---
   pub gauge_filled_icon: String,
   pub gauge_unfilled_icon: String,
   pub active_source_icon: String,
-  pub episode_played_icon: String,
   pub sort_ascending_icon: String,
   pub sort_descending_icon: String,
   pub list_highlight_icon: String,
@@ -1051,14 +673,9 @@ pub struct BehaviorConfig {
   pub playbar_control_labels: HashMap<String, String>,
   // --- Phase 3: behavior constants / startup / sort ---
   pub status_message_ttl_percent: u16,
-  pub playback_poll_seconds: u64,
   pub table_scroll_padding: u16,
-  pub like_animation_frames: u8,
   pub startup_route: String,
   pub default_sort_playlist_tracks: String,
-  pub default_sort_saved_albums: String,
-  pub default_sort_saved_artists: String,
-  pub default_sort_recently_played: String,
   // --- Phase 6: layout arrangement ---
   pub sidebar_position: String,
   pub playbar_position: String,
@@ -1072,55 +689,9 @@ pub struct BehaviorConfig {
   pub small_terminal_height: u16,
 }
 
-/// The DJ brains a config may name. Module-level rather than a local `const` in
-/// the load validator so the validator, the picker and [`BehaviorConfig::dj_is_configured`]
-/// cannot drift apart.
-#[cfg(feature = "ai-dj")]
-pub const DJ_BACKENDS: [&str; 3] = ["agent_cli", "anthropic", "openai_compat"];
-
-/// The shipped default backend. Also what "not configured" compares against.
-#[cfg(feature = "ai-dj")]
-pub const DEFAULT_DJ_BACKEND: &str = "agent_cli";
-
-/// The shipped default `agent_cli` argv.
-///
-/// A function rather than a `const` because it allocates, and one source of truth
-/// because [`BehaviorConfig::dj_is_configured`] asks "is this still the value
-/// spotatui shipped?" — a second copy would answer that question wrongly the first
-/// time either changed.
-#[cfg(feature = "ai-dj")]
-pub fn default_dj_agent_command() -> Vec<String> {
-  vec!["claude".to_string(), "-p".to_string()]
-}
-
 impl BehaviorConfig {
   // `emphasis` moved to `tui/theme.rs::EmphasisExt` (it returns a terminal
   // `Modifier` type, which core no longer names).
-
-  /// Has the DJ already been set up, by the picker or by hand?
-  ///
-  /// Two signals, and both are needed. The marker covers "the picker ran, or the
-  /// user dismissed it". Value-differs-from-default covers the user who configured
-  /// the DJ in their YAML before the picker existed: those values can only have
-  /// been typed, because `save_config` writes the defaults back verbatim.
-  ///
-  /// Deliberately absent: `dj_batch_size`, `dj_history_period`, `dj_avoid_library`
-  /// and the timeout are tuning, not a choice of AI. So is `dj_agent_prompt_via`,
-  /// and that one is the trap — `save_config` already wrote `stdin` into every
-  /// existing install, so counting it would mean nobody is ever asked, including
-  /// the Claude Pro users this picker exists for.
-  #[cfg(feature = "ai-dj")]
-  pub fn dj_is_configured(&self) -> bool {
-    if self.dj_configured == Some(true) {
-      return true;
-    }
-    self.dj_backend != DEFAULT_DJ_BACKEND
-      || self.dj_agent_command != default_dj_agent_command()
-      || self.dj_agent_model.is_some()
-      || self.dj_model.is_some()
-      || self.dj_api_key.is_some()
-      || self.dj_base_url.is_some()
-  }
 }
 
 // ===== Phase 4: format templates =====
@@ -1319,13 +890,6 @@ pub struct UserConfig {
 }
 
 impl UserConfig {
-  /// Get the spotatui app config directory.
-  /// Returns None if neither an absolute XDG config directory nor $HOME is set.
-  #[cfg(feature = "self-update")]
-  pub fn get_app_config_dir() -> Option<PathBuf> {
-    default_app_config_dir()
-  }
-
   pub fn new() -> UserConfig {
     // Detect platform for platform-specific defaults
     #[cfg(target_os = "macos")]
@@ -1349,28 +913,6 @@ impl UserConfig {
         previous_page: Key::Ctrl('u'),
         jump_to_start: Key::Ctrl('a'),
         jump_to_end: Key::Ctrl('e'),
-        jump_to_album: Key::Char('a'),
-        #[cfg(feature = "ai-dj")]
-        dj_open: Key::Ctrl('j'),
-        #[cfg(feature = "ai-dj")]
-        dj_toggle_auto_queue: Key::Ctrl('t'),
-        #[cfg(feature = "ai-dj")]
-        dj_vibe_shift: Key::Ctrl('y'),
-        // Ctrl+O for "only new". The readline-ish keys the DJ prompt implements
-        // (Ctrl+A/B/D/E/F/H/U) are all spoken for, and this has to work while the
-        // prompt has focus.
-        #[cfg(feature = "ai-dj")]
-        dj_toggle_fresh_only: Key::Ctrl('o'),
-        // Ctrl+G, chosen because it is the only unused modifier key that also
-        // survives the DJ prompt: Ctrl+L is the macOS settings alias, Ctrl+N is
-        // `down_event` for every list in the app, and Ctrl+K / Ctrl+W kill a line in
-        // the search input. Needs a modifier at all because the DJ prompt takes
-        // every bare character.
-        #[cfg(feature = "ai-dj")]
-        dj_pick_model: Key::Ctrl('g'),
-        jump_to_artist_album: Key::Char('A'),
-        jump_to_context: Key::Char('o'),
-        manage_devices: Key::Char('d'),
         decrease_volume: Key::Char('-'),
         increase_volume: Key::Char('+'),
         toggle_playback: Key::Char(' '),
@@ -1384,8 +926,6 @@ impl UserConfig {
         repeat: Key::Ctrl('r'),
         search: Key::Char('/'),
         submit: Key::Enter,
-        copy_song_url: Key::Char('c'),
-        copy_album_url: Key::Char('C'),
         audio_analysis: Key::Char('v'),
         lyrics_view: Key::Char('B'),
         miniplayer_view: Key::Char('T'),
@@ -1401,8 +941,6 @@ impl UserConfig {
           Key::Alt(',')
         },
         save_settings: Key::Alt('s'),
-        listening_party: Key::Ctrl('p'),
-        like_track: Key::Char('F'),
         generate_recap: Key::Char('R'),
         detach_pane: Key::Alt('d'),
         close_pane: Key::Alt('x'),
@@ -1432,7 +970,6 @@ impl UserConfig {
         show_loading_indicator: true,
         enforce_wide_search_bar: false,
         group_folders_first: false,
-        enable_global_song_count: true,
         disable_mouse_inputs: false,
         enable_discord_rpc: true,
         discord_rpc_client_id: None,
@@ -1440,8 +977,6 @@ impl UserConfig {
         enable_lyrics: true,
         announcement_feed_url: None,
         enable_monthly_recap_prompt: true,
-        pin_community_playlist: true,
-        liked_icon: "♥".to_string(),
         shuffle_icon: "🔀".to_string(),
         repeat_track_icon: "🔂".to_string(),
         repeat_context_icon: "🔁".to_string(),
@@ -1450,11 +985,8 @@ impl UserConfig {
         set_window_title: true,
         visualizer_style: VisualizerStyle::default(),
         player_bar_visualizer: PlayerBarVisualizer::default(),
-        relay_server_url: "wss://spotatui-party.spotatui.workers.dev/ws".to_string(),
         stop_after_current_track: false,
         startup_behavior: StartupBehavior::Continue,
-        disable_auto_update: false,
-        auto_update_delay: "0".to_string(),
         #[cfg(feature = "art-decode")]
         draw_cover_art: true,
         #[cfg(feature = "art-decode")]
@@ -1469,73 +1001,22 @@ impl UserConfig {
         cover_art_dither_algorithm: "stucki".to_string(),
         #[cfg(feature = "cover-art")]
         cover_art_dither_pixel_scale: 1,
-        #[cfg(feature = "mcp-server")]
-        mcp_enabled: false,
-        #[cfg(feature = "ai-dj")]
-        dj_backend: DEFAULT_DJ_BACKEND.to_string(),
-        #[cfg(feature = "ai-dj")]
-        dj_agent_command: default_dj_agent_command(),
-        // Unset, so the preset's own delivery mode applies. Pinning "stdin" here
-        // would silently break `agy`, which reads the prompt from argv only.
-        #[cfg(feature = "ai-dj")]
-        dj_agent_prompt_via: None,
-        #[cfg(feature = "ai-dj")]
-        dj_agent_timeout_secs: 90,
-        #[cfg(feature = "ai-dj")]
-        dj_agent_model: None,
-        #[cfg(feature = "ai-dj")]
-        dj_model: None,
-        #[cfg(feature = "ai-dj")]
-        dj_base_url: None,
-        #[cfg(feature = "ai-dj")]
-        dj_api_key: None,
-        #[cfg(feature = "ai-dj")]
-        dj_batch_size: crate::infra::dj::DEFAULT_BATCH,
-        #[cfg(feature = "ai-dj")]
-        dj_history_period: "30d".to_string(),
-        // Off by default: the filter costs a playlist crawl, and "more like this"
-        // is a perfectly reasonable thing to want from a DJ.
-        #[cfg(feature = "ai-dj")]
-        dj_avoid_library: false,
-        #[cfg(feature = "ai-dj")]
-        dj_configured: None,
         keepawake_enabled: true,
         enable_media_keys: true,
-        enable_streaming: cfg!(feature = "streaming"),
-        streaming_device_name: default_device_name(),
-        streaming_bitrate: STREAMING_BITRATE_DEFAULT,
-        streaming_audio_cache: false,
-        streaming_autoplay: true,
-        sync_token: None,
-        local_music_path: dirs::audio_dir().map(|p| p.to_string_lossy().to_string()),
-        subsonic_url: None,
-        subsonic_username: None,
-        subsonic_password: None,
-        ytdlp_path: None,
-        playback_engine: PlaybackEngine::Librespot,
-        soloist_path: None,
-        soloist_audio_quality: SoloistQuality::Lossless,
         qobuz_quality: QOBUZ_QUALITY_DEFAULT,
-        radio_stations: Vec::new(),
         // --- Phase 2: icons / glyphs / labels (defaults = today's glyphs) ---
         gauge_filled_icon: "⣿".to_string(),
         gauge_unfilled_icon: "⣉".to_string(),
         active_source_icon: "●".to_string(),
-        episode_played_icon: "✔".to_string(),
         sort_ascending_icon: "↑".to_string(),
         sort_descending_icon: "↓".to_string(),
         list_highlight_icon: "▶".to_string(),
         playbar_control_labels: HashMap::new(),
         // --- Phase 3: behavior constants / startup / sort ---
         status_message_ttl_percent: 100,
-        playback_poll_seconds: 5,
         table_scroll_padding: 5,
-        like_animation_frames: 10,
         startup_route: "home".to_string(),
         default_sort_playlist_tracks: "default".to_string(),
-        default_sort_saved_albums: "default".to_string(),
-        default_sort_saved_artists: "default".to_string(),
-        default_sort_recently_played: "default".to_string(),
         // --- Phase 6: layout arrangement ---
         sidebar_position: "left".to_string(),
         playbar_position: "bottom".to_string(),
@@ -1618,20 +1099,6 @@ impl UserConfig {
     to_keys!(previous_page);
     to_keys!(jump_to_start);
     to_keys!(jump_to_end);
-    to_keys!(jump_to_album);
-    #[cfg(feature = "ai-dj")]
-    to_keys!(dj_open);
-    #[cfg(feature = "ai-dj")]
-    to_keys!(dj_toggle_auto_queue);
-    #[cfg(feature = "ai-dj")]
-    to_keys!(dj_vibe_shift);
-    #[cfg(feature = "ai-dj")]
-    to_keys!(dj_toggle_fresh_only);
-    #[cfg(feature = "ai-dj")]
-    to_keys!(dj_pick_model);
-    to_keys!(jump_to_artist_album);
-    to_keys!(jump_to_context);
-    to_keys!(manage_devices);
     to_keys!(decrease_volume);
     to_keys!(increase_volume);
     to_keys!(toggle_playback);
@@ -1645,8 +1112,6 @@ impl UserConfig {
     to_keys!(repeat);
     to_keys!(search);
     to_keys!(submit);
-    to_keys!(copy_song_url);
-    to_keys!(copy_album_url);
     to_keys!(audio_analysis);
     to_keys!(lyrics_view);
     to_keys!(miniplayer_view);
@@ -1656,8 +1121,6 @@ impl UserConfig {
     to_keys!(remove_from_queue);
     to_keys!(open_settings);
     to_keys!(save_settings);
-    to_keys!(listening_party);
-    to_keys!(like_track);
     to_keys!(generate_recap);
     to_keys!(detach_pane);
     to_keys!(close_pane);
@@ -1842,10 +1305,6 @@ impl UserConfig {
       self.behavior.group_folders_first = group_folders_first;
     }
 
-    if let Some(liked_icon) = behavior_config.liked_icon {
-      self.behavior.liked_icon = liked_icon;
-    }
-
     if let Some(paused_icon) = behavior_config.paused_icon {
       self.behavior.paused_icon = paused_icon;
     }
@@ -1864,10 +1323,6 @@ impl UserConfig {
 
     if let Some(set_window_title) = behavior_config.set_window_title {
       self.behavior.set_window_title = set_window_title;
-    }
-
-    if let Some(enable_global_song_count) = behavior_config.enable_global_song_count {
-      self.behavior.enable_global_song_count = enable_global_song_count;
     }
 
     if let Some(disable_mouse_inputs) = behavior_config.disable_mouse_inputs {
@@ -1890,10 +1345,6 @@ impl UserConfig {
       self.behavior.enable_monthly_recap_prompt = enable_monthly_recap_prompt;
     }
 
-    if let Some(pin_community_playlist) = behavior_config.pin_community_playlist {
-      self.behavior.pin_community_playlist = pin_community_playlist;
-    }
-
     if let Some(announcement_feed_url) = behavior_config.announcement_feed_url {
       let trimmed = announcement_feed_url.trim();
       self.behavior.announcement_feed_url = if trimmed.is_empty() {
@@ -1911,26 +1362,8 @@ impl UserConfig {
       self.behavior.visualizer_style = visualizer_style;
     }
 
-    if let Some(relay_server_url) = behavior_config.relay_server_url {
-      let trimmed = relay_server_url.trim();
-      if !trimmed.is_empty() {
-        self.behavior.relay_server_url = trimmed.to_string();
-      }
-    }
-    if let Some(sync_token) = behavior_config.sync_token {
-      let trimmed = sync_token.trim();
-      if trimmed.is_empty() {
-        self.behavior.sync_token = None;
-      } else {
-        self.behavior.sync_token = Some(trimmed.to_string());
-      }
-    }
     if let Some(stop_after_current_track) = behavior_config.stop_after_current_track {
       self.behavior.stop_after_current_track = stop_after_current_track;
-    }
-
-    if let Some(radio_stations) = behavior_config.radio_stations {
-      self.behavior.radio_stations = sanitized_radio_stations(&radio_stations);
     }
 
     if let Some(sidebar_width_percent) = behavior_config.sidebar_width_percent {
@@ -1951,16 +1384,6 @@ impl UserConfig {
 
     if let Some(player_bar_visualizer) = behavior_config.player_bar_visualizer {
       self.behavior.player_bar_visualizer = player_bar_visualizer;
-    }
-
-    if let Some(disable_auto_update) = behavior_config.disable_auto_update {
-      self.behavior.disable_auto_update = disable_auto_update;
-    }
-
-    if let Some(auto_update_delay) = behavior_config.auto_update_delay {
-      parse_update_delay_secs(&auto_update_delay)
-        .map_err(|e| anyhow!("Invalid auto-update delay: {e}"))?;
-      self.behavior.auto_update_delay = auto_update_delay;
     }
 
     #[cfg(feature = "art-decode")]
@@ -1994,130 +1417,14 @@ impl UserConfig {
         self.behavior.cover_art_dither_pixel_scale = normalize_cover_art_dither_pixel_scale(value);
       }
     }
-    #[cfg(feature = "mcp-server")]
-    if let Some(mcp_enabled) = behavior_config.mcp_enabled {
-      self.behavior.mcp_enabled = mcp_enabled;
-    }
-    #[cfg(feature = "ai-dj")]
-    {
-      if let Some(dj_backend) = behavior_config.dj_backend {
-        let normalized = dj_backend.trim().to_ascii_lowercase();
-        if DJ_BACKENDS.contains(&normalized.as_str()) {
-          self.behavior.dj_backend = normalized;
-        } else {
-          log::warn!(
-            "behavior.dj_backend '{dj_backend}' is not one of {DJ_BACKENDS:?}; keeping '{}'",
-            self.behavior.dj_backend
-          );
-        }
-      }
-      if let Some(dj_agent_command) = behavior_config.dj_agent_command {
-        // Only argv[0] has to be a real word: it is the program to exec, and a
-        // blank one reaches `spawn` as a confusing ENOENT. Later arguments are
-        // left alone, since a CLI can legitimately take an empty one.
-        if dj_agent_command
-          .first()
-          .is_some_and(|program| !program.trim().is_empty())
-        {
-          self.behavior.dj_agent_command = dj_agent_command;
-        } else {
-          log::warn!("behavior.dj_agent_command has no program to run; keeping the default");
-        }
-      }
-      if let Some(dj_agent_prompt_via) = behavior_config.dj_agent_prompt_via {
-        match crate::infra::dj::brain::agent_cli::PromptDelivery::from_config_str(
-          &dj_agent_prompt_via,
-        ) {
-          // Store the canonical form, so `arg`/`argv`/`last-arg` all read back the
-          // same way.
-          Some(delivery) => {
-            self.behavior.dj_agent_prompt_via = Some(delivery.to_config_str().to_string())
-          }
-          None => log::warn!(
-            "behavior.dj_agent_prompt_via '{dj_agent_prompt_via}' is not 'stdin' or 'arg';              keeping '{}'",
-            self
-              .behavior
-              .dj_agent_prompt_via
-              .as_deref()
-              .unwrap_or("unset")
-          ),
-        }
-      }
-      if let Some(secs) = behavior_config.dj_agent_timeout_secs {
-        // A sub-second timeout would kill every agent before it started.
-        self.behavior.dj_agent_timeout_secs = secs.clamp(5, 600);
-      }
-      if let Some(dj_agent_model) = behavior_config.dj_agent_model {
-        self.behavior.dj_agent_model =
-          Some(dj_agent_model).filter(|model| !model.trim().is_empty());
-      }
-      if let Some(dj_model) = behavior_config.dj_model {
-        self.behavior.dj_model = Some(dj_model).filter(|model| !model.trim().is_empty());
-      }
-      if let Some(dj_base_url) = behavior_config.dj_base_url {
-        self.behavior.dj_base_url = Some(dj_base_url).filter(|url| !url.trim().is_empty());
-      }
-      if let Some(dj_api_key) = behavior_config.dj_api_key {
-        self.behavior.dj_api_key = Some(dj_api_key).filter(|key| !key.trim().is_empty());
-      }
-      if let Some(dj_batch_size) = behavior_config.dj_batch_size {
-        self.behavior.dj_batch_size = dj_batch_size.clamp(1, crate::infra::dj::MAX_BATCH);
-      }
-      if let Some(dj_history_period) = behavior_config.dj_history_period {
-        const PERIODS: [&str; 5] = ["7d", "30d", "month", "year", "all"];
-        let normalized = dj_history_period.trim().to_ascii_lowercase();
-        if PERIODS.contains(&normalized.as_str()) {
-          self.behavior.dj_history_period = normalized;
-        } else {
-          log::warn!(
-            "behavior.dj_history_period '{dj_history_period}' is not one of {PERIODS:?};              keeping '{}'",
-            self.behavior.dj_history_period
-          );
-        }
-      }
-      if let Some(dj_avoid_library) = behavior_config.dj_avoid_library {
-        self.behavior.dj_avoid_library = dj_avoid_library;
-      }
-      // No validation to do: the only value that means anything is `true`, and a
-      // config that says `false` is telling us the picker has not run yet.
-      if let Some(dj_configured) = behavior_config.dj_configured {
-        self.behavior.dj_configured = Some(dj_configured);
-      }
-    }
     if let Some(keepawake_enabled) = behavior_config.keepawake_enabled {
       self.behavior.keepawake_enabled = keepawake_enabled;
     }
     if let Some(enable_media_keys) = behavior_config.enable_media_keys {
       self.behavior.enable_media_keys = enable_media_keys;
     }
-    if let Some(enable_streaming) = behavior_config.enable_streaming {
-      self.behavior.enable_streaming = enable_streaming;
-    }
-    if let Some(name) = behavior_config.streaming_device_name {
-      let name = name.trim();
-      if !name.is_empty() {
-        self.behavior.streaming_device_name = name.to_string();
-      }
-    }
-    if let Some(bitrate) = behavior_config.streaming_bitrate {
-      self.behavior.streaming_bitrate = streaming_bitrate_or_default(bitrate);
-    }
-    if let Some(audio_cache) = behavior_config.streaming_audio_cache {
-      self.behavior.streaming_audio_cache = audio_cache;
-    }
-    if let Some(autoplay) = behavior_config.streaming_autoplay {
-      self.behavior.streaming_autoplay = autoplay;
-    }
-    if let Some(local_music_path) = behavior_config.local_music_path {
-      let trimmed = local_music_path.trim();
-      self.behavior.local_music_path = if trimmed.is_empty() {
-        None
-      } else {
-        Some(trimmed.to_string())
-      };
-    }
     // Subsonic server config: trim-to-None so blank keys read as unset.
-    let trim_to_none = |value: Option<String>| -> Option<String> {
+    let _trim_to_none = |value: Option<String>| -> Option<String> {
       value.and_then(|v| {
         let trimmed = v.trim();
         if trimmed.is_empty() {
@@ -2127,27 +1434,6 @@ impl UserConfig {
         }
       })
     };
-    if let Some(subsonic_url) = trim_to_none(behavior_config.subsonic_url) {
-      self.behavior.subsonic_url = Some(subsonic_url);
-    }
-    if let Some(subsonic_username) = trim_to_none(behavior_config.subsonic_username) {
-      self.behavior.subsonic_username = Some(subsonic_username);
-    }
-    if let Some(subsonic_password) = trim_to_none(behavior_config.subsonic_password) {
-      self.behavior.subsonic_password = Some(subsonic_password);
-    }
-    if let Some(ytdlp_path) = trim_to_none(behavior_config.ytdlp_path) {
-      self.behavior.ytdlp_path = Some(ytdlp_path);
-    }
-    if let Some(playback_engine) = behavior_config.playback_engine {
-      self.behavior.playback_engine = playback_engine;
-    }
-    if let Some(soloist_path) = trim_to_none(behavior_config.soloist_path) {
-      self.behavior.soloist_path = Some(soloist_path);
-    }
-    if let Some(quality) = behavior_config.soloist_audio_quality {
-      self.behavior.soloist_audio_quality = quality;
-    }
     if let Some(qobuz_quality) = behavior_config.qobuz_quality {
       self.behavior.qobuz_quality = qobuz_quality_or_default(qobuz_quality);
     }
@@ -2205,14 +1491,6 @@ impl UserConfig {
         self.behavior.list_highlight_icon = icon;
       }
     }
-    // episode_played_icon renders in a width-2 "played" column (tables.rs),
-    // so it must be exactly one column wide (the leading space is added at
-    // the call site).
-    load_width1_icon(
-      &mut self.behavior.episode_played_icon,
-      behavior_config.episode_played_icon,
-      "episode_played_icon",
-    );
     // sort direction icons render in a width-1 column.
     load_width1_icon(
       &mut self.behavior.sort_ascending_icon,
@@ -2262,24 +1540,8 @@ impl UserConfig {
     if let Some(pct) = behavior_config.status_message_ttl_percent {
       self.behavior.status_message_ttl_percent = pct.clamp(10, 1000);
     }
-    if let Some(secs) = behavior_config.playback_poll_seconds {
-      if secs < 1 {
-        return Err(anyhow!(
-          "playback_poll_seconds must be at least 1, is {secs}"
-        ));
-      }
-      self.behavior.playback_poll_seconds = secs;
-    }
     if let Some(padding) = behavior_config.table_scroll_padding {
       self.behavior.table_scroll_padding = padding;
-    }
-    if let Some(frames) = behavior_config.like_animation_frames {
-      if frames < 1 {
-        return Err(anyhow!(
-          "like_animation_frames must be at least 1, is {frames}"
-        ));
-      }
-      self.behavior.like_animation_frames = frames;
     }
     if let Some(route) = behavior_config.startup_route {
       let route = route.trim().to_string();
@@ -2313,24 +1575,6 @@ impl UserConfig {
       behavior_config.default_sort_playlist_tracks,
       crate::core::sort::SortContext::PlaylistTracks,
       "default_sort_playlist_tracks",
-    );
-    load_sort_default(
-      &mut self.behavior.default_sort_saved_albums,
-      behavior_config.default_sort_saved_albums,
-      crate::core::sort::SortContext::SavedAlbums,
-      "default_sort_saved_albums",
-    );
-    load_sort_default(
-      &mut self.behavior.default_sort_saved_artists,
-      behavior_config.default_sort_saved_artists,
-      crate::core::sort::SortContext::SavedArtists,
-      "default_sort_saved_artists",
-    );
-    load_sort_default(
-      &mut self.behavior.default_sort_recently_played,
-      behavior_config.default_sort_recently_played,
-      crate::core::sort::SortContext::RecentlyPlayed,
-      "default_sort_recently_played",
     );
 
     // ===== Phase 6: layout arrangement =====
@@ -2373,20 +1617,6 @@ impl UserConfig {
       k.previous_page,
       k.jump_to_start,
       k.jump_to_end,
-      k.jump_to_album,
-      #[cfg(feature = "ai-dj")]
-      k.dj_open,
-      #[cfg(feature = "ai-dj")]
-      k.dj_toggle_auto_queue,
-      #[cfg(feature = "ai-dj")]
-      k.dj_vibe_shift,
-      #[cfg(feature = "ai-dj")]
-      k.dj_toggle_fresh_only,
-      #[cfg(feature = "ai-dj")]
-      k.dj_pick_model,
-      k.jump_to_artist_album,
-      k.jump_to_context,
-      k.manage_devices,
       k.decrease_volume,
       k.increase_volume,
       k.toggle_playback,
@@ -2400,8 +1630,6 @@ impl UserConfig {
       k.repeat,
       k.search,
       k.submit,
-      k.copy_song_url,
-      k.copy_album_url,
       k.audio_analysis,
       k.lyrics_view,
       k.miniplayer_view,
@@ -2411,8 +1639,6 @@ impl UserConfig {
       k.remove_from_queue,
       k.open_settings,
       k.save_settings,
-      k.listening_party,
-      k.like_track,
       k.generate_recap,
       k.detach_pane,
       k.close_pane,
@@ -2576,7 +1802,6 @@ impl UserConfig {
       show_loading_indicator: Some(self.behavior.show_loading_indicator),
       enforce_wide_search_bar: Some(self.behavior.enforce_wide_search_bar),
       group_folders_first: Some(self.behavior.group_folders_first),
-      enable_global_song_count: Some(self.behavior.enable_global_song_count),
       disable_mouse_inputs: Some(self.behavior.disable_mouse_inputs),
       enable_discord_rpc: Some(self.behavior.enable_discord_rpc),
       discord_rpc_client_id: self.behavior.discord_rpc_client_id.clone(),
@@ -2584,8 +1809,6 @@ impl UserConfig {
       enable_lyrics: Some(self.behavior.enable_lyrics),
       announcement_feed_url: self.behavior.announcement_feed_url.clone(),
       enable_monthly_recap_prompt: Some(self.behavior.enable_monthly_recap_prompt),
-      pin_community_playlist: Some(self.behavior.pin_community_playlist),
-      liked_icon: Some(self.behavior.liked_icon.clone()),
       shuffle_icon: Some(self.behavior.shuffle_icon.clone()),
       repeat_track_icon: Some(self.behavior.repeat_track_icon.clone()),
       repeat_context_icon: Some(self.behavior.repeat_context_icon.clone()),
@@ -2593,27 +1816,10 @@ impl UserConfig {
       paused_icon: Some(self.behavior.paused_icon.clone()),
       set_window_title: Some(self.behavior.set_window_title),
       visualizer_style: Some(self.behavior.visualizer_style),
-      relay_server_url: Some(self.behavior.relay_server_url.clone()),
-      sync_token: self.behavior.sync_token.clone(),
-      local_music_path: self.behavior.local_music_path.clone(),
-      subsonic_url: self.behavior.subsonic_url.clone(),
-      subsonic_username: self.behavior.subsonic_username.clone(),
-      subsonic_password: self.behavior.subsonic_password.clone(),
-      ytdlp_path: self.behavior.ytdlp_path.clone(),
-      playback_engine: Some(self.behavior.playback_engine),
-      soloist_path: self.behavior.soloist_path.clone(),
-      soloist_audio_quality: Some(self.behavior.soloist_audio_quality),
       qobuz_quality: Some(self.behavior.qobuz_quality),
-      radio_stations: if self.behavior.radio_stations.is_empty() {
-        None
-      } else {
-        Some(self.behavior.radio_stations.clone())
-      },
       stop_after_current_track: Some(self.behavior.stop_after_current_track),
       startup_behavior: Some(self.behavior.startup_behavior),
       player_bar_visualizer: Some(self.behavior.player_bar_visualizer),
-      disable_auto_update: Some(self.behavior.disable_auto_update),
-      auto_update_delay: Some(self.behavior.auto_update_delay.clone()),
       #[cfg(feature = "art-decode")]
       draw_cover_art: Some(self.behavior.draw_cover_art),
       #[cfg(feature = "art-decode")]
@@ -2630,48 +1836,12 @@ impl UserConfig {
       cover_art_dither_pixel_scale: Some(i64::from(normalize_cover_art_dither_pixel_scale(
         i64::from(self.behavior.cover_art_dither_pixel_scale),
       ))),
-      #[cfg(feature = "mcp-server")]
-      mcp_enabled: Some(self.behavior.mcp_enabled),
-      #[cfg(feature = "ai-dj")]
-      dj_backend: Some(self.behavior.dj_backend.clone()),
-      #[cfg(feature = "ai-dj")]
-      dj_agent_command: Some(self.behavior.dj_agent_command.clone()),
-      // Passed through rather than wrapped in `Some`: it is already an `Option`,
-      // and `null` on disk is what lets the preset decide.
-      #[cfg(feature = "ai-dj")]
-      dj_agent_prompt_via: self.behavior.dj_agent_prompt_via.clone(),
-      #[cfg(feature = "ai-dj")]
-      dj_agent_timeout_secs: Some(self.behavior.dj_agent_timeout_secs),
-      #[cfg(feature = "ai-dj")]
-      dj_agent_model: self.behavior.dj_agent_model.clone(),
-      #[cfg(feature = "ai-dj")]
-      dj_model: self.behavior.dj_model.clone(),
-      #[cfg(feature = "ai-dj")]
-      dj_base_url: self.behavior.dj_base_url.clone(),
-      #[cfg(feature = "ai-dj")]
-      dj_api_key: self.behavior.dj_api_key.clone(),
-      #[cfg(feature = "ai-dj")]
-      dj_batch_size: Some(self.behavior.dj_batch_size),
-      #[cfg(feature = "ai-dj")]
-      dj_history_period: Some(self.behavior.dj_history_period.clone()),
-      #[cfg(feature = "ai-dj")]
-      dj_avoid_library: Some(self.behavior.dj_avoid_library),
-      // Never `Some(false)`: an automatic save must not answer the picker's
-      // question on the user's behalf.
-      #[cfg(feature = "ai-dj")]
-      dj_configured: self.behavior.dj_configured,
       keepawake_enabled: Some(self.behavior.keepawake_enabled),
       enable_media_keys: Some(self.behavior.enable_media_keys),
-      enable_streaming: Some(self.behavior.enable_streaming),
-      streaming_device_name: Some(self.behavior.streaming_device_name.clone()),
-      streaming_bitrate: Some(self.behavior.streaming_bitrate),
-      streaming_audio_cache: Some(self.behavior.streaming_audio_cache),
-      streaming_autoplay: Some(self.behavior.streaming_autoplay),
       // --- Phase 2/3/6 new fields (persist whatever the user set) ---
       gauge_filled_icon: Some(self.behavior.gauge_filled_icon.clone()),
       gauge_unfilled_icon: Some(self.behavior.gauge_unfilled_icon.clone()),
       active_source_icon: Some(self.behavior.active_source_icon.clone()),
-      episode_played_icon: Some(self.behavior.episode_played_icon.clone()),
       sort_ascending_icon: Some(self.behavior.sort_ascending_icon.clone()),
       sort_descending_icon: Some(self.behavior.sort_descending_icon.clone()),
       list_highlight_icon: Some(self.behavior.list_highlight_icon.clone()),
@@ -2681,14 +1851,9 @@ impl UserConfig {
         Some(self.behavior.playbar_control_labels.clone())
       },
       status_message_ttl_percent: Some(self.behavior.status_message_ttl_percent),
-      playback_poll_seconds: Some(self.behavior.playback_poll_seconds),
       table_scroll_padding: Some(self.behavior.table_scroll_padding),
-      like_animation_frames: Some(self.behavior.like_animation_frames),
       startup_route: Some(self.behavior.startup_route.clone()),
       default_sort_playlist_tracks: Some(self.behavior.default_sort_playlist_tracks.clone()),
-      default_sort_saved_albums: Some(self.behavior.default_sort_saved_albums.clone()),
-      default_sort_saved_artists: Some(self.behavior.default_sort_saved_artists.clone()),
-      default_sort_recently_played: Some(self.behavior.default_sort_recently_played.clone()),
       sidebar_position: Some(self.behavior.sidebar_position.clone()),
       playbar_position: Some(self.behavior.playbar_position.clone()),
       sidebar_width_percent: self.behavior.sidebar_width_percent,
@@ -2712,20 +1877,6 @@ impl UserConfig {
       previous_page: Some(key_to_config_string(self.keys.previous_page)),
       jump_to_start: Some(key_to_config_string(self.keys.jump_to_start)),
       jump_to_end: Some(key_to_config_string(self.keys.jump_to_end)),
-      jump_to_album: Some(key_to_config_string(self.keys.jump_to_album)),
-      #[cfg(feature = "ai-dj")]
-      dj_open: Some(key_to_config_string(self.keys.dj_open)),
-      #[cfg(feature = "ai-dj")]
-      dj_toggle_auto_queue: Some(key_to_config_string(self.keys.dj_toggle_auto_queue)),
-      #[cfg(feature = "ai-dj")]
-      dj_vibe_shift: Some(key_to_config_string(self.keys.dj_vibe_shift)),
-      #[cfg(feature = "ai-dj")]
-      dj_toggle_fresh_only: Some(key_to_config_string(self.keys.dj_toggle_fresh_only)),
-      #[cfg(feature = "ai-dj")]
-      dj_pick_model: Some(key_to_config_string(self.keys.dj_pick_model)),
-      jump_to_artist_album: Some(key_to_config_string(self.keys.jump_to_artist_album)),
-      jump_to_context: Some(key_to_config_string(self.keys.jump_to_context)),
-      manage_devices: Some(key_to_config_string(self.keys.manage_devices)),
       decrease_volume: Some(key_to_config_string(self.keys.decrease_volume)),
       increase_volume: Some(key_to_config_string(self.keys.increase_volume)),
       toggle_playback: Some(key_to_config_string(self.keys.toggle_playback)),
@@ -2739,8 +1890,6 @@ impl UserConfig {
       repeat: Some(key_to_config_string(self.keys.repeat)),
       search: Some(key_to_config_string(self.keys.search)),
       submit: Some(key_to_config_string(self.keys.submit)),
-      copy_song_url: Some(key_to_config_string(self.keys.copy_song_url)),
-      copy_album_url: Some(key_to_config_string(self.keys.copy_album_url)),
       audio_analysis: Some(key_to_config_string(self.keys.audio_analysis)),
       lyrics_view: Some(key_to_config_string(self.keys.lyrics_view)),
       miniplayer_view: Some(key_to_config_string(self.keys.miniplayer_view)),
@@ -2750,8 +1899,6 @@ impl UserConfig {
       remove_from_queue: Some(key_to_config_string(self.keys.remove_from_queue)),
       open_settings: Some(key_to_config_string(self.keys.open_settings)),
       save_settings: Some(key_to_config_string(self.keys.save_settings)),
-      listening_party: Some(key_to_config_string(self.keys.listening_party)),
-      like_track: Some(key_to_config_string(self.keys.like_track)),
       generate_recap: Some(key_to_config_string(self.keys.generate_recap)),
       detach_pane: Some(key_to_config_string(self.keys.detach_pane)),
       close_pane: Some(key_to_config_string(self.keys.close_pane)),
@@ -2840,16 +1987,6 @@ impl UserConfig {
     crate::core::auth::write_private_file_atomic(&paths.config_file_path, content_yml.as_bytes())?;
 
     Ok(())
-  }
-  pub fn padded_liked_icon(&self) -> String {
-    format!("{} ", self.behavior.liked_icon)
-  }
-
-  /// The configured `playing_icon` followed by a single trailing space, for
-  /// prepending to the title cell of the currently-playing row. Width-2
-  /// (the icon is validated to one column at load time).
-  pub fn padded_playing_icon(&self) -> String {
-    format!("{} ", self.behavior.playing_icon)
   }
   #[cfg(feature = "art-decode")]
   pub fn do_draw_cover_art(&self, full_image_support: bool) -> bool {
@@ -3387,19 +2524,6 @@ mod tests {
   }
 
   #[test]
-  fn soloist_settings_parse_in_every_build() {
-    use super::{BehaviorConfigString, PlaybackEngine, SoloistQuality};
-
-    let config: BehaviorConfigString = serde_yaml::from_str(
-      "playback_engine: soloist\nsoloist_path: C:/soloist.exe\nsoloist_audio_quality: very_high",
-    )
-    .unwrap();
-    assert_eq!(config.playback_engine, Some(PlaybackEngine::Soloist));
-    assert_eq!(config.soloist_path.as_deref(), Some("C:/soloist.exe"));
-    assert_eq!(config.soloist_audio_quality, Some(SoloistQuality::VeryHigh));
-  }
-
-  #[test]
   fn tick_rates_load_defaults_explicit_values_and_legacy_defaults() {
     use super::{
       BehaviorConfigString, UserConfig, DEFAULT_ANIMATION_TICK_RATE_MILLISECONDS,
@@ -3458,30 +2582,6 @@ mod tests {
 
       assert!(config.load_behaviorconfig(behavior).is_err());
     }
-  }
-
-  #[test]
-  fn parse_update_delay_secs_accepts_supported_units() {
-    use super::parse_update_delay_secs;
-
-    assert_eq!(parse_update_delay_secs("0"), Ok(0));
-    assert_eq!(parse_update_delay_secs(""), Ok(0));
-    assert_eq!(parse_update_delay_secs("7d"), Ok(7 * 86400));
-    assert_eq!(parse_update_delay_secs("2h"), Ok(2 * 3600));
-    assert_eq!(parse_update_delay_secs("10m"), Ok(10 * 60));
-    assert_eq!(parse_update_delay_secs("30s"), Ok(30));
-    assert_eq!(parse_update_delay_secs("120"), Ok(120));
-    assert!(parse_update_delay_secs("bogus").is_err());
-  }
-
-  #[test]
-  fn invalid_auto_update_delay_is_rejected() {
-    use super::{BehaviorConfigString, UserConfig};
-
-    let behavior: BehaviorConfigString = serde_yaml::from_str("auto_update_delay: bogus").unwrap();
-    let mut config = UserConfig::new();
-
-    assert!(config.load_behaviorconfig(behavior).is_err());
   }
 
   #[cfg(feature = "art-decode")]
@@ -3570,246 +2670,6 @@ volume_increment: 5
     assert_eq!(config.behavior.volume_increment, 5);
   }
 
-  /// The DJ keys a build *does* understand survive a save/load round trip.
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn dj_behavior_keys_round_trip_through_yaml() {
-    use super::{BehaviorConfigString, UserConfig};
-
-    let mut config = UserConfig::new();
-    config.behavior.dj_backend = "openai_compat".to_string();
-    config.behavior.dj_batch_size = 7;
-    config.behavior.dj_history_period = "7d".to_string();
-    config.behavior.dj_agent_command = vec!["codex".to_string()];
-    config.behavior.dj_agent_prompt_via = Some("arg".to_string());
-    config.behavior.dj_agent_model = Some("haiku".to_string());
-    config.behavior.dj_agent_timeout_secs = 240;
-    config.behavior.dj_model = Some("some-model".to_string());
-    config.behavior.dj_base_url = Some("http://localhost:1234/v1".to_string());
-    config.behavior.dj_api_key = Some("sk-not-a-real-key".to_string());
-    config.behavior.dj_avoid_library = true;
-    config.behavior.dj_configured = Some(true);
-
-    // Mirrors what `save_config` writes, then reads it back. Every persisted DJ
-    // key belongs here: one left out is one a persistence regression keeps green.
-    let written = serde_yaml::to_string(&BehaviorConfigString {
-      dj_backend: Some(config.behavior.dj_backend.clone()),
-      dj_batch_size: Some(config.behavior.dj_batch_size),
-      dj_history_period: Some(config.behavior.dj_history_period.clone()),
-      dj_agent_command: Some(config.behavior.dj_agent_command.clone()),
-      dj_agent_prompt_via: config.behavior.dj_agent_prompt_via.clone(),
-      dj_agent_model: config.behavior.dj_agent_model.clone(),
-      dj_agent_timeout_secs: Some(config.behavior.dj_agent_timeout_secs),
-      dj_model: config.behavior.dj_model.clone(),
-      dj_base_url: config.behavior.dj_base_url.clone(),
-      dj_api_key: config.behavior.dj_api_key.clone(),
-      dj_avoid_library: Some(config.behavior.dj_avoid_library),
-      dj_configured: config.behavior.dj_configured,
-      ..Default::default()
-    })
-    .unwrap();
-
-    let mut reloaded = UserConfig::new();
-    reloaded
-      .load_behaviorconfig(serde_yaml::from_str(&written).unwrap())
-      .unwrap();
-    assert_eq!(reloaded.behavior.dj_backend, "openai_compat");
-    assert_eq!(reloaded.behavior.dj_batch_size, 7);
-    assert_eq!(reloaded.behavior.dj_history_period, "7d");
-    assert_eq!(reloaded.behavior.dj_agent_command, vec!["codex"]);
-    assert_eq!(
-      reloaded.behavior.dj_agent_prompt_via.as_deref(),
-      Some("arg")
-    );
-    assert_eq!(reloaded.behavior.dj_agent_model.as_deref(), Some("haiku"));
-    assert_eq!(reloaded.behavior.dj_agent_timeout_secs, 240);
-    assert_eq!(reloaded.behavior.dj_model.as_deref(), Some("some-model"));
-    assert_eq!(
-      reloaded.behavior.dj_base_url.as_deref(),
-      Some("http://localhost:1234/v1")
-    );
-    assert_eq!(
-      reloaded.behavior.dj_api_key.as_deref(),
-      Some("sk-not-a-real-key")
-    );
-    assert!(reloaded.behavior.dj_avoid_library);
-    assert_eq!(reloaded.behavior.dj_configured, Some(true));
-  }
-
-  /// argv[0] is the program to exec, so a blank one is no command at all.
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn a_dj_agent_command_without_a_program_keeps_the_default() {
-    let default = super::default_dj_agent_command();
-
-    let config = loaded("dj_agent_command:\n  - '   '\n  - -p");
-    assert_eq!(
-      config.behavior.dj_agent_command, default,
-      "a blank argv[0] reaches spawn as a confusing ENOENT"
-    );
-
-    // A blank *later* argument is the user's business, so it still loads.
-    let config = loaded("dj_agent_command:\n  - claude\n  - ''");
-    assert_eq!(config.behavior.dj_agent_command, vec!["claude", ""]);
-  }
-
-  /// The reopen binding is really registered, not just declared.
-  ///
-  /// Several sites have to agree for a binding to work and a miss in any of them
-  /// fails silently. This covers the three that are reachable without a config file
-  /// on disk: the shipped default, the rebind path, and the named-action list that
-  /// stops a plugin shadowing it.
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn the_dj_model_picker_binding_round_trips_and_is_reserved() {
-    use super::{KeyBindingsString, UserConfig};
-    use crate::core::input::Key;
-    use std::collections::HashMap;
-
-    let mut config = UserConfig::new();
-    assert_eq!(config.keys.dj_pick_model, Key::Ctrl('g'));
-
-    config
-      .load_keybindings(KeyBindingsString {
-        dj_pick_model: Some("ctrl-x".to_string()),
-        ..Default::default()
-      })
-      .unwrap();
-    assert_eq!(config.keys.dj_pick_model, Key::Ctrl('x'));
-
-    // Named actions are off limits to Lua `plugin_commands`, or a plugin silently
-    // steals the binding.
-    let mut entries = HashMap::new();
-    entries.insert("steal_it".to_string(), "ctrl-x".to_string());
-    config.load_plugin_commands(entries);
-    assert!(config.plugin_command_keys.is_empty());
-  }
-
-  /// The exact YAML an existing install carries: every `dj_*` key present, every
-  /// one of them written by an automatic `save_config` rather than typed.
-  #[cfg(feature = "ai-dj")]
-  fn machine_written_dj_defaults() -> &'static str {
-    "
-dj_backend: agent_cli
-dj_agent_command:
-  - claude
-  - -p
-dj_agent_prompt_via: stdin
-dj_agent_timeout_secs: 90
-dj_batch_size: 6
-dj_history_period: 30d
-dj_avoid_library: false
-dj_model: null
-dj_base_url: null
-dj_api_key: null
-"
-  }
-
-  #[cfg(feature = "ai-dj")]
-  fn loaded(yaml: &str) -> super::UserConfig {
-    use super::{BehaviorConfigString, UserConfig};
-    let mut config = UserConfig::new();
-    config
-      .load_behaviorconfig(serde_yaml::from_str::<BehaviorConfigString>(yaml).unwrap())
-      .unwrap();
-    config
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn a_fresh_config_is_not_treated_as_a_configured_dj() {
-    use super::UserConfig;
-    assert!(!UserConfig::new().behavior.dj_is_configured());
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn an_install_carrying_only_machine_written_dj_defaults_is_still_asked_once() {
-    // The test that keeps the predicate from silently excluding everybody: every
-    // key below is present on disk today, so presence can never be the signal.
-    // `dj_agent_prompt_via: stdin` in particular is the trap.
-    let config = loaded(machine_written_dj_defaults());
-    assert!(
-      !config.behavior.dj_is_configured(),
-      "a config written entirely by save_config has not chosen anything"
-    );
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn the_completion_marker_makes_a_default_config_count_as_configured() {
-    let yaml = format!("{}dj_configured: true\n", machine_written_dj_defaults());
-    assert!(loaded(&yaml).behavior.dj_is_configured());
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn a_hand_edited_dj_backend_counts_as_configured_without_the_marker() {
-    assert!(loaded("dj_backend: anthropic").behavior.dj_is_configured());
-    assert!(loaded("dj_agent_command:\n  - agy")
-      .behavior
-      .dj_is_configured());
-    assert!(loaded("dj_agent_model: haiku").behavior.dj_is_configured());
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn a_configured_api_key_counts_as_configured_without_the_marker() {
-    assert!(loaded("dj_api_key: sk-whatever")
-      .behavior
-      .dj_is_configured());
-    assert!(loaded("dj_base_url: http://localhost:11434/v1")
-      .behavior
-      .dj_is_configured());
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn tuning_the_dj_is_not_choosing_an_ai() {
-    // Batch size and the history window are knobs, not a backend choice, so a user
-    // who touched them is still owed the question.
-    let config = loaded("dj_batch_size: 3\ndj_history_period: 7d\ndj_avoid_library: true");
-    assert!(!config.behavior.dj_is_configured());
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn the_configured_marker_stays_null_until_something_sets_it() {
-    use super::{UserConfig, UserConfigPaths, UserConfigString};
-
-    // Through the real save path, because that is where the hazard is: `save_config`
-    // runs from volume changes and shutdown, and if it wrote `false` it would answer
-    // the picker's question on the user's behalf and pin the answer forever.
-    let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("config.yml");
-    let mut config = UserConfig::new();
-    config.path_to_config = Some(UserConfigPaths {
-      config_file_path: config_path.clone(),
-    });
-
-    config.save_config().unwrap();
-    let on_disk = |path: &std::path::Path| -> super::BehaviorConfigString {
-      let raw = std::fs::read_to_string(path).unwrap();
-      serde_yaml::from_str::<UserConfigString>(&raw)
-        .unwrap()
-        .behavior
-        .unwrap()
-    };
-    let saved = on_disk(&config_path);
-    assert_eq!(
-      saved.dj_configured, None,
-      "an automatic save answers nothing"
-    );
-    assert_eq!(
-      saved.dj_agent_prompt_via, None,
-      "and leaves the delivery mode for the preset to decide"
-    );
-
-    config.behavior.dj_configured = Some(true);
-    config.save_config().unwrap();
-    assert_eq!(on_disk(&config_path).dj_configured, Some(true));
-  }
-
   #[test]
   fn a_save_keeps_alt_arrow_bindings() {
     use super::{UserConfig, UserConfigPaths, UserConfigString};
@@ -3861,23 +2721,6 @@ dj_api_key: null
       "a field this build has and left unset is not brought back"
     );
     assert!(super::field_names::<super::BehaviorConfigString>().contains(&"seek_milliseconds"));
-  }
-
-  #[cfg(feature = "ai-dj")]
-  #[test]
-  fn an_invalid_dj_agent_prompt_via_keeps_the_previous_value() {
-    let config = loaded("dj_agent_prompt_via: carrier pigeon");
-    assert_eq!(
-      config.behavior.dj_agent_prompt_via, None,
-      "unset stays unset, so the preset still decides"
-    );
-
-    let config = loaded("dj_agent_prompt_via: argv");
-    assert_eq!(
-      config.behavior.dj_agent_prompt_via.as_deref(),
-      Some("arg"),
-      "the canonical form is stored, not what the user typed"
-    );
   }
 
   #[test]
@@ -3955,20 +2798,6 @@ dj_api_key: null
   }
 
   #[test]
-  fn sync_token_loads_as_user_config_and_trims_blank_to_none() {
-    use super::{BehaviorConfigString, UserConfig};
-
-    let behavior: BehaviorConfigString = serde_yaml::from_str("sync_token: ' token '\n").unwrap();
-    let mut config = UserConfig::new();
-    config.load_behaviorconfig(behavior).unwrap();
-    assert_eq!(config.behavior.sync_token, Some("token".to_string()));
-
-    let behavior: BehaviorConfigString = serde_yaml::from_str("sync_token: '   '\n").unwrap();
-    config.load_behaviorconfig(behavior).unwrap();
-    assert_eq!(config.behavior.sync_token, None);
-  }
-
-  #[test]
   fn volume_percent_loads_as_configured_runtime_default() {
     use super::{BehaviorConfigString, UserConfig};
 
@@ -4007,59 +2836,6 @@ library_height_percent: 101
     assert_eq!(config.behavior.sidebar_width_percent, None);
     assert_eq!(config.behavior.playbar_height_rows, None);
     assert_eq!(config.behavior.library_height_percent, None);
-  }
-
-  #[test]
-  fn radio_stations_load_as_user_config() {
-    use super::{BehaviorConfigString, UserConfig};
-    use crate::core::state::RadioStationConfig;
-
-    let behavior: BehaviorConfigString = serde_yaml::from_str(
-      r#"
-radio_stations:
-  - name: " Groove Salad "
-    url: " https://ice1.somafm.com/groovesalad-128-mp3 "
-  - name: Duplicate
-    url: https://ice1.somafm.com/groovesalad-128-mp3
-  - name: ""
-    url: https://blank-name.example/dropped
-"#,
-    )
-    .unwrap();
-    let mut config = UserConfig::new();
-    config.load_behaviorconfig(behavior).unwrap();
-    assert_eq!(
-      config.behavior.radio_stations,
-      vec![RadioStationConfig {
-        name: "Groove Salad".to_string(),
-        url: "https://ice1.somafm.com/groovesalad-128-mp3".to_string(),
-      }]
-    );
-  }
-
-  #[test]
-  fn active_source_unknown_string_falls_back_to_spotify() {
-    use crate::core::source::Source;
-
-    // Unknown/garbage strings must not panic and fall back to Spotify
-    assert_eq!(Source::from_config_str("Tidal"), Source::Spotify);
-    assert_eq!(Source::from_config_str(""), Source::Spotify);
-    assert_eq!(Source::from_config_str("local"), Source::Spotify); // case-sensitive
-  }
-
-  #[test]
-  fn active_source_to_config_str_matches_from_config_str() {
-    use crate::core::source::Source;
-
-    // Round-trip: to_config_str → from_config_str must be identity for both variants
-    assert_eq!(
-      Source::from_config_str(Source::Spotify.to_config_str()),
-      Source::Spotify
-    );
-    assert_eq!(
-      Source::from_config_str(Source::Local.to_config_str()),
-      Source::Local
-    );
   }
 
   #[test]
@@ -4102,47 +2878,6 @@ radio_stations:
       Some("Band"),
       "header override from the example must survive resolution"
     );
-  }
-
-  #[test]
-  fn structural_behavior_errors_degrade_to_defaults_instead_of_failing_load() {
-    use super::{BehaviorConfigString, UserConfig};
-
-    // A two-column playing icon, an empty gauge icon, an invalid sort field,
-    // and an unknown playbar label key must all warn-and-fallback: the app
-    // must stay launchable on a config typo.
-    let yaml = r#"
-playing_icon: "WW"
-gauge_filled_icon: ""
-default_sort_saved_albums: "dtae_added"
-playbar_control_labels:
-  bogus_key: "x"
-  play_pause: "PLAY"
-"#;
-    let behavior: BehaviorConfigString = serde_yaml::from_str(yaml).unwrap();
-    let mut config = UserConfig::new();
-    let defaults = UserConfig::new();
-
-    config.load_behaviorconfig(behavior).unwrap();
-
-    assert_eq!(config.behavior.playing_icon, defaults.behavior.playing_icon);
-    assert_eq!(
-      config.behavior.gauge_filled_icon,
-      defaults.behavior.gauge_filled_icon
-    );
-    assert_eq!(
-      config.behavior.default_sort_saved_albums,
-      defaults.behavior.default_sort_saved_albums
-    );
-    // The unknown key is skipped, the valid one is kept.
-    assert_eq!(
-      config.behavior.playbar_control_labels.get("play_pause"),
-      Some(&"PLAY".to_string())
-    );
-    assert!(!config
-      .behavior
-      .playbar_control_labels
-      .contains_key("bogus_key"));
   }
 
   #[test]
@@ -4250,12 +2985,7 @@ mod language_tests {
     assert_eq!(UserConfig::new().behavior.language, Language::Auto);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yml");
-    for language in [
-      Language::Auto,
-      Language::En,
-      Language::ZhHans,
-      Language::ZhHant,
-    ] {
+    for language in [Language::Auto, Language::En, Language::PtBr, Language::Fr] {
       let mut config = UserConfig::new();
       config.path_to_config = Some(UserConfigPaths {
         config_file_path: path.clone(),
@@ -4275,12 +3005,13 @@ mod language_tests {
   #[test]
   fn language_aliases_are_accepted_and_unknown_values_fall_back_to_auto() {
     for (value, expected) in [
-      ("zh-CN", Language::ZhHans),
-      ("zh_CN", Language::ZhHans),
-      ("zh", Language::ZhHans),
-      ("ZH-HANS", Language::ZhHans),
-      ("zh_TW", Language::ZhHant),
-      ("fr", Language::Auto),
+      ("pt-BR", Language::PtBr),
+      ("pt_BR", Language::PtBr),
+      ("pt", Language::PtBr),
+      ("PT-PT", Language::PtBr),
+      ("fr_FR", Language::Fr),
+      ("fr", Language::Fr),
+      ("zh-Hans", Language::Auto),
       ("42", Language::Auto),
       ("false", Language::Auto),
     ] {

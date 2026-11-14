@@ -10,7 +10,6 @@ const PERMILLE: u16 = 1000;
 const MIN_FLOAT_PERMILLE: u16 = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct GuiLayout {
   pub tree: PaneNode,
   /// In paint order, the last one on top.
@@ -23,7 +22,6 @@ pub struct GuiLayout {
 
 /// A pane over the tree, placed in thousandths of the pane area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct FloatingPane {
   pub pane: Pane,
   pub x: u16,
@@ -33,7 +31,6 @@ pub struct FloatingPane {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct BarPlacement {
   pub bar: FrameBar,
   pub edge: WindowEdge,
@@ -41,7 +38,6 @@ pub struct BarPlacement {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum FrameBar {
   Top,
   Player,
@@ -49,7 +45,6 @@ pub enum FrameBar {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum WindowEdge {
   Top,
   Bottom,

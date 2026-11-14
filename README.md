@@ -3,9 +3,16 @@
   spotatui
 </h1>
 <p align="center">
-  A fast music player for the terminal and the desktop, written in Rust.<br>
-  Spotify through its own built-in client, plus local files, Subsonic/Navidrome, internet radio, YouTube and Qobuz, and Apple Music on macOS.
+  A fast Qobuz player for the terminal, written in Rust.
 </p>
+
+> **About this fork.** This is a trimmed-down fork of
+> [spotatui](https://github.com/LargeModGames/spotatui): Qobuz is the only music
+> source, the terminal UI is the only frontend, and the interface ships in
+> English, Portuguese (Brazil) and French. Spotify, the other sources, the AI DJ
+> and MCP server, the listening party, playlist sync, the browser/desktop/mobile
+> apps, telemetry and self-update are removed. The rest of this README describes
+> upstream spotatui; for this fork, build from source with `cargo build --release`.
 <p align="center">
   <a href="#installation">Install</a> · <a href="docs/README.md">Docs</a> · <a href="docs/installation.md#desktop-app">Desktop app</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="https://spotatui.com/discord">Discord</a>
 </p>

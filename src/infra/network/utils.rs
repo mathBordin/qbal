@@ -1,9 +1,7 @@
 use super::Network;
 use crate::core::app::{Announcement, AnnouncementLevel, App, LyricsStatus};
 use chrono::{DateTime, Utc};
-#[cfg(feature = "spotify-session")]
-use reqwest::Method;
-use serde::{de::Error as _, Deserialize, Deserializer};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::env;
 use std::time::{Duration, Instant};
@@ -26,40 +24,7 @@ impl LrcResponse {
 }
 
 #[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct GlobalSongCountResponse {
-  #[serde(deserialize_with = "deserialize_global_song_count")]
-  count: u64,
-}
-
-const TELEMETRY_ENDPOINT: &str = "https://spotatui-counter.spotatui.workers.dev";
-
-fn deserialize_global_song_count<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-  D: Deserializer<'de>,
-{
-  #[derive(Deserialize)]
-  #[serde(untagged)]
-  enum CountValue {
-    Number(u64),
-    String(String),
-  }
-
-  match CountValue::deserialize(deserializer)? {
-    CountValue::Number(value) => Ok(value),
-    CountValue::String(value) => {
-      let sanitized = value.replace(',', "");
-      sanitized
-        .parse::<u64>()
-        .map_err(|_| D::Error::custom("invalid global song count"))
-    }
-  }
-}
-
-#[derive(Deserialize, Debug)]
 struct AnnouncementFeedResponse {
-  #[allow(dead_code)]
-  version: Option<u8>,
   #[serde(default)]
   announcements: Vec<AnnouncementRecord>,
 }
@@ -83,8 +48,6 @@ pub trait UtilsNetwork {
     duration: f64,
     spotify_id: Option<String>,
   );
-  async fn increment_global_song_count(&mut self);
-  async fn fetch_global_song_count(&mut self);
   async fn fetch_announcements(&mut self);
 }
 
@@ -125,24 +88,6 @@ async fn spotify_lyrics(
   spotify_id: Option<&str>,
   duration: f64,
 ) -> Option<(Vec<(u128, String)>, bool)> {
-  #[cfg(feature = "spotify-session")]
-  if let Some(id) = spotify_id {
-    let path = format!("tracks/{id}/lyrics");
-    // The funnel already logs a failed request.
-    let value = super::requests::spotify_api_request_json_for(Method::GET, &path, &[], None).await;
-    match value
-      .ok()
-      .and_then(crate::infra::spotify::lyrics::parse_lyrics)
-    {
-      Some(lyrics) if lyrics.synced => return Some((lyrics.lines, true)),
-      Some(lyrics) => {
-        let text: Vec<String> = lyrics.lines.into_iter().map(|(_, line)| line).collect();
-        return Some((synthesize_plain_lyrics(&text.join("\n"), duration), false));
-      }
-      None => log::debug!("No Spotify lyrics for {id}; trying LRCLIB"),
-    }
-  }
-  #[cfg(not(feature = "spotify-session"))]
   let _ = (spotify_id, duration);
   None
 }
@@ -185,43 +130,6 @@ impl UtilsNetwork for Network {
       return;
     }
     apply_lyrics_response(&mut app, lrc_resp, duration);
-  }
-
-  async fn increment_global_song_count(&mut self) {
-    let client = super::requests::shared_http_client();
-    // Fire and forget
-    let _ = client
-      .post(TELEMETRY_ENDPOINT)
-      .header(reqwest::header::ACCEPT, "application/json")
-      .timeout(Duration::from_secs(5))
-      .send()
-      .await;
-  }
-
-  async fn fetch_global_song_count(&mut self) {
-    let client = super::requests::shared_http_client();
-    match client
-      .get(TELEMETRY_ENDPOINT)
-      .header(reqwest::header::ACCEPT, "application/json")
-      .timeout(Duration::from_secs(5))
-      .send()
-      .await
-    {
-      Ok(resp) => {
-        if let Ok(data) = resp.json::<GlobalSongCountResponse>().await {
-          let mut app = self.app.lock().await;
-          app.global_song_count = Some(data.count);
-          app.global_song_count_failed = false;
-        } else {
-          let mut app = self.app.lock().await;
-          app.global_song_count_failed = true;
-        }
-      }
-      Err(_) => {
-        let mut app = self.app.lock().await;
-        app.global_song_count_failed = true;
-      }
-    }
   }
 
   async fn fetch_announcements(&mut self) {

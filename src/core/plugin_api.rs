@@ -9,14 +9,23 @@
 
 use crate::core::app::App;
 use crate::infra::media_metadata::current_playback_snapshot;
-use rspotify::model::RepeatState;
 use serde::{Deserialize, Serialize};
+
+/// The repeat mode of the playing context: off, one track, or the whole list.
+/// Serialized as `off` / `track` / `context`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatState {
+  #[default]
+  Off,
+  Track,
+  Context,
+}
 
 pub const API_VERSION: u32 = 6;
 
 /// A popup dialog produced by a plugin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PluginPopup {
   pub title: String,
   pub lines: Vec<PopupLine>,
@@ -24,7 +33,6 @@ pub struct PluginPopup {
 
 /// A single line in a [`PluginPopup`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PopupLine {
   pub text: String,
   pub fg: Option<crate::core::theme::Color>,
@@ -33,7 +41,6 @@ pub struct PopupLine {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct TrackInfo {
   pub uri: Option<String>,
   pub name: String,
@@ -79,13 +86,11 @@ pub struct TrackInfo {
   pub release_date: Option<String>,
   // Identity of a generated title, retained when a queue is saved and restored.
   #[serde(default, skip_serializing_if = "Option::is_none")]
-  #[cfg_attr(all(test, feature = "gui"), ts(optional))]
   pub generated_name: Option<GeneratedTrackName>,
 }
 
 /// Generated track titles are translated at display time; real tags stay literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum GeneratedTrackName {
   LocalUnknown,
 }
@@ -129,7 +134,6 @@ pub struct PlaybackState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct DeviceInfo {
   pub id: Option<String>,
   pub name: String,
@@ -140,11 +144,9 @@ pub struct DeviceInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PlaylistInfo {
   /// In-memory identity for generated labels; frontends receive the rendered name.
   #[serde(skip)]
-  #[cfg_attr(all(test, feature = "gui"), ts(skip))]
   pub generated_name: Option<GeneratedPlaylistName>,
   pub uri: String,
   pub name: String,
@@ -187,14 +189,12 @@ impl PlaylistInfo {
 /// Reused by [`TrackInfo`], [`AlbumInfo`], and [`ArtistInfo`]. `id` is `None`
 /// for local/unknown sources or when the API omits it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct ArtistRef {
   pub id: Option<String>,
   pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct ArtistInfo {
   pub id: Option<String>,
   pub uri: Option<String>,
@@ -204,7 +204,6 @@ pub struct ArtistInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct AlbumInfo {
   pub id: Option<String>,
   pub uri: Option<String>,
@@ -239,7 +238,6 @@ pub struct SavedAlbumInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct ShowInfo {
   pub id: Option<String>,
   pub uri: Option<String>,
@@ -257,14 +255,12 @@ pub struct ShowInfo {
 /// `ResumePoint`; carried so the episode list can render the "fully played"
 /// marker and resume position.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct ResumePointInfo {
   pub fully_played: bool,
   pub resume_position_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct EpisodeInfo {
   pub id: Option<String>,
   pub uri: Option<String>,
@@ -318,7 +314,6 @@ pub struct SearchResults {
 /// design: draw runs with `&App` only (the engine is unreachable there), so
 /// plugins publish content via effects and the renderer just reads it.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PluginScreenContent {
   pub title: String,
   pub widgets: Vec<PluginWidget>,
@@ -326,7 +321,6 @@ pub struct PluginScreenContent {
 
 /// A size along one axis: an absolute cell count, or a percentage of the parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum PluginLength {
   Cells(u16),
   /// 1..=100 (validated at the API layer).
@@ -340,7 +334,6 @@ pub enum PluginLength {
 /// that some terminals misbehave when it does (Alacritty's sixel branch is
 /// named explicitly).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum PluginCoverArtFit {
   /// Fit inside the area, keeping the aspect ratio, never upscaling.
   #[default]
@@ -355,7 +348,6 @@ pub enum PluginCoverArtFit {
 /// container's axis is used (the top level is an implicit vertical stack).
 /// `None` means "share the remaining space evenly".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PluginWidget {
   pub kind: PluginWidgetKind,
   pub width: Option<PluginLength>,
@@ -376,7 +368,6 @@ impl PluginWidget {
 /// The content of a [`PluginWidget`]. `Row`/`Column` are pure layout containers:
 /// they draw no border and no title, they only split their area.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum PluginWidgetKind {
   Paragraph {
     lines: Vec<PopupLine>,
@@ -413,7 +404,6 @@ pub enum PluginWidgetKind {
 /// serde shape (`{ Track = {...} }`) is hostile to Lua, so queue items are
 /// flattened into an explicit `kind` plus at most one populated payload field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct QueueItemSnapshot {
   /// `"track"` or `"episode"`.
   pub kind: String,
@@ -442,7 +432,6 @@ impl QueueItemSnapshot {
 
 /// The playback queue as exposed to plugins.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct QueueSnapshot {
   #[serde(default)]
   pub currently_playing: Option<QueueItemSnapshot>,
@@ -478,7 +467,6 @@ pub struct BehaviorSnapshot {
   pub enable_text_emphasis: bool,
   pub show_loading_indicator: bool,
   pub enforce_wide_search_bar: bool,
-  pub liked_icon: String,
   pub shuffle_icon: String,
   pub repeat_track_icon: String,
   pub repeat_context_icon: String,
@@ -546,7 +534,6 @@ pub fn config_snapshot(
       enable_text_emphasis: b.enable_text_emphasis,
       show_loading_indicator: b.show_loading_indicator,
       enforce_wide_search_bar: b.enforce_wide_search_bar,
-      liked_icon: b.liked_icon.clone(),
       shuffle_icon: b.shuffle_icon.clone(),
       repeat_track_icon: b.repeat_track_icon.clone(),
       repeat_context_icon: b.repeat_context_icon.clone(),
@@ -583,40 +570,9 @@ impl PlaybackState {
   }
 }
 
-impl DeviceInfo {
-  pub fn from_rspotify(device: &rspotify::model::Device) -> Self {
-    DeviceInfo {
-      id: device.id.clone(),
-      name: device.name.clone(),
-      kind: format!("{:?}", device._type).to_lowercase(),
-      is_active: device.is_active,
-      volume_percent: device.volume_percent.map(|v| v.min(100) as u8),
-    }
-  }
-}
+impl DeviceInfo {}
 
-impl PlaylistInfo {
-  pub fn from_simplified(p: &rspotify::model::SimplifiedPlaylist) -> Self {
-    use rspotify::prelude::Id;
-    let owner = p
-      .owner
-      .display_name
-      .clone()
-      .unwrap_or_else(|| p.owner.id.id().to_string());
-    PlaylistInfo {
-      generated_name: None,
-      uri: p.id.uri(),
-      name: p.name.clone(),
-      owner,
-      track_count: p.items.total,
-      id: Some(p.id.id().to_string()),
-      owner_id: Some(p.owner.id.id().to_string()),
-      collaborative: p.collaborative,
-      public: p.public,
-      image_url: p.images.first().map(|img| img.url.clone()),
-    }
-  }
-}
+impl PlaylistInfo {}
 
 /// Build a [`PlaybackState`] from the current [`App`] state.
 ///
@@ -624,14 +580,8 @@ impl PlaylistInfo {
 /// `current_playback_snapshot` and `app.current_playback_context` are absent).
 pub fn playback_state(app: &App) -> Option<PlaybackState> {
   let snapshot = current_playback_snapshot(app);
-  let context = app
-    .current_playback_context
-    .as_ref()
-    .filter(|_| !app.apple_music_owns_playback());
-
-  if snapshot.is_none() && context.is_none() {
-    return None;
-  }
+  // Nothing playing: plugins see `nil`, as before the source reduction.
+  snapshot.as_ref()?;
 
   let track = snapshot.as_ref().map(|s| TrackInfo {
     generated_name: None,
@@ -659,24 +609,9 @@ pub fn playback_state(app: &App) -> Option<PlaybackState> {
       .repeat
       .map(PlaybackState::repeat_from)
       .unwrap_or_else(|| "off".to_string());
-    let device = if app.apple_music_owns_playback() {
-      Some(DeviceInfo {
-        id: None,
-        name: "Music.app".into(),
-        kind: "computer".into(),
-        is_active: true,
-        volume_percent: Some(app.apple_music_volume()),
-      })
-    } else {
-      context.map(|ctx| DeviceInfo::from_rspotify(&ctx.device))
-    };
-    (s.is_playing, s.shuffle, repeat_str, device)
+    (s.is_playing, s.shuffle, repeat_str, None::<DeviceInfo>)
   } else {
-    // snapshot is None but context is Some — build from context only
-    let ctx = context.unwrap();
-    let repeat_str = PlaybackState::repeat_from(ctx.repeat_state);
-    let device = Some(DeviceInfo::from_rspotify(&ctx.device));
-    (ctx.is_playing, ctx.shuffle_state, repeat_str, device)
+    (false, false, "off".to_string(), None)
   };
 
   let volume_percent = device.as_ref().and_then(|d| d.volume_percent);
@@ -695,17 +630,8 @@ pub fn playback_state(app: &App) -> Option<PlaybackState> {
 }
 
 /// Return a list of available devices from [`App`]'s cached device payload.
-pub fn device_list(app: &App) -> Vec<DeviceInfo> {
-  app
-    .devices()
-    .map(|payload| {
-      payload
-        .devices
-        .iter()
-        .map(DeviceInfo::from_rspotify)
-        .collect()
-    })
-    .unwrap_or_default()
+pub fn device_list(_app: &App) -> Vec<DeviceInfo> {
+  Vec::new()
 }
 
 /// Stable plugin-facing name of a route. Exhaustive on purpose (no `_` arm):
@@ -715,39 +641,21 @@ pub fn route_name(route: &crate::core::app::Route) -> String {
   use crate::core::app::RouteId;
   match &route.id {
     RouteId::Analysis => "analysis",
-    RouteId::AlbumTracks => "album_tracks",
-    RouteId::AlbumList => "album_list",
-    RouteId::Artist => "artist",
     RouteId::LyricsView => "lyrics",
     RouteId::CoverArtView => "cover_art",
     RouteId::MiniPlayer => "miniplayer",
     RouteId::Error => "error",
     RouteId::Home => "home",
-    RouteId::RecentlyPlayed => "recently_played",
     RouteId::Search => "search",
-    RouteId::SelectedDevice => "devices",
     RouteId::TrackTable => "track_table",
-    RouteId::Discover => "discover",
-    RouteId::Artists => "artists",
-    RouteId::Podcasts => "podcasts",
-    RouteId::PodcastEpisodes => "podcast_episodes",
-    RouteId::Recommendations => "recommendations",
     RouteId::Dialog => "dialog",
     RouteId::AnnouncementPrompt => "announcement",
     RouteId::RecapPrompt => "recap_prompt",
-    RouteId::CommunityPinPrompt => "community_pin_prompt",
     RouteId::ExitPrompt => "exit_prompt",
     RouteId::Settings => "settings",
     RouteId::HelpMenu => "help",
     RouteId::Queue => "queue",
-    RouteId::Party => "party",
-    RouteId::CreatePlaylist => "create_playlist",
-    RouteId::Friends => "friends",
-    RouteId::LocalBrowser => "local_browser",
     RouteId::Stats => "stats",
-    RouteId::PlaylistSync => "playlist_sync",
-    #[cfg(feature = "ai-dj")]
-    RouteId::AiDj => "ai_dj",
     RouteId::PluginScreen(name) => return format!("plugin:{name}"),
   }
   .to_string()
@@ -881,9 +789,6 @@ pub fn lyrics_state_is_current(app: &App) -> bool {
         app.desired_lyrics_identity
           == Some((snapshot.metadata.title.clone(), snapshot.primary_artist()))
       }
-      // Episodes get no lookup at all; the detector clears the identity and
-      // publishes `NotFound` for them.
-      PlaybackItemKind::Episode => app.desired_lyrics_identity.is_none(),
     },
   }
 }
@@ -921,105 +826,8 @@ pub fn lyrics_snapshot(app: &App) -> LyricsSnapshot {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::{source::Source, state::RuntimeState, user_config::UserConfig};
-  use chrono::Utc;
-  use rspotify::model::{
-    context::{Actions, CurrentPlaybackContext},
-    CurrentlyPlayingType, Device, DeviceType, RepeatState,
-  };
-  use std::{sync::mpsc::channel, time::SystemTime};
-
-  fn make_app() -> App {
-    let (tx, _rx) = channel();
-    App::new(
-      tx,
-      crate::core::user_config::UserConfig::new(),
-      Some(SystemTime::now()),
-    )
-  }
-
-  #[allow(deprecated)]
-  fn make_device(volume: u32) -> Device {
-    Device {
-      id: Some("dev-abc".to_string()),
-      is_active: true,
-      is_private_session: false,
-      is_restricted: false,
-      name: "Living Room TV".to_string(),
-      _type: DeviceType::Tv,
-      volume_percent: Some(volume),
-    }
-  }
-
-  #[allow(deprecated)]
-  fn make_playback_context_no_item(
-    is_playing: bool,
-    shuffle: bool,
-    repeat: RepeatState,
-    device: Device,
-  ) -> CurrentPlaybackContext {
-    CurrentPlaybackContext {
-      device,
-      repeat_state: repeat,
-      shuffle_state: shuffle,
-      context: None,
-      timestamp: Utc::now(),
-      progress: None,
-      is_playing,
-      item: None,
-      currently_playing_type: CurrentlyPlayingType::Unknown,
-      actions: Actions::default(),
-    }
-  }
 
   // --- DeviceInfo::from_rspotify ---
-
-  #[test]
-  fn device_info_maps_all_fields_and_lowercases_kind() {
-    let d = make_device(75);
-    let info = DeviceInfo::from_rspotify(&d);
-    assert_eq!(info.id.as_deref(), Some("dev-abc"));
-    assert_eq!(info.name, "Living Room TV");
-    assert_eq!(info.kind, "tv");
-    assert!(info.is_active);
-    assert_eq!(info.volume_percent, Some(75));
-  }
-
-  #[test]
-  fn device_info_computer_kind() {
-    #[allow(deprecated)]
-    let d = Device {
-      id: None,
-      is_active: false,
-      is_private_session: false,
-      is_restricted: false,
-      name: "Laptop".to_string(),
-      _type: DeviceType::Computer,
-      volume_percent: Some(50),
-    };
-    let info = DeviceInfo::from_rspotify(&d);
-    assert_eq!(info.kind, "computer");
-    assert_eq!(info.volume_percent, Some(50));
-    assert!(info.id.is_none());
-    assert!(!info.is_active);
-  }
-
-  #[test]
-  fn device_info_volume_clamped_to_u8() {
-    // volume_percent is u32; values > 255 should not cause panic (min(100) ensures <= 100).
-    #[allow(deprecated)]
-    let d = Device {
-      id: None,
-      is_active: false,
-      is_private_session: false,
-      is_restricted: false,
-      name: "X".to_string(),
-      _type: DeviceType::Smartphone,
-      volume_percent: Some(100),
-    };
-    let info = DeviceInfo::from_rspotify(&d);
-    assert_eq!(info.volume_percent, Some(100));
-  }
 
   // --- repeat_from ---
 
@@ -1040,130 +848,7 @@ mod tests {
 
   // --- playback_state ---
 
-  #[test]
-  fn playback_state_returns_none_on_default_app() {
-    let app = make_app();
-    assert!(playback_state(&app).is_none());
-  }
-
-  #[test]
-  fn playback_state_with_context_no_item_returns_some_with_track_none() {
-    let mut app = make_app();
-    let device = make_device(60);
-    app.current_playback_context = Some(make_playback_context_no_item(
-      true,
-      true,
-      RepeatState::Context,
-      device,
-    ));
-
-    let state = playback_state(&app).expect("should be Some");
-    assert!(state.track.is_none());
-    assert!(state.is_playing);
-    assert!(state.shuffle);
-    assert_eq!(state.repeat, "context");
-    assert_eq!(state.volume_percent, Some(60));
-    let dev = state.device.as_ref().expect("device should be present");
-    assert_eq!(dev.id.as_deref(), Some("dev-abc"));
-    assert_eq!(dev.name, "Living Room TV");
-    assert_eq!(dev.kind, "tv");
-  }
-
   // --- config_snapshot ---
 
-  #[test]
-  fn config_snapshot_uses_runtime_state_for_migrated_fields_without_mutating_config() {
-    let mut config = UserConfig::new();
-    config.behavior.volume_percent = Some(10);
-    config.behavior.sidebar_width_percent = Some(20);
-    config.behavior.playbar_height_rows = Some(6);
-    config.behavior.library_height_percent = Some(30);
-    config.behavior.stop_after_current_track = true;
-
-    let runtime_state = RuntimeState {
-      shuffle_enabled: true,
-      sidebar_width_percent: 42,
-      playbar_height_rows: 12,
-      library_height_percent: 64,
-      active_source: Source::Radio,
-      ..RuntimeState::default()
-    };
-
-    let snapshot = config_snapshot(&config, &runtime_state);
-
-    assert!(snapshot.behavior.shuffle_enabled);
-    assert_eq!(snapshot.behavior.sidebar_width_percent, 42);
-    assert_eq!(snapshot.behavior.playbar_height_rows, 12);
-    assert_eq!(snapshot.behavior.library_height_percent, 64);
-    assert_eq!(snapshot.behavior.active_source, "radio");
-    assert!(snapshot.behavior.stop_after_current_track);
-
-    assert_eq!(config.behavior.volume_percent, Some(10));
-    assert_eq!(config.behavior.sidebar_width_percent, Some(20));
-    assert_eq!(config.behavior.playbar_height_rows, Some(6));
-    assert_eq!(config.behavior.library_height_percent, Some(30));
-  }
-
   // --- PlaylistInfo::from_simplified ---
-
-  #[test]
-  fn playlist_info_maps_all_fields() {
-    let playlist = crate::core::test_helpers::simplified_playlist(
-      "37i9dQZF1DXcBWIGoYBM5M",
-      "Today's Top Hits",
-      "spotify",
-      false,
-    );
-    let info = PlaylistInfo::from_simplified(&playlist);
-    assert_eq!(info.uri, "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M");
-    assert_eq!(info.name, "Today's Top Hits");
-    // test_helpers::simplified_playlist sets owner display_name = owner_id
-    assert_eq!(info.owner, "spotify");
-    assert_eq!(info.owner_id.as_deref(), Some("spotify"));
-    assert_eq!(info.track_count, 5);
-  }
-
-  #[test]
-  fn playlist_info_falls_back_to_owner_id_when_no_display_name() {
-    use rspotify::model::{
-      idtypes::{PlaylistId, UserId},
-      playlist::PlaylistTracksRef,
-      user::PublicUser,
-    };
-    use std::collections::HashMap;
-
-    #[allow(deprecated)]
-    let playlist = rspotify::model::SimplifiedPlaylist {
-      collaborative: false,
-      external_urls: HashMap::new(),
-      href: "https://api.spotify.com/v1/playlists/abc".to_string(),
-      id: PlaylistId::from_id("37i9dQZF1DXcBWIGoYBM5M")
-        .unwrap()
-        .into_static(),
-      images: Vec::new(),
-      name: "Chill Vibes".to_string(),
-      owner: PublicUser {
-        display_name: None,
-        external_urls: HashMap::new(),
-        followers: None,
-        href: "https://api.spotify.com/v1/users/spotifyuser".to_string(),
-        id: UserId::from_id("spotifyuser").unwrap().into_static(),
-        images: Vec::new(),
-      },
-      public: None,
-      snapshot_id: "snap".to_string(),
-      tracks: PlaylistTracksRef {
-        href: "https://api.spotify.com/v1/playlists/abc/tracks".to_string(),
-        total: 10,
-      },
-      items: PlaylistTracksRef {
-        href: "https://api.spotify.com/v1/playlists/abc/tracks".to_string(),
-        total: 10,
-      },
-    };
-    let info = PlaylistInfo::from_simplified(&playlist);
-    assert_eq!(info.owner, "spotifyuser");
-    assert_eq!(info.owner_id.as_deref(), Some("spotifyuser"));
-    assert_eq!(info.track_count, 10);
-  }
 }

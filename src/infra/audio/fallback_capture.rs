@@ -37,7 +37,6 @@ impl AudioCaptureManager {
     }
   }
 
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
   pub fn recent_audio(&self) -> Option<RecentAudio> {
     match self {
       Self::PipeWire(capture) => capture.recent_audio(),

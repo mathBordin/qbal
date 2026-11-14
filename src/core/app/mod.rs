@@ -1,6 +1,5 @@
 use crate::core::action::LibraryTarget;
 use crate::core::geometry::Viewport;
-use crate::core::gui_layout::GuiLayout;
 use crate::core::input::Key;
 use crate::core::pagination::{CursorPaged, Paged};
 use crate::core::pane::{Pane, PaneNode};
@@ -8,39 +7,23 @@ use crate::core::plugin_api::{
   ArtistInfo, EpisodeInfo, PlayableInfo, PlaylistInfo, SavedAlbumInfo, ShowInfo, TrackInfo,
 };
 use crate::core::requirement::{availability, Availability, Capability, Requirement};
-use crate::core::sort::{
-  sort_playlist_slots, PlaylistLastListens, SidebarPlaylistOrder, SortContext, SortField, SortState,
-};
+use crate::core::sort::{SidebarPlaylistOrder, SortContext, SortField, SortState};
 use crate::core::source::Source;
-use crate::core::state::{
-  PersistedRuntimeState, RadioStationAddOutcome, RadioStationConfig, RuntimeState,
-};
+use crate::core::state::{PersistedRuntimeState, RuntimeState};
 use crate::core::user_config::{
   color_to_string, key_to_config_string, normalize_tick_rate_milliseconds, UserConfig,
   VisualizerStyle,
 };
 use crate::infra::history::{RecapPeriod, StatsData, StreakSummary};
-use crate::infra::network::sync::{
-  ControlMode, PartyRole, PartySession, PartyStatus, PlaybackAction,
-};
 use crate::infra::network::IoEvent;
-#[cfg(feature = "queue")]
 use crate::infra::queue::QueueNowPlaying;
 use anyhow::anyhow;
-use rspotify::{
-  model::enums::Country,
-  model::{
-    context::CurrentPlaybackContext, device::DevicePayload, idtypes::PlaylistId, PlayableItem,
-  },
-  prelude::*, // Adds Id trait for .id() method
-};
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 // Bare `Arc` here is only ever named by the streaming player, the MPRIS manager,
 // and the decoded queue-slot accessors below (whose gate is the queueable
 // sources, not `audio-decode` — a radio-only build has no queue slot).
-#[cfg(any(feature = "queue", all(feature = "mpris", target_os = "linux")))]
 use std::sync::Arc;
 use std::{
   cmp::{max, min},
@@ -48,64 +31,17 @@ use std::{
   time::{Duration, Instant},
 };
 // The test modules under `core/app/` take `SystemTime` through `use super::*`.
-#[cfg(test)]
-use std::time::SystemTime;
 use unicode_width::UnicodeWidthStr;
 
-#[cfg(not(target_os = "android"))]
-use arboard::Clipboard;
-/// arboard has no Android backend, so the clipboard is never available there.
-#[cfg(target_os = "android")]
-pub enum Clipboard {}
-#[cfg(target_os = "android")]
-impl Clipboard {
-  fn new() -> Result<Self, ()> {
-    Err(())
-  }
-
-  fn set_text(&mut self, _text: String) -> Result<(), std::convert::Infallible> {
-    match *self {}
-  }
-}
-#[cfg(any(test, feature = "streaming"))]
-use chrono::Utc;
 use log::info;
-#[cfg(feature = "streaming")]
-use rspotify::model::{
-  context::Actions,
-  device::Device,
-  enums::{CurrentlyPlayingType, RepeatState},
-  DeviceType,
-};
 
 use crate::infra::queue::RepeatMode;
 
-#[cfg(test)]
-use crate::core::sort::SortOrder;
-#[cfg(test)]
-use crate::core::test_helpers::{playlist_info, user_info};
-#[cfg(test)]
-use chrono::Duration as ChronoDuration;
-#[cfg(test)]
-use rspotify::model::{
-  artist::SimplifiedArtist, idtypes::TrackId, page::Page, track::FullTrack, track::SavedTrack,
-  SimplifiedAlbum,
-};
-#[cfg(test)]
-use std::collections::HashMap;
-#[cfg(test)]
-use std::sync::mpsc::channel;
-
 mod album_theme;
-mod apple_music;
 mod audio_analysis;
 mod construction;
-mod discover;
 mod display_revisions;
-mod dj;
-mod friends;
 mod help;
-#[cfg(not(target_os = "android"))]
 mod keep_awake;
 mod keybindings;
 mod layout;
@@ -113,18 +49,9 @@ mod library;
 mod localization;
 mod lyrics;
 mod models;
-mod native_backend;
-mod native_recovery;
-mod native_shuffle;
-mod party;
 mod persistence;
 mod playback_routing;
-pub(crate) use playback_routing::PlaybackOwner;
-#[cfg(test)]
-pub(crate) use playback_routing::NOTHING_PLAYING_STATUS;
-mod playlist_folders;
 mod playlist_pages;
-mod playlist_sync;
 mod playlists;
 mod plugins;
 mod queue;
@@ -137,14 +64,10 @@ mod session;
 mod settings_apply;
 mod settings_schema;
 mod shuffle_repeat;
-#[cfg(feature = "soloist")]
-mod soloist;
 mod status;
 mod tick;
 mod transport;
 mod view;
-#[cfg(feature = "gui")]
-mod visualizer_look;
 mod volume;
 mod welcome;
 
@@ -152,55 +75,24 @@ mod welcome;
 mod test_support;
 
 pub use audio_analysis::*;
-pub use discover::*;
 pub use display_revisions::*;
-pub use friends::*;
 pub use help::*;
 pub use keybindings::*;
 pub use library::*;
 pub use lyrics::*;
 pub use models::*;
-pub use native_backend::*;
-#[cfg(feature = "streaming")]
-pub use native_recovery::*;
-#[cfg(feature = "streaming")]
-pub(crate) use native_shuffle::*;
-pub use playback_routing::*;
-pub use playlist_folders::*;
 pub use playlists::*;
 pub use plugins::*;
 pub use queue::*;
 pub use route::*;
 pub use scrollable_pages::*;
-pub use seek::*;
 pub use session::*;
 pub use settings_schema::*;
 pub use status::*;
 pub use view::*;
 
-/// What the Playback revision counts: snapshot without position, volume, device, liked, Qobuz quality, context name.
-pub(crate) type PlaybackView = (
-  Option<crate::infra::media_metadata::PlaybackSnapshot>,
-  u32,
-  Option<String>,
-  bool,
-  Option<String>,
-  Option<String>,
-);
-
 pub struct App {
-  /// What the user actually wants the volume to be. We keep this around until
-  /// Spotify's API comes back with the same value — otherwise a slow poll
-  /// response can flash the old volume back on screen.
-  pub pending_volume: Option<u8>,
-  /// The last value we actually sent to the API. Lets us skip redundant
-  /// dispatches while we're just waiting for confirmation.
-  pub last_dispatched_volume: Option<u8>,
   pub instant_since_last_current_playback_poll: Instant,
-  /// `timestamp` of the playback state the track-end poll already ran for.
-  track_end_polled_for: Option<chrono::DateTime<chrono::Utc>>,
-  /// When the poll after a Web API command is due.
-  command_poll_at: Option<Instant>,
   navigation_stack: Vec<Route>,
   pub spectrum_data: Option<crate::infra::audio::SpectrumData>,
   pub audio_capture_active: bool,
@@ -225,8 +117,6 @@ pub struct App {
   pub runtime_state: RuntimeState,
   pub state_path: Option<PathBuf>,
   pub artists: Vec<crate::core::plugin_api::ArtistInfo>,
-  pub artist: Option<Artist>,
-  pub album_table_context: AlbumTableContext,
   /// The live error recorded by [`App::handle_error`], or empty when there is
   /// none. The `RouteId::Error` frame raised alongside it is a presentation
   /// *hint*, not the state: a frontend may draw it full-screen, render this
@@ -235,15 +125,6 @@ pub struct App {
   /// When the live `api_error` stops being current. Stamped by `handle_error`,
   /// consumed by `App::expire_api_error` on the tick. `None` means none is live.
   api_error_expires_at: Option<Instant>,
-  pub current_playback_context: Option<CurrentPlaybackContext>,
-  /// Spotify's name for a play context, with that context's uri.
-  spotify_context_name: Option<(String, String)>,
-  pub last_track_id: Option<String>,
-  /// Set to true when a track ends naturally and stop_after_current_track is enabled.
-  /// The next Playing event will see this flag and immediately pause.
-  #[allow(dead_code)]
-  pub pending_stop_after_track: bool,
-  devices: Option<DevicePayload>,
   pub queue: Option<QueueState>,
   /// The native cross-source playback queue (FIFO). Unlike [`Self::queue`]
   /// (a read-only mirror of Spotify's Web-API queue), this is owned by the app
@@ -258,22 +139,13 @@ pub struct App {
   /// track — i.e. native streaming or a source with a finite track list, which
   /// excludes internet radio — and every read goes through the unconditional
   /// [`Self::queue_owns_playback`] accessor.
-  #[cfg(feature = "queue")]
   pub queue_now: Option<crate::infra::queue::QueueNowPlaying>,
-  /// Bounded retry guard for the native-Spotify queue slot. When a queued
-  /// Spotify track is playing via a direct `player.load` (no Spirc context) and
-  /// Spirc self-advances to a different track, the player-event handler reissues
-  /// the queued track and increments this. Reset to 0 each time a new Spotify
-  /// queue slot is published; capped so a genuinely-gone track can't loop.
-  #[cfg(feature = "streaming")]
-  pub spotify_queue_guard_reloads: u8,
   /// Whether the queue slot should be playing. Set on a Spotify slot's publish
   /// and on a user skip, flipped by the slot's pause/resume transport arms,
   /// cleared by a device removal; read by the paths that stage the next
   /// decoded item and by the suspended context's resume. Unlike
   /// `native_is_playing` this survives a backend teardown, so a recovery
   /// replay of the slot can honor a user's pause.
-  #[cfg(feature = "queue")]
   pub queue_slot_desired_playing: bool,
   /// Decoded cover art for the current track plus its load status. The TUI
   /// renderer (`tui::cover_art`) caches its terminal protocols on this
@@ -295,21 +167,7 @@ pub struct App {
   /// In-flight fade of the live theme, advanced by `update_on_tick`.
   #[cfg(feature = "art-decode")]
   theme_transition: Option<crate::core::cover_theme::ThemeTransition>,
-  /// AI DJ session state: transcript, auto-queue toggle, vibe, and the
-  /// generation counter that invalidates in-flight background work.
-  #[cfg(feature = "dj-core")]
-  pub dj: crate::infra::dj::DjState,
   liked_song_ids_set: HashSet<String>,
-  /// Liked-state lookups pending for the detached contains worker, as bare
-  /// base62 track ids (deduped). The `CurrentUserSavedTracksContains` handler
-  /// enqueues here instead of resolving on the serial IoEvent pump.
-  pub liked_lookup_pending: HashSet<String>,
-  /// Whether the single detached liked-lookup worker is currently draining
-  /// [`Self::liked_lookup_pending`].
-  pub liked_lookup_worker_running: bool,
-  /// Bumped on every local like/unlike so a detached liked-state read that
-  /// started before the mutation is re-read instead of clobbering it.
-  pub liked_state_epoch: u64,
   followed_artist_ids_set: HashSet<String>,
   saved_album_ids_set: HashSet<String>,
   saved_show_ids_set: HashSet<String>,
@@ -321,36 +179,20 @@ pub struct App {
   // play-from-here offsets stay correct (see `playlist_items_page`).
   pub playlist_tracks: Option<Paged<(u32, PlayableInfo)>>,
   pub playlist_track_pages: ScrollableResultPages<Paged<(u32, PlayableInfo)>>,
-  pub playlist_track_table_id: Option<PlaylistId<'static>>,
   pub active_playlist_track_filter: Option<String>,
   pub pending_playlist_track_search: Option<String>,
-  playlists: Option<Paged<PlaylistInfo>>,
   /// The Recently Played page. Its cursor is `view.recently_played_index`.
   pub recently_played:
     Option<crate::core::pagination::CursorPaged<crate::core::plugin_api::TrackInfo>>,
-  pub recommendations_seed: String,
-  /// The seed track id of the recommendation rows in the track table.
-  radio_seed_id: Option<String>,
   /// Moves on every write that opens other rows in the track table, and on a radio request.
   track_table_epoch: u64,
-  /// The epoch of the last radio request; its rows land only while no other list opened.
-  radio_epoch: Option<u64>,
-  pub recommendations_context: Option<RecommendationsContext>,
   search_results: SearchResult,
-  pub selected_album_simplified: Option<SelectedAlbum>,
-  pub selected_album_full: Option<SelectedFullAlbum>,
   pub song_progress_ms: u128,
   /// When `update_on_tick` last ran. Every frontend must drive the tick (see
   /// `core::driver`); `playback_position_ms` reports stale past 2s so one
   /// that stops ticking shows a loud error instead of a frozen playbar.
   last_tick_at: Instant,
   pub seek_ms: Option<u128>,
-  /// Last time a native seek was actually sent to the player (for throttling)
-  #[cfg(feature = "streaming")]
-  pub last_native_seek: Option<Instant>,
-  /// Pending seek position to send to player (throttled to avoid overwhelming librespot)
-  #[cfg(feature = "streaming")]
-  pending_native_seek: Option<u32>,
   /// Last time an API seek was sent (for throttling external device control)
   last_api_seek: Option<Instant>,
   /// Pending seek position for API (throttled to avoid overwhelming Spotify API)
@@ -361,52 +203,17 @@ pub struct App {
   pending_source_seek: Option<u32>,
   pub track_table: TrackTable,
   pub episode_table_context: EpisodeTableContext,
-  pub selected_show_simplified: Option<SelectedShow>,
   pub selected_show_full: Option<SelectedFullShow>,
   user: Option<UserInfo>,
-  /// Folders under the configured music dir that hold audio, shown by the
-  /// Local Files browser. Its cursor is `view.local_playlists_index`.
-  local_playlists: Vec<PlaylistInfo>,
-  /// The user's Subsonic server playlists shown by the Subsonic browser.
-  /// Populated by `GetSubsonicPlaylists` dispatch.
-  subsonic_playlists: Vec<PlaylistInfo>,
-  /// The Music.app remote: whether it owns playback, the handoff generation
-  /// and the last status it reported.
-  apple_music: crate::infra::apple_music::RemoteState,
-  /// Lets an Apple Music claim withdraw spotatui's own Now Playing entry, so
-  /// Music's is the only one.
-  #[cfg(all(feature = "macos-media", target_os = "macos"))]
-  macos_media_manager: Option<Arc<crate::infra::macos_media::MacMediaManager>>,
   /// The Qobuz sidebar rows (favorites, playlists, albums) shown by the Qobuz
   /// browser. Populated by `GetQobuzPlaylists` dispatch.
   qobuz_playlists: Vec<PlaylistInfo>,
-  /// The user's configured internet-radio stations (as playable rows, uri
-  /// `radio:<url>`) shown by the sidebar when the Radio source is active.
-  /// Populated by `GetRadioStations` dispatch.
-  /// Unconditional (domain type) because the sidebar match arms key on the
-  /// unconditional `Source::Radio` variant even in the slim build.
-  radio_stations: Vec<TrackInfo>,
-  /// The user's local YouTube playlists (from `youtube_playlists.yml`), shown
-  /// by the sidebar when the YouTube source is active. Unconditional for the
-  /// same slim-build reason as [`radio_stations`](Self::radio_stations).
-  youtube_playlists: Vec<PlaylistInfo>,
-  /// The `youtube:playlist:` URI currently open in the shared track table, so
-  /// the remove-track flow knows which playlist to edit.
-  pub youtube_open_playlist: Option<String>,
   /// The source the UI is currently scoped to (sidebar, search, capability
   /// gating). Browse-scope only — never changes playback routing.
   pub active_source: Source,
-  pub clipboard: Option<Clipboard>,
   pub is_loading: bool,
   io_tx: Option<Sender<IoEvent>>,
-  pub is_fetching_current_playback: bool,
-  /// Whether a Spotify login is available (cached at startup or added by the
-  /// in-app login). Gates the Spotify-only startup dispatches so a
-  /// free-source launch doesn't spam "connect Spotify" messages.
-  pub spotify_connected: bool,
   pending_keybinding_persist: Option<PendingKeybindingPersist>,
-  /// A fetch of Spotify's queue for "Up next" that has not gone out yet.
-  up_next_pending: bool,
   pub keybinding_runtime: KeybindingRuntimeState,
 
   pub active_announcement: Option<Announcement>,
@@ -423,71 +230,16 @@ pub struct App {
   /// Whether the current `lyrics` carry real LRC timestamps rather than
   /// synthesized evenly-spaced ones derived from plain lyrics.
   lyrics_synced: bool,
-  pub global_song_count: Option<u64>,
-  pub global_song_count_failed: bool,
   // Settings screen state
   pub settings_items: Vec<SettingItem>,
   settings_saved_items: Vec<SettingItem>,
-  /// Immediate track info from native player for instant UI updates
-  pub native_track_info: Option<NativeTrackInfo>,
-  /// Whether native streaming is active (disables API-based progress calculation)
-  pub is_streaming_active: bool,
-  /// Device id for the native streaming device when known
-  #[allow(dead_code)]
-  pub native_device_id: Option<String>,
   /// A `file://` URI to start playing once the UI is up (set from `--play-file`).
   /// Consumed and cleared on first render.
   pub pending_play_file: Option<String>,
-  /// Native playback state - updated by player events, used when streaming is active
-  /// This is more reliable than current_playback_context.is_playing during native streaming
-  pub native_is_playing: Option<bool>,
-  /// librespot's last reported position, which the tick moves on between reports.
-  #[cfg(feature = "streaming")]
-  native_clock: Option<NativeClock>,
-  /// Tracks whether the current native playback was started from a Spotify context
-  /// or from a raw URI-list/native-only route.
-  pub native_playback_origin: Option<NativePlaybackOrigin>,
-  /// The app-owned native-Spotify shuffle session, when client-side shuffle
-  /// owns the current native playback (see [`NativeSpotifyShuffleSession`]).
-  #[cfg(feature = "streaming")]
-  pub native_spotify_shuffle: Option<NativeSpotifyShuffleSession>,
-  /// Monotonic generation for [`Self::native_spotify_shuffle`]; bumped on every
-  /// session create/clear so stale background fetches are discarded.
-  #[cfg(feature = "streaming")]
-  native_shuffle_generation: u64,
   /// Prevent idle/sleep during playback
-  #[cfg(not(target_os = "android"))]
   keepawake: keep_awake::KeepAwake,
-  /// Timestamp of the last native device activation
-  #[allow(dead_code)]
-  pub last_device_activation: Option<Instant>,
-  /// Whether a native device activation is still in progress
-  #[allow(dead_code)]
-  pub native_activation_pending: bool,
-  /// Another device took playback over; the idle poll must not reclaim it (#693)
-  #[cfg(feature = "streaming")]
-  native_handed_off: bool,
-  /// The unavailable-track guard stopped librespot; only a new load plays again
-  #[cfg(feature = "streaming")]
-  native_unavailable_halt: bool,
-  /// A bare resume already tried to pull the handed-off playback back
-  #[cfg(feature = "streaming")]
-  native_handoff_resume_tried: bool,
-  /// Spotify's Made For You page; `None` until the first fetch lands.
-  discover_shelves: Option<Vec<DiscoverShelf>>,
-  discover_loading: bool,
-  discover_view: DiscoverView,
   /// The liked marks the Search revision last counted.
   search_liked_view: Vec<String>,
-  /// The liked marks the LikedMarks revision last counted.
-  #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-  liked_marks_view: Vec<String>,
-  /// The desktop shell's updater; `None` without one.
-  #[cfg(feature = "gui")]
-  update_status: Option<crate::core::update::UpdateStatus>,
-  /// The player-bar visualizer's look from `visualizer.yml`.
-  #[cfg(feature = "gui")]
-  visualizer_look: crate::core::visualizer_look::VisualizerLook,
   /// The decoded-source list whose rows landed in the track table.
   source_table_uri: Option<String>,
   track_table_view: TrackTableView,
@@ -508,8 +260,6 @@ pub struct App {
   album_sort: SortState,
   pub artist_sort: SortState,
   recently_played_sort: SortState,
-  /// Last time the listening party host broadcast playback state.
-  last_party_sync_at: Instant,
   /// Ephemeral status message shown in the playbar. Read through
   /// [`App::status_message`]; every writer is a setter in `status.rs`.
   status_message: Option<String>,
@@ -517,12 +267,6 @@ pub struct App {
   status_message_expires_at: Option<Instant>,
   /// True when the current status message is an error (blocks normal message overwrites)
   status_message_is_error: bool,
-  /// Listening party status
-  party_status: PartyStatus,
-  /// Active listening party session data
-  party_session: Option<PartySession>,
-  /// Pending track table selection to apply when new page loads
-  pending_track_table_selection: Option<PendingTrackSelection>,
   /// Maps visible track table rows to source playlist item positions.
   /// Used to remove a single selected playlist occurrence safely.
   pub playlist_track_positions: Option<Vec<usize>>,
@@ -532,40 +276,9 @@ pub struct App {
   pub pending_playlist_track_removal: Option<PendingPlaylistTrackRemoval>,
   /// Full flat list of all user playlists (all pages combined)
   all_playlists: Vec<PlaylistInfo>,
-  /// Folder tree from rootlist (None if not fetched or streaming disabled)
-  _playlist_folder_nodes: Option<Vec<PlaylistFolderNode>>,
-  /// Flattened folder+playlist items for display navigation
-  playlist_folder_items: Vec<PlaylistFolderItem>,
-  /// Latest local listen per playlist context, maintained by the history collector.
-  playlist_last_listens: PlaylistLastListens,
-  /// Backing storage for the injected community-playlist pin so display methods
-  /// can hand out a `&PlaylistFolderItem`. Never stored in
-  /// `playlist_folder_items`.
-  community_pin_item: PlaylistFolderItem,
-  /// Current folder ID being viewed (0 = root)
-  pub current_playlist_folder_id: usize,
-  /// Incremented every time playlists are refreshed to guard stale background tasks
-  pub playlist_refresh_generation: u64,
-  /// Incremented every time the saved tracks view is reloaded to guard stale prefetch tasks
-  pub saved_tracks_prefetch_generation: u64,
   pub saved_tracks_prefetch_in_flight: HashSet<u32>,
-  /// Incremented every time the playlist track table is reloaded to guard stale prefetch tasks
-  pub playlist_tracks_prefetch_generation: u64,
   pub playlist_tracks_prefetch_in_flight: HashSet<u32>,
   saved_artists_prefetch_in_flight: Option<String>,
-  pending_artist_selection: Option<usize>,
-  saved_artists_prefetch_generation: usize,
-  /// Playlist ids whose full track list is being fetched for sorting. Further
-  /// sort changes reuse the active fetch and apply the newest sort at completion.
-  pub playlist_sort_fetch_in_flight: HashSet<String>,
-  /// Playlist id whose page-1 open fetch is in flight, so spamming Enter on a
-  /// playlist doesn't queue duplicate full fetches. Cleared when the response
-  /// (or its error) lands.
-  pub pending_playlist_open: Option<String>,
-  /// Tracks whether a ChangeVolume request is on its way to Spotify.
-  /// When true, we hold off on sending another one — rapid key presses
-  /// just update `pending_volume` and the latest value wins.
-  pub is_volume_change_in_flight: bool,
   /// Deadline for a debounced state save scheduled by auto-repeating runtime
   /// state changes such as volume and shuffle.
   state_save_due: Option<Instant>,
@@ -577,26 +290,6 @@ pub struct App {
   /// the status bar into error mode, where `set_status_message` refuses to
   /// overwrite it and every ordinary message is dropped for the rest of the run.
   state_save_error_reported: bool,
-  /// Reference to the native streaming player for direct control (bypasses event channel)
-  #[cfg(feature = "streaming")]
-  pub streaming_player: Option<Arc<crate::infra::player::StreamingPlayer>>,
-  /// The running Soloist engine; `streaming_player` stays `None` while it is set.
-  #[cfg(feature = "soloist")]
-  soloist_link: Option<Arc<crate::infra::soloist::SoloistLink>>,
-  /// A Soloist download from Spotify runs.
-  #[cfg(feature = "soloist")]
-  soloist_downloading: bool,
-  /// The librespot recovery sender while Soloist is the engine, for a switch back.
-  #[cfg(feature = "soloist")]
-  librespot_standby:
-    Option<tokio::sync::mpsc::UnboundedSender<crate::infra::player::StreamingRecoveryRequest>>,
-  /// The Soloist pairing guide shows: Soloist waits for its first login.
-  soloist_pairing: bool,
-  /// The offer to set up Soloist shows, after librespot failed several tracks in a row.
-  soloist_offer: bool,
-  /// That offer was made in this run; it shows once.
-  #[cfg(feature = "soloist")]
-  soloist_offered: bool,
   /// Player-global repeat mode for the decoded (non-Spotify) sources
   /// (Local / Subsonic / YouTube). Decoded sources have no Spotify
   /// `current_playback_context`, so their repeat lives here instead of in
@@ -608,103 +301,19 @@ pub struct App {
   /// the owning source's own queue is reordered in place (see `ShuffleBackup`),
   /// keeping the current track playing.
   pub decoded_shuffle: bool,
-  /// The active local-file playback session (multi-source Phase 3), or `None`
-  /// when Spotify owns playback. Decoupled from Spotify/librespot state: the
-  /// local playbar reads progress and pause state live from the player here, so
-  /// librespot events and polls never desync it. `Some` exactly while a local
-  /// file is playing; dropping it releases the audio output device.
-  #[cfg(feature = "local-files")]
-  pub local_playback: Option<crate::infra::local::LocalPlaybackState>,
-  /// The active Subsonic playback session (multi-source Phase 4), or `None` when
-  /// another backend owns playback. Same decoupling contract as
-  /// [`local_playback`](Self::local_playback): the playbar reads progress/pause
-  /// live from the player here, never touching Spotify/librespot fields.
-  #[cfg(feature = "subsonic")]
-  pub subsonic_playback: Option<crate::infra::subsonic::SubsonicPlaybackState>,
   /// The active Qobuz playback session, or `None` when another backend owns
   /// playback. Same decoupling contract as [`local_playback`](Self::local_playback).
-  #[cfg(feature = "qobuz")]
   pub qobuz_playback: Option<crate::infra::qobuz::QobuzPlaybackState>,
-  /// The active internet-radio playback session (multi-source Phase 5), or
-  /// `None` when another backend owns playback. Same decoupling contract as
-  /// [`local_playback`](Self::local_playback); unlike it there is no queue —
-  /// a station is one infinite stream.
-  #[cfg(feature = "internet-radio")]
-  pub radio_playback: Option<crate::infra::radio::RadioPlaybackState>,
-  /// The active YouTube playback session (multi-source, yt-dlp backed), or
-  /// `None` when another backend owns playback. Same decoupling contract as
-  /// [`subsonic_playback`](Self::subsonic_playback).
-  #[cfg(feature = "youtube")]
-  pub youtube_playback: Option<crate::infra::youtube::YouTubePlaybackState>,
   /// The decoded source that claimed the audio sink: set when its start path
   /// pauses librespot, kept when the session dies with nothing to replace it
   /// (a failed start, a lost output device), cleared when an explicit Spotify
   /// start takes the sink. Covers the window in which every `*_playback` field
   /// is `None` for a source the user asked for.
-  #[cfg(any(test, feature = "audio-decode"))]
   decoded_sink_claim: Option<Source>,
-  /// Sender used to recover native streaming when a stale/disconnected player is detected.
-  #[cfg(feature = "streaming")]
-  pub streaming_recovery_tx:
-    Option<tokio::sync::mpsc::UnboundedSender<crate::infra::player::StreamingRecoveryRequest>>,
-  /// A StartPlayback request parked while no usable backend exists (native
-  /// session recovering, or startup init still materializing one). Replayed
-  /// once the backend is ready so the user's press isn't silently dropped.
-  #[cfg(feature = "streaming")]
-  pub pending_start_playback: Option<PendingStartPlayback>,
-  /// True while a native backend may materialize soon (recovery in flight, or
-  /// the deferred startup init still running). While set, a playback request
-  /// that finds no active device parks itself for replay instead of routing
-  /// to the full-screen error.
-  #[cfg(feature = "streaming")]
-  pub native_backend_pending: bool,
-  /// librespot was shut down for another source; the next Spotify start
-  /// rebuilds it.
-  #[cfg(feature = "streaming")]
-  native_parked: bool,
-  /// Armed when a native load is issued; a Playing/TrackChanged event disarms
-  /// it. If it fires, the session is a zombie (passes `is_connected` but
-  /// silently drops Spirc commands) and recovery is forced.
-  #[cfg(feature = "streaming")]
-  pub native_load_watchdog: Option<Instant>,
-  /// Durable native playback intent, independent of the current librespot
-  /// Session/Spirc instance. Used to restore the exact track or in-flight
-  /// transition after a transport-level recovery.
-  #[cfg(feature = "streaming")]
-  pub native_playback_recovery: Option<NativePlaybackRecoverySnapshot>,
-  /// A restore command has been issued for this generation and is waiting for
-  /// a matching Playing/Paused event from the replacement player.
-  #[cfg(feature = "streaming")]
-  pub native_restore_pending: Option<NativePlaybackRestoreAttempt>,
-  #[cfg(feature = "streaming")]
-  native_playback_generation: u64,
   /// Reference to MPRIS manager for emitting Seeked signals after native seeks
   #[cfg(all(feature = "mpris", target_os = "linux"))]
   pub mpris_manager: Option<Arc<crate::infra::mpris::MprisManager>>,
 
-  // Friends screen state
-  /// All friends fetched from spotatui.com (follows list)
-  pub friends: Vec<FriendEntry>,
-  /// Whether friends are currently loading from the API
-  pub friends_loading: bool,
-  /// Own friend code fetched from spotatui.com
-  pub friend_code: Option<String>,
-  /// Results from searching users by name
-  pub friend_user_search_results: Vec<FriendSearchResult>,
-  /// Timestamp of the last time friends were refreshed (for periodic polling)
-  last_friends_refresh_at: Instant,
-
-  // Create Playlist form state
-  pub create_playlist_tracks: Vec<TrackInfo>,
-  pub create_playlist_search_results: Vec<TrackInfo>,
-  /// Whether a playlist-sync run owns the single slot right now.
-  playlist_sync_in_flight: bool,
-  /// The links as the last run loaded them, for the sync screen.
-  playlist_sync_links: Vec<crate::core::playlist_sync::Link>,
-  /// The last finished run.
-  playlist_sync_last_report: Option<crate::core::playlist_sync::SyncReport>,
-  /// The playlist the open mirror picker is for.
-  pending_playlist_sync_master: Option<crate::core::playlist_sync::Endpoint>,
   /// The link id the open remove-link confirm is for.
   pending_playlist_sync_remove: Option<String>,
   /// Commands queued by keybindings for the scripting engine to run.
@@ -714,8 +323,6 @@ pub struct App {
   /// only the scripting engine reads them.
   pub plugin_data_generations: PluginDataGenerations,
   display_revisions: DisplayRevisions,
-  /// The playback view the Playback revision last counted.
-  playback_view: PlaybackView,
   /// The queue view the Queue revision last counted: the Spotify mirror, the native queue, the playing slot.
   queue_view: (Option<QueueState>, Vec<TrackInfo>, Option<TrackInfo>),
   /// Retained content of plugin-registered custom screens, keyed by screen
@@ -756,31 +363,8 @@ impl App {
     }
   }
 
-  /// [`Self::dispatch`] without setting `is_loading`.
-  ///
-  /// For work with its own progress surface. A DJ brain call runs for up to
-  /// `dj_agent_timeout_secs` (minutes), and `dispatch` would pin the global
-  /// spinner until the service-lane task finishes — the exact UX bug
-  /// `DjState::thinking` exists to avoid, and the reason the MCP executor sends
-  /// straight down the channel instead of dispatching.
-  /// The Apple Music worker also uses it for the handoff it sends back to the
-  /// pump, which is not a user-visible load.
-  pub fn dispatch_without_spinner(&self, action: IoEvent) {
-    if let Some(io_tx) = &self.io_tx {
-      if let Err(e) = io_tx.send(action) {
-        log::warn!("dispatch_without_spinner failed (shutting down?): {e}");
-      }
-    }
-  }
-
   // Close the IO channel to allow the network thread to exit gracefully
   pub fn close_io_channel(&mut self) {
     self.io_tx = None;
-    // App-side rebuild requests stop here; the install check refuses any
-    // build that a player handler still starts.
-    #[cfg(feature = "streaming")]
-    {
-      self.streaming_recovery_tx = None;
-    }
   }
 }

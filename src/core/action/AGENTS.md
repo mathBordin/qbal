@@ -20,6 +20,5 @@
   file has a value for it (an `Unbound` one also goes into the `UNBOUND`
   pin, which a producer scan of `src/tui/` checks). Feature-gate an arm's
   body, never the arm: clippy skips a match when any arm carries a `#[cfg]`.
-- `Action` derives serde (the frontend wire shape); a payload type added to it
-  must stay serde-derivable and carry the `ts_rs::TS` `cfg_attr` line (see
-  Testing conventions), and the change needs regenerated `gui/src/bindings/`.
+- `Action` derives serde (the Lua plugins' wire shape); a payload type added to
+  it must stay serde-derivable.

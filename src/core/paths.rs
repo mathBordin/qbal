@@ -6,11 +6,9 @@ use std::{
 
 const APP_DIR: &str = "spotatui";
 const FALLBACK_CONFIG_DIR: [&str; 1] = [".config"];
-#[cfg(any(feature = "spotify-session", test))]
+#[cfg(test)]
 const FALLBACK_CACHE_DIR: [&str; 1] = [".cache"];
 const FALLBACK_STATE_DIR: [&str; 2] = [".local", "state"];
-#[cfg(feature = "spotify-session")]
-const XDG_CACHE_HOME_ENV: &str = "XDG_CACHE_HOME";
 const XDG_CONFIG_HOME_ENV: &str = "XDG_CONFIG_HOME";
 const XDG_STATE_HOME_ENV: &str = "XDG_STATE_HOME";
 
@@ -23,19 +21,6 @@ pub(crate) fn app_config_dir() -> Option<PathBuf> {
     std::env::var_os(XDG_CONFIG_HOME_ENV),
     dirs::home_dir(),
     &FALLBACK_CONFIG_DIR,
-  )
-}
-
-/// Resolve spotatui's app cache directory.
-///
-/// Uses `$XDG_CACHE_HOME/spotatui` when XDG_CACHE_HOME is set to an absolute
-/// path, otherwise falls back to `$HOME/.cache/spotatui`.
-#[cfg(feature = "spotify-session")]
-pub(crate) fn app_cache_dir() -> Option<PathBuf> {
-  app_dir_from(
-    std::env::var_os(XDG_CACHE_HOME_ENV),
-    dirs::home_dir(),
-    &FALLBACK_CACHE_DIR,
   )
 }
 
@@ -57,39 +42,8 @@ pub(crate) fn legacy_client_config_path() -> Option<PathBuf> {
 }
 
 /// The Qobuz credentials file: `<config dir>/qobuz_credentials.yml`.
-#[cfg(feature = "qobuz")]
 pub(crate) fn qobuz_credentials_path() -> Option<PathBuf> {
   app_config_dir().map(|dir| dir.join("qobuz_credentials.yml"))
-}
-
-/// The Soloist API key: `<config dir>/soloist_credentials.yml`.
-#[cfg(feature = "soloist")]
-pub(crate) fn soloist_credentials_path() -> Option<PathBuf> {
-  app_config_dir().map(|dir| dir.join("soloist_credentials.yml"))
-}
-
-/// Soloist's own data dir (device id, paired session, prefs): `<state dir>/soloist`.
-#[cfg(feature = "soloist")]
-pub(crate) fn soloist_data_dir() -> Option<PathBuf> {
-  app_state_dir().map(|dir| dir.join("soloist"))
-}
-
-/// The Soloist builds spotatui downloaded from Spotify: `<state dir>/soloist-bin`.
-#[cfg(feature = "soloist")]
-pub(crate) fn soloist_bin_dir() -> Option<PathBuf> {
-  app_state_dir().map(|dir| dir.join("soloist-bin"))
-}
-
-/// Soloist's playback cache: `<cache dir>/soloist`.
-#[cfg(feature = "soloist")]
-pub(crate) fn soloist_cache_dir() -> Option<PathBuf> {
-  app_cache_dir().map(|dir| dir.join("soloist"))
-}
-
-/// The player-bar visualizer's look: `<config dir>/visualizer.yml`, never written by the app.
-#[cfg(feature = "gui")]
-pub(crate) fn visualizer_config_path() -> Option<PathBuf> {
-  app_config_dir().map(|dir| dir.join("visualizer.yml"))
 }
 
 /// Directory holding this run's log file.

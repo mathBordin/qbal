@@ -46,14 +46,6 @@ pub enum CoverArtRequest {
   /// Download and decode an image from a URL (Spotify album art, YouTube
   /// thumbnail, Subsonic getCoverArt, Qobuz album art).
   Url(String),
-  /// Read the embedded cover picture out of a local audio file. `key` is the
-  /// track's `file://` URI (used as the cache identity); `path` is the resolved
-  /// filesystem path handed to the blocking tag reader.
-  #[cfg(feature = "local-files")]
-  LocalFile {
-    key: String,
-    path: std::path::PathBuf,
-  },
 }
 
 impl CoverArtRequest {
@@ -62,8 +54,6 @@ impl CoverArtRequest {
   pub fn key(&self) -> &str {
     match self {
       CoverArtRequest::Url(url) => url,
-      #[cfg(feature = "local-files")]
-      CoverArtRequest::LocalFile { key, .. } => key,
     }
   }
 }

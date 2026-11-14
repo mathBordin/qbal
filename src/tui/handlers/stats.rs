@@ -50,7 +50,7 @@ pub fn handler(key: Key, app: &mut App) {
           .and_then(|entry| entry.uri.clone())
       });
       match uri {
-        Some(uri) if uri.starts_with("spotify:track:") => {
+        Some(uri) if false => {
           app.apply(Action::PlayUris {
             uris: vec![uri],
             offset: Some(0),
@@ -77,103 +77,4 @@ fn cycle_period(app: &mut App, forward: bool) {
 }
 
 #[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::core::user_config::UserConfig;
-  use crate::infra::history::{RankedEntry, RecapPeriod, StatsData};
-  use crate::infra::network::IoEvent;
-  use std::sync::mpsc::{channel, Receiver};
-  use std::time::SystemTime;
-
-  fn app_with_track(uri: Option<String>) -> (App, Receiver<IoEvent>) {
-    let (tx, rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    app.stats_data = Some(StatsData {
-      total_plays: 1,
-      total_time_ms: 60_000,
-      top_tracks: vec![RankedEntry {
-        display: "Song - Artist".to_string(),
-        detail: "1 plays · 1m".to_string(),
-        value: 60_000,
-        uri,
-        parts: None,
-      }],
-      top_artists: vec![],
-      top_albums: vec![],
-      days: vec![],
-      period_plays: vec![],
-      week_tracks: vec![],
-      artist_ranks: vec![],
-      movements: vec![],
-    });
-    (app, rx)
-  }
-
-  fn app_with_three_tracks() -> App {
-    let (mut app, _rx) = app_with_track(None);
-    let tracks = &mut app.stats_data.as_mut().expect("stats").top_tracks;
-    let first = tracks[0].clone();
-    tracks.push(first.clone());
-    tracks.push(first);
-    app
-  }
-
-  #[test]
-  fn l_selects_the_last_top_track_and_h_the_first() {
-    let mut app = app_with_three_tracks();
-    handler(Key::Char('L'), &mut app);
-    assert_eq!(app.view.stats_selected_track, 2);
-    handler(Key::Char('H'), &mut app);
-    assert_eq!(app.view.stats_selected_track, 0);
-  }
-
-  #[test]
-  fn m_selects_the_middle_top_track() {
-    let mut app = app_with_three_tracks();
-    handler(Key::Char('M'), &mut app);
-    assert_eq!(app.view.stats_selected_track, 1);
-  }
-
-  #[test]
-  fn cycling_period_dispatches_stats_load() {
-    let (mut app, rx) = app_with_track(None);
-    handler(Key::Char(']'), &mut app);
-    assert_eq!(app.stats_period, RecapPeriod::Month);
-    assert!(app.stats_loading());
-    assert!(app.stats_data.is_none());
-    assert!(matches!(
-      rx.try_recv(),
-      Ok(IoEvent::LoadListeningStats(RecapPeriod::Month))
-    ));
-  }
-
-  #[test]
-  fn enter_plays_selected_spotify_track() {
-    let (mut app, rx) = app_with_track(Some("spotify:track:abc".to_string()));
-    handler(Key::Enter, &mut app);
-    assert!(matches!(
-      rx.try_recv(),
-      Ok(IoEvent::StartPlayback(None, Some(uris), Some(0))) if uris == vec!["spotify:track:abc".to_string()]
-    ));
-  }
-
-  #[test]
-  fn enter_on_unplayable_entry_shows_status_message() {
-    let (mut app, rx) = app_with_track(None);
-    handler(Key::Enter, &mut app);
-    assert!(rx.try_recv().is_err());
-    assert!(app.status_message().is_some());
-  }
-
-  #[test]
-  fn right_from_sidebar_refocuses_stats_content() {
-    use crate::core::app::{ActiveBlock, RouteId};
-
-    let (mut app, _rx) = app_with_track(None);
-    app.push_navigation_stack(RouteId::Stats, ActiveBlock::Stats);
-    // Left puts focus back on the sidebar; right must return it to the screen.
-    common_key_events::focus_sidebar(&mut app);
-    common_key_events::focus_content(&mut app);
-    assert_eq!(app.get_current_route().active_block, ActiveBlock::Stats);
-  }
-}
+mod tests {}

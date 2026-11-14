@@ -48,28 +48,28 @@ impl App {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::i18n::{Language, EN, ZH_HANS, ZH_HANT};
+  use crate::core::i18n::{Language, EN, FR, PT_BR};
 
   #[test]
   fn language_changes_are_per_app_and_invalidate_the_settings_revision() {
     let mut app = App::default();
     let other = App::default();
     let before = app.display_revisions().get(DisplayDomain::Settings);
-    app.user_config.behavior.language = Language::ZhHans;
+    app.user_config.behavior.language = Language::PtBr;
     app.refresh_language();
-    assert!(std::ptr::eq(app.strings(), &ZH_HANS));
+    assert!(std::ptr::eq(app.strings(), &PT_BR));
     assert!(std::ptr::eq(other.strings(), &EN));
     assert!(app.display_revisions().get(DisplayDomain::Settings) > before);
-    app.user_config.behavior.language = Language::ZhHant;
+    app.user_config.behavior.language = Language::Fr;
     app.refresh_language();
-    assert!(std::ptr::eq(app.strings(), &ZH_HANT));
+    assert!(std::ptr::eq(app.strings(), &FR));
   }
 
   #[test]
   fn switching_language_refreshes_every_display_domain_only_when_it_changes() {
     let mut app = App::default();
     let before = app.display_revisions();
-    app.user_config.behavior.language = Language::ZhHant;
+    app.user_config.behavior.language = Language::Fr;
     app.refresh_language();
     let after = app.display_revisions();
     for domain in DisplayDomain::ALL {
@@ -82,28 +82,17 @@ mod tests {
   }
 
   #[test]
-  fn switching_language_reloads_pending_stats_in_the_new_language() {
-    let (mut app, rx) = crate::core::app::test_support::session_free_app();
-    app.reload_stats();
-    assert!(matches!(rx.try_recv(), Ok(IoEvent::LoadListeningStats(_))));
-    app.user_config.behavior.language = Language::ZhHans;
-    app.refresh_language();
-    assert!(matches!(rx.try_recv(), Ok(IoEvent::LoadListeningStats(_))));
-    assert!(app.stats_loading());
-  }
-
-  #[test]
   fn auto_resolves_the_startup_locale_and_cli_keeps_english() {
     let mut app = App {
-      system_language: Language::ZhHant,
+      system_language: Language::Fr,
       ..Default::default()
     };
     app.refresh_language();
-    assert_eq!(app.language(), Language::ZhHant);
+    assert_eq!(app.language(), Language::Fr);
     app.use_english_messages();
     assert_eq!(app.language(), Language::En);
     assert_eq!(app.user_config.behavior.language, Language::Auto);
-    app.user_config.behavior.language = Language::ZhHans;
+    app.user_config.behavior.language = Language::PtBr;
     app.refresh_language();
     assert_eq!(app.language(), Language::En);
   }
@@ -120,24 +109,24 @@ mod tests {
     });
     let result = app.apply(Action::SetSetting {
       id: "behavior.language".into(),
-      value: SettingInput::Text("zh-Hant".into()),
+      value: SettingInput::Text("fr".into()),
     });
     assert!(matches!(
       result,
       ActionOutcome::SettingsSaved { saved: true }
     ));
-    assert_eq!(app.language(), Language::ZhHant);
+    assert_eq!(app.language(), Language::Fr);
     let saved: serde_yaml::Value =
       serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert_eq!(saved["behavior"]["language"].as_str(), Some("zh-Hant"));
+    assert_eq!(saved["behavior"]["language"].as_str(), Some("fr"));
     let result = app.apply(Action::SetSetting {
       id: "behavior.language".into(),
-      value: SettingInput::Text("fr".into()),
+      value: SettingInput::Text("de".into()),
     });
     assert!(matches!(
       result,
       ActionOutcome::SettingsSaved { saved: false }
     ));
-    assert_eq!(app.language(), Language::ZhHant);
+    assert_eq!(app.language(), Language::Fr);
   }
 }

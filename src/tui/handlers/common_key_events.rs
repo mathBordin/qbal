@@ -103,23 +103,9 @@ pub fn on_low_press_handler<T>(selection_data: &[T]) -> usize {
 
 pub fn content_active_block_for_route(route_id: &RouteId) -> Option<ActiveBlock> {
   match route_id {
-    RouteId::AlbumTracks => Some(ActiveBlock::AlbumTracks),
-    RouteId::TrackTable | RouteId::Recommendations => Some(ActiveBlock::TrackTable),
-    RouteId::Podcasts => Some(ActiveBlock::Podcasts),
-    RouteId::AlbumList => Some(ActiveBlock::AlbumList),
-    RouteId::PodcastEpisodes => Some(ActiveBlock::EpisodeTable),
-    RouteId::Discover => Some(ActiveBlock::Discover),
-    RouteId::LocalBrowser => Some(ActiveBlock::LocalBrowser),
+    RouteId::TrackTable => Some(ActiveBlock::TrackTable),
     RouteId::Stats => Some(ActiveBlock::Stats),
-    RouteId::PlaylistSync => Some(ActiveBlock::PlaylistSync),
-    // Without this the right-arrow from the sidebar silently does nothing: the
-    // match has a `_ => None` fallthrough, so it compiles either way.
-    #[cfg(feature = "ai-dj")]
-    RouteId::AiDj => Some(ActiveBlock::AiDj),
-    RouteId::Artists => Some(ActiveBlock::Artists),
-    RouteId::RecentlyPlayed => Some(ActiveBlock::RecentlyPlayed),
     RouteId::Search => Some(ActiveBlock::SearchResultBlock),
-    RouteId::Artist => Some(ActiveBlock::ArtistBlock),
     RouteId::Home => Some(ActiveBlock::Home),
     _ => None,
   }
@@ -195,19 +181,7 @@ pub fn block_borders_playbar(block: ActiveBlock, config: &UserConfig) -> bool {
   match block {
     ActiveBlock::Library => playbar_on_top(config),
     ActiveBlock::MyPlaylists => !playbar_on_top(config),
-    ActiveBlock::ArtistBlock
-    | ActiveBlock::AlbumList
-    | ActiveBlock::AlbumTracks
-    | ActiveBlock::Artists
-    | ActiveBlock::Podcasts
-    | ActiveBlock::EpisodeTable
-    | ActiveBlock::Home
-    | ActiveBlock::Discover
-    | ActiveBlock::RecentlyPlayed
-    | ActiveBlock::TrackTable
-    | ActiveBlock::Stats
-    | ActiveBlock::PlaylistSync
-    | ActiveBlock::LocalBrowser => true,
+    ActiveBlock::Home | ActiveBlock::TrackTable | ActiveBlock::Stats => true,
     _ => false,
   }
 }
@@ -277,23 +251,7 @@ pub fn leave_playbar(app: &mut App) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::{app::SidebarBlock, source::Source};
-
-  #[test]
-  fn the_playlist_sync_route_focuses_its_block_from_the_sidebar() {
-    assert_eq!(
-      content_active_block_for_route(&RouteId::PlaylistSync),
-      Some(ActiveBlock::PlaylistSync)
-    );
-  }
-
-  #[test]
-  fn the_local_files_route_focuses_its_block_from_the_sidebar() {
-    assert_eq!(
-      content_active_block_for_route(&RouteId::LocalBrowser),
-      Some(ActiveBlock::LocalBrowser)
-    );
-  }
+  use crate::core::app::SidebarBlock;
 
   #[test]
   fn test_on_down_press_handler() {
@@ -357,21 +315,6 @@ mod tests {
 
     assert_eq!(uris, vec!["spotify:track:one"]);
     assert_eq!(offset, None);
-  }
-
-  #[test]
-  fn left_event_targets_library_for_spotify_and_playlists_for_local() {
-    let mut app = App::default();
-    // Spotify (default): left arrow focuses the Library list.
-    app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-    focus_sidebar(&mut app);
-    assert_eq!(app.get_current_route().hovered_block, ActiveBlock::Library);
-
-    // Local: the Library list keeps its free rows, so it stays the top block.
-    app.active_source = Source::Local;
-    app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-    focus_sidebar(&mut app);
-    assert_eq!(app.get_current_route().hovered_block, ActiveBlock::Library);
   }
 
   #[test]

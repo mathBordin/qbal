@@ -10,6 +10,7 @@ use crate::core::plugin_api;
 use crate::infra::network::IoEvent;
 
 use super::{Action, ActionOutcome, NavTarget, RepeatSetting};
+use crate::core::plugin_api::RepeatState;
 
 impl App {
   /// Apply one frontend-neutral action. See the module doc for the rules
@@ -22,10 +23,6 @@ impl App {
 
   fn apply_action(&mut self, action: Action) -> ActionOutcome {
     match action {
-      // Music's state is its own intent, which a start still loading has
-      // before any snapshot does.
-      Action::Play if self.apple_music_owns_playback() => self.set_apple_music_playing(true),
-      Action::Pause if self.apple_music_owns_playback() => self.set_apple_music_playing(false),
       Action::Play => {
         if !effective_is_playing(self) {
           self.toggle_playback();
@@ -57,23 +54,18 @@ impl App {
       Action::ToggleShuffle => self.shuffle(),
       Action::CycleRepeat => self.repeat(),
       Action::SetRepeat(setting) => {
-        use rspotify::model::RepeatState;
-        let state = match setting {
+        let _state = match setting {
           RepeatSetting::Off => RepeatState::Off,
           RepeatSetting::Track => RepeatState::Track,
           RepeatSetting::Context => RepeatState::Context,
         };
-        self.dispatch_spotify_fallback(IoEvent::Repeat(state));
+        self.report_nothing_playing();
       }
       Action::PlayUris { uris, offset } => self.start_playback_uris(uris, offset),
       Action::PlayContext { uri, offset } => self.start_playback_context(uri, offset),
       Action::PlayTrackInContext { context, track } => {
         self.start_playback_track_in_context(context, track);
       }
-      Action::TransferPlayback { device_id, persist } => {
-        self.transfer_playback_to_device(device_id, persist);
-      }
-      Action::AddToQueue(uri) => self.add_to_spotify_queue(uri),
       Action::QueueTrack(track) => self.add_track_to_native_queue(track),
       Action::PlayQueueItem { uri, position } => self.play_queue_item(&uri, position),
       Action::RemoveFromQueue { uri, position } => {
@@ -83,103 +75,11 @@ impl App {
         self.move_queue_item(&uri, from, to);
       }
       Action::ClearQueue => self.clear_native_queue(),
-      Action::RefreshQueue => self.dispatch_without_spinner(IoEvent::GetQueue),
-      Action::RefreshDevices => self.dispatch_without_spinner(IoEvent::GetDevicesSilent),
-      Action::Search(query) => {
-        let country = self.get_user_country();
-        self.dispatch(IoEvent::GetSearchResults(query, country));
-      }
       Action::SearchActiveSource(query) => match self.active_source {
-        crate::core::source::Source::Subsonic => {
-          self.dispatch(IoEvent::GetSubsonicSearchResults(query));
-        }
-        crate::core::source::Source::Radio => {
-          self.dispatch(IoEvent::GetRadioSearchResults(query));
-        }
-        crate::core::source::Source::YouTube => {
-          self.dispatch(IoEvent::GetYouTubeSearchResults(query));
-        }
         crate::core::source::Source::Qobuz => {
           self.dispatch(IoEvent::GetQobuzSearchResults(query));
         }
-        crate::core::source::Source::AppleMusic => {
-          self.browse_apple_music(crate::infra::apple_music::Browse::Search(query));
-        }
-        // Spotify and Local both land on the Web API search, exactly like
-        // the search input's if-chain (which has no Local branch).
-        crate::core::source::Source::Spotify | crate::core::source::Source::Local => {
-          let country = self.get_user_country();
-          self.dispatch(IoEvent::GetSearchResults(query, country));
-        }
       },
-      Action::SearchPlaylistTracks { playlist_id, query } => {
-        self.pending_playlist_track_search = Some(query.clone());
-        self.set_status_message(self.strings().status.app.playlist_searching(&query), 60);
-        self.dispatch(IoEvent::SearchPlaylistTracks(playlist_id, query));
-      }
-      Action::CreatePlaylist { name, track_uris } => {
-        self.dispatch(IoEvent::CreateNewPlaylist(name, track_uris));
-      }
-      Action::CreateYouTubePlaylist(name) => {
-        self.dispatch(IoEvent::CreateYouTubePlaylist(name));
-      }
-      Action::SearchTracksForPlaylist(query) => {
-        self.dispatch(IoEvent::SearchTracksForPlaylist(query));
-      }
-      Action::AddTrackToPlaylist { playlist, track } => {
-        self.add_track_to_playlist(playlist, track);
-      }
-      Action::RemoveTrackFromPlaylist {
-        playlist,
-        track,
-        position,
-      } => self.remove_track_from_playlist(playlist, track, position),
-      Action::FollowPlaylist(playlist) => {
-        // The network handler ignores the owner-id parameter; "unknown"
-        // mirrors the fallback the built-in follow flow uses.
-        self.dispatch(IoEvent::UserFollowPlaylist(
-          "unknown".to_string(),
-          playlist,
-          None,
-        ));
-      }
-      Action::UnfollowPlaylist(playlist_id) => {
-        let user_id = self.user().as_ref().map(|u| u.id.clone());
-        if let Some(user_id) = user_id {
-          self.dispatch(IoEvent::UserUnfollowPlaylist(user_id, playlist_id));
-        } else {
-          self.set_error_status_message(
-            self
-              .strings()
-              .status
-              .app
-              .unfollow_profile_loading
-              .to_string(),
-            4,
-          );
-        }
-      }
-      Action::DeletePlaylist(uri) => self.dispatch(IoEvent::DeleteYouTubePlaylist(uri)),
-      Action::OpenPlaylistSyncPicker => self.begin_playlist_sync_picker(),
-      Action::LinkPlaylistTo(source) => self.link_playlist_to(source),
-      Action::RunPlaylistSync => self.dispatch(IoEvent::RunPlaylistSync {
-        retry_unmatched: true,
-      }),
-      Action::RemovePlaylistSyncLink(id) => self.dispatch(IoEvent::RemovePlaylistSyncLink(id)),
-      Action::ToggleSaveTrack(uri) => self.dispatch(IoEvent::ToggleSaveTrack(uri)),
-      Action::ToggleSaveCurrentItem => self.toggle_save_current_item(),
-      Action::SaveAlbum(id) => self.dispatch(IoEvent::CurrentUserSavedAlbumAdd(id)),
-      Action::UnsaveAlbum(id) => self.dispatch(IoEvent::CurrentUserSavedAlbumDelete(id)),
-      Action::SaveShow(id) => self.dispatch(IoEvent::CurrentUserSavedShowAdd(id)),
-      Action::UnsaveShow(id) => self.dispatch(IoEvent::CurrentUserSavedShowDelete(id)),
-      Action::FollowArtist(id) => self.dispatch(IoEvent::UserFollowArtists(vec![id])),
-      Action::UnfollowArtist(id) => self.dispatch(IoEvent::UserUnfollowArtists(vec![id])),
-      Action::AddFriendByCode(code) => self.dispatch(IoEvent::AddFriendByCode(code)),
-      Action::AddFriendById(user_id) => self.dispatch(IoEvent::AddFriendById(user_id)),
-      Action::UnfollowFriend(user_id) => self.dispatch(IoEvent::UnfollowFriend(user_id)),
-      Action::SearchFriendUsers(query) => self.search_friend_users(query),
-      Action::FavoriteRadioStation(station) => self.favorite_radio_station(station),
-      Action::RemoveRadioStation(uri) => self.remove_saved_radio_station(uri),
       Action::Notify(msg, ttl) => self.set_status_message(msg, ttl),
       Action::NotifyError(msg, ttl) => self.set_error_status_message(msg, ttl),
       Action::Navigate(target) => apply_navigate(self, target),
@@ -197,71 +97,16 @@ impl App {
       Action::Sort { context, field } => self.apply_sort_field(context, field),
       Action::ToggleSortOrder(context) => self.toggle_sort_order(context),
       Action::Open(target) => match target {
-        super::OpenTarget::Album { id, from_search } => {
-          if from_search {
-            self.track_table.context = Some(crate::core::app::TrackTableContext::AlbumSearch);
-          }
-          self.dispatch(IoEvent::GetAlbum(id));
-        }
-        super::OpenTarget::SavedAlbum(id) => self.open_saved_album(id),
-        super::OpenTarget::Artist { id, name } => self.get_artist(id, name),
-        super::OpenTarget::Playlist { id, from_search } => {
-          // Same silent no-op on an unparseable id as today's opening paths.
-          if let Some(playlist_id) = crate::infra::network::ids::playlist_id(&id) {
-            let context = if from_search {
-              crate::core::app::TrackTableContext::PlaylistSearch
-            } else {
-              crate::core::app::TrackTableContext::MyPlaylists
-            };
-            self.open_playlist_tracks(playlist_id, context);
-          }
-        }
         super::OpenTarget::SourcePlaylist(uri) => self.open_source_playlist_tracks(uri),
-        super::OpenTarget::PlaylistFolder(target_id) => {
-          self.open_playlist_folder(target_id);
-        }
-        super::OpenTarget::Show(id) => self.dispatch(IoEvent::GetShow(id)),
-        super::OpenTarget::TrackAlbum(track_id) => {
-          self.dispatch(IoEvent::GetAlbumForTrack(track_id));
-        }
       },
-      Action::OpenShowEpisodes(show) => {
-        self.dispatch(IoEvent::GetShowEpisodes(Box::new(show)));
-      }
       Action::OpenLibrary(target) => self.open_library_section(target),
       Action::SelectSource(source) => {
         self.set_active_source(source);
         self.load_source_sidebar(source);
-        if source == crate::core::source::Source::Spotify {
-          self.begin_spotify_login_if_needed();
-        }
       }
-      Action::OpenAddTrackDialog => self.begin_add_track_to_playlist_flow_from_selection(),
-      Action::OpenAddTrackDialogFor {
-        track_id,
-        track_name,
-      } => self.begin_add_track_to_playlist_flow(track_id, track_name),
-      Action::OpenAddPlayingTrackDialog => self.begin_add_playing_track_to_playlist_flow(),
-      Action::OpenRemoveTrackDialog => self.begin_remove_track_from_playlist_flow(),
-      Action::JumpToAlbum => self.jump_to_album(),
-      Action::JumpToArtist => self.jump_to_artist_album(),
-      Action::JumpToContext => self.jump_to_context(),
-      Action::CopyUrl(target) => match target {
-        super::CopyTarget::CurrentSong => self.copy_song_url(),
-        super::CopyTarget::CurrentAlbum => self.copy_album_url(),
-      },
       Action::GenerateRecap => self.generate_recap(),
       Action::GenerateStatsRecap => self.generate_stats_recap(),
       Action::CycleStatsPeriod { forward } => self.cycle_stats_period(forward),
-      Action::RecommendFromTrack(track) => self.load_recommendations_for_track(track),
-      Action::RecommendFromArtist { id, name } => self.load_recommendations_for_artist(id, name),
-      Action::RecommendFromTrackId { id, name } => {
-        self.load_recommendations_for_track_id(id, name);
-      }
-      Action::StartParty => self.start_party(),
-      Action::JoinParty { code, name } => self.join_party(code, name),
-      Action::LeaveParty => self.dispatch(IoEvent::LeaveParty),
-      Action::TogglePartyControlMode => self.toggle_party_control_mode(),
       Action::SetPlaybarSegment { plugin, text } => match text {
         Some(t) => {
           self.plugin_playbar_segments.insert(plugin, t);
@@ -285,9 +130,6 @@ impl App {
       }
       Action::PressSettingButton { id } => self.press_setting_button(&id),
       Action::CycleVisualizerStyle => self.cycle_visualizer_style(),
-      Action::AnswerCommunityPinPrompt { keep } => self.answer_community_pin_prompt(keep),
-      Action::DismissSoloistPairing => self.dismiss_soloist_pairing(),
-      Action::AnswerSoloistOffer { set_up } => self.answer_soloist_offer(set_up),
       Action::OpenRecap => self.open_recap(),
       Action::DismissRecapPrompt => self.dismiss_recap_prompt(),
       Action::DisableRecapPrompt => self.disable_recap_prompt(),
@@ -302,69 +144,6 @@ impl App {
         if self.get_current_route().id == RouteId::PluginScreen(name) {
           self.pop_navigation_stack();
         }
-      }
-      Action::QueueTracks(tracks) => {
-        #[cfg(feature = "dj-core")]
-        {
-          return ActionOutcome::Queued {
-            accepted: self.extend_native_queue_from_dj(tracks),
-          };
-        }
-        #[cfg(not(feature = "dj-core"))]
-        {
-          let _ = tracks;
-          return ActionOutcome::Queued { accepted: 0 };
-        }
-      }
-      Action::SetDjVibe(vibe) => {
-        #[cfg(feature = "dj-core")]
-        {
-          // A new standing direction invalidates any refill already in
-          // flight for the old one. Exactly one bump: the in-TUI agent
-          // tells its own set_dj_vibe bump apart from the listener's by
-          // asserting the generation moved by exactly 1.
-          self.dj.bump_generation();
-          self.dj.vibe = vibe;
-        }
-        #[cfg(not(feature = "dj-core"))]
-        {
-          let _ = vibe;
-        }
-      }
-      // Gated on `ai-dj`, not `dj-core`: the bodies need the in-app DJ's events.
-      Action::AskDj(text) => {
-        #[cfg(feature = "ai-dj")]
-        {
-          self.ask_dj(text);
-        }
-        #[cfg(not(feature = "ai-dj"))]
-        {
-          let _ = text;
-        }
-      }
-      Action::DjVibeShift => {
-        #[cfg(feature = "ai-dj")]
-        self.dj_vibe_shift();
-      }
-      Action::ToggleDjAutoQueue => {
-        #[cfg(feature = "ai-dj")]
-        self.toggle_dj_auto_queue();
-      }
-      Action::ToggleDjFreshOnly => {
-        #[cfg(feature = "ai-dj")]
-        self.toggle_dj_fresh_only();
-      }
-      Action::OpenDjSetup => {
-        #[cfg(feature = "ai-dj")]
-        self.open_dj_setup();
-      }
-      Action::DismissDjSetup => {
-        #[cfg(feature = "ai-dj")]
-        self.dismiss_dj_setup();
-      }
-      Action::CommitDjSetup => {
-        #[cfg(feature = "ai-dj")]
-        self.commit_dj_setup();
       }
     }
     ActionOutcome::Applied
@@ -383,19 +162,13 @@ fn apply_navigate(app: &mut App, target: NavTarget) {
   match target {
     NavTarget::Home => app.push_navigation_stack(RouteId::Home, ActiveBlock::Empty),
     NavTarget::Queue => {
-      app.dispatch(IoEvent::GetQueue);
       app.push_navigation_stack(RouteId::Queue, ActiveBlock::Queue);
     }
     NavTarget::Settings => app.open_settings_screen(),
-    NavTarget::Devices => app.open_source_device_picker(),
     // The help KEY also clears the help filter first (`help_menu::open`); that
     // reset needs the TUI's filtered-docs count, so it cannot live here.
     NavTarget::Help => app.push_navigation_stack(RouteId::HelpMenu, ActiveBlock::HelpMenu),
     NavTarget::Lyrics => app.push_navigation_stack(RouteId::LyricsView, ActiveBlock::LyricsView),
-    // The network handler pushes the route once the data arrives, exactly like
-    // the keybinding.
-    NavTarget::RecentlyPlayed => app.dispatch(IoEvent::GetRecentlyPlayed),
-    NavTarget::Party => app.push_navigation_stack(RouteId::Party, ActiveBlock::Party),
     NavTarget::Analysis => app.get_audio_analysis(),
     NavTarget::MiniPlayer => {
       if app.get_current_route().id == RouteId::MiniPlayer {

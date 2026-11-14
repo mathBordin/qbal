@@ -24,8 +24,8 @@ Any new typing surface must also be added to
 `runner.rs::key_reaches_handlers_before_back`, or the default back key `q` closes
 it mid-typing. Keep feature-gated screens' match arms ungated and `#[cfg]` only
 the body, so the exhaustive `ActiveBlock` match compiles in slim builds. New
-Spotify calls become `IoEvent` variants in `src/infra/network/mod.rs`, implemented
-in the matching `src/infra/network/<concern>.rs`. A new `Action` variant is a
+async work becomes an `IoEvent` variant in `src/infra/network/mod.rs`, handled
+by a router (`infra/queue/`, `infra/qobuz/`) or `Network::handle_network_event`. A new `Action` variant is a
 compile error in `src/tui/keymap.rs::default_binding` until its arm names a key,
 a gesture, or `Exposure::Unbound`.
 

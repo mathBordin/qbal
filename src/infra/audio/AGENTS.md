@@ -1,9 +1,7 @@
-### Alternative sources (Local / Subsonic / Radio / YouTube / Qobuz)
+### Decoded playback (Qobuz)
 
-- All three platforms play decoded sources. macOS was gated off in
-  `LocalPlayer` until rodio 0.22 / cpal 0.17 were measured on CoreAudio; the
-  SIGSEGVs behind that gate (#9/#20) were librespot's own rodio-backend, which
-  is why librespot still uses portaudio-backend there and this player does not.
+- All three platforms play through `LocalPlayer` (rodio 0.22 / cpal 0.17,
+  measured on CoreAudio).
 - Losing the output device has **two** shapes and only one is an error. cpal
   reports the device being *removed* (`DeviceNotAvailable`); it cannot report the
   common case - the OS moving its **default output** elsewhere (headphones out,

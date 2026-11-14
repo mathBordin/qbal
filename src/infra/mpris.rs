@@ -46,10 +46,10 @@ pub enum MprisCommand {
     duration_ms: u32,
     art_url: Option<String>,
   },
-  PlaybackStatus(bool),        // true = playing, false = paused
-  Position(u64),               // position in milliseconds (silent update)
-  Seeked(u64),                 // position in milliseconds (emits Seeked signal to notify clients)
-  Volume(u8),                  // 0-100
+  PlaybackStatus(bool), // true = playing, false = paused
+  Position(u64),        // position in milliseconds (silent update)
+  Seeked(u64),          // position in milliseconds (emits Seeked signal to notify clients)
+  // 0-100
   Shuffle(bool),               // shuffle state
   LoopStatus(LoopStatusEvent), // loop/repeat state
   Stopped,
@@ -273,12 +273,6 @@ impl MprisManager {
                 log::warn!("MPRIS: Failed to emit Seeked signal: {}", e);
               }
             }
-            MprisCommand::Volume(volume_percent) => {
-              let volume = (volume_percent as f64) / 100.0;
-              if let Err(e) = player.set_volume(volume).await {
-                log::warn!("MPRIS: Failed to set volume: {}", e);
-              }
-            }
             MprisCommand::Shuffle(shuffle) => {
               if let Err(e) = player.set_shuffle(shuffle).await {
                 log::warn!("MPRIS: Failed to set shuffle: {}", e);
@@ -351,11 +345,6 @@ impl MprisManager {
   /// Update position AND emit Seeked signal (use when position jumps due to seeking)
   pub fn emit_seeked(&self, position_ms: u64) {
     let _ = self.command_tx.send(MprisCommand::Seeked(position_ms));
-  }
-
-  /// Update volume (0-100)
-  pub fn set_volume(&self, volume_percent: u8) {
-    let _ = self.command_tx.send(MprisCommand::Volume(volume_percent));
   }
 
   /// Mark playback as stopped

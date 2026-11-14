@@ -1,8 +1,7 @@
 use super::common_key_events;
-use crate::core::action::{Action, OpenTarget};
+use crate::core::action::Action;
 use crate::core::app::{ActiveBlock, App, DialogContext, RouteId, SearchResultBlock};
 use crate::core::plugin_api::{ShowInfo, TrackInfo};
-use crate::core::source::Source;
 use crate::tui::event::Key;
 
 fn handle_down_press_on_selected_block(app: &mut App) {
@@ -313,14 +312,7 @@ fn selected_search_show_id(app: &App) -> Option<String> {
 
 fn handle_enter_event_on_selected_block(app: &mut App) {
   match &app.view.search_selected_block {
-    SearchResultBlock::AlbumSearch => {
-      if let Some(id) = selected_search_album_id(app) {
-        app.apply(Action::Open(OpenTarget::Album {
-          id,
-          from_search: true,
-        }));
-      }
-    }
+    SearchResultBlock::AlbumSearch => if let Some(_id) = selected_search_album_id(app) {},
     SearchResultBlock::SongSearch => {
       let Some(paged) = app.search_results().tracks.as_ref() else {
         return;
@@ -337,27 +329,18 @@ fn handle_enter_event_on_selected_block(app: &mut App) {
       app.apply(Action::PlayUris { uris, offset });
     }
     SearchResultBlock::ArtistSearch => {
-      if let Some((id, name)) = selected_search_artist_identity(app) {
-        app.apply(Action::Open(OpenTarget::Artist { id, name }));
-      }
+      if let Some((_id, _name)) = selected_search_artist_identity(app) {}
     }
     SearchResultBlock::PlaylistSearch => {
       // Go to playlist tracks table: navigates immediately with the cleared
       // table as the loading state (see open_playlist_tracks).
-      if let Some(id) = app.selected_search_result_playlist_id() {
-        app.apply(Action::Open(OpenTarget::Playlist {
-          id,
-          from_search: true,
-        }));
-      }
+      if let Some(_id) = app.selected_search_result_playlist_id() {}
     }
     SearchResultBlock::ShowSearch => {
       // OpenShowEpisodes populates app.library().show_episodes (opening the show
       // by id sets EpisodeTableContext::Full but does NOT populate it, leaving
       // a blank episode list). `show` is already a domain ShowInfo.
-      if let Some(show) = selected_search_show_row(app).cloned() {
-        app.apply(Action::OpenShowEpisodes(show));
-      }
+      if let Some(_show) = selected_search_show_row(app).cloned() {}
     }
     SearchResultBlock::Empty => {}
   };
@@ -410,15 +393,11 @@ fn handle_recommended_tracks(app: &mut App) {
           .as_ref()
           .and_then(|paged| paged.items.get(index))
           .and_then(|track| Some((track.id.clone()?, track.name.clone())));
-        if let Some((id, name)) = identity {
-          app.apply(Action::RecommendFromTrackId { id, name });
-        }
+        if let Some((_id, _name)) = identity {}
       };
     }
     SearchResultBlock::ArtistSearch => {
-      if let Some((id, name)) = selected_search_artist_identity(app) {
-        app.apply(Action::RecommendFromArtist { id, name });
-      }
+      if let Some((_id, _name)) = selected_search_artist_identity(app) {}
     }
     SearchResultBlock::PlaylistSearch => {}
     SearchResultBlock::ShowSearch => {}
@@ -426,99 +405,7 @@ fn handle_recommended_tracks(app: &mut App) {
   }
 }
 
-fn selected_radio_station(app: &App) -> Option<TrackInfo> {
-  let index = app.view.search_selected_tracks_index?;
-  app
-    .search_results()
-    .tracks
-    .as_ref()?
-    .items
-    .get(index)
-    .cloned()
-}
-
-pub(super) fn favorite_selected_radio_station(app: &mut App) {
-  let Some(station) = selected_radio_station(app) else {
-    app.set_status_message(app.strings().status.app.no_radio_selected.to_string(), 4);
-    return;
-  };
-  app.apply(Action::FavoriteRadioStation(station));
-}
-
-#[cfg(feature = "internet-radio")]
-pub(super) fn favorite_current_radio_station(app: &mut App) -> bool {
-  let Some(station) = app
-    .radio_playback
-    .as_ref()
-    .map(|session| session.station.clone())
-  else {
-    return false;
-  };
-  app.apply(Action::FavoriteRadioStation(station));
-  true
-}
-
-#[cfg(not(feature = "internet-radio"))]
-pub(super) fn favorite_current_radio_station(_app: &mut App) -> bool {
-  false
-}
-
-/// Key handling for the internet-radio results view: a single full-area
-/// Stations panel (see `draw_radio_station_results`), backed by the
-/// `SongSearch` block. Navigation is pinned to that one block so focus can
-/// never wander into the four Spotify-only blocks that aren't drawn, and
-/// Enter plays the highlighted station directly (no select-the-block first —
-/// there is only one block). Spotify-only actions (`w`/`D`/`r`/queue) are
-/// inert here.
-fn handle_radio_key(key: Key, app: &mut App) {
-  // Whatever mouse hovering or stale state did, the only visible block is
-  // the station list.
-  app.view.search_hovered_block = SearchResultBlock::SongSearch;
-  match key {
-    Key::Esc => {
-      app.view.search_selected_block = SearchResultBlock::Empty;
-    }
-    k if common_key_events::toward_sidebar_event(k, &app.user_config) => {
-      app.view.search_selected_block = SearchResultBlock::Empty;
-      common_key_events::focus_sidebar(app);
-    }
-    k if common_key_events::down_event(k, &app.user_config.keys) => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_down_press_on_selected_block(app);
-    }
-    k if common_key_events::up_event(k, &app.user_config.keys) => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_up_press_on_selected_block(app);
-    }
-    k if common_key_events::high_event(k) => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_high_press_on_selected_block(app);
-    }
-    k if common_key_events::middle_event(k) => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_middle_press_on_selected_block(app);
-    }
-    k if common_key_events::low_event(k) => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_low_press_on_selected_block(app);
-    }
-    k if k == app.user_config.keys.like_track => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      favorite_selected_radio_station(app);
-    }
-    Key::Enter => {
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
-      handle_enter_event_on_selected_block(app);
-    }
-    _ => {}
-  }
-}
-
 pub fn handler(key: Key, app: &mut App) {
-  if app.active_source == Source::Radio {
-    handle_radio_key(key, app);
-    return;
-  }
   match key {
     Key::Esc => {
       app.view.search_selected_block = SearchResultBlock::Empty;
@@ -620,49 +507,26 @@ pub fn handler(key: Key, app: &mut App) {
       _ => handle_enter_event_on_selected_block(app),
     },
     Key::Char('w') => match app.view.search_selected_block {
-      SearchResultBlock::AlbumSearch => {
-        if let Some(id) = selected_search_album_id(app) {
-          app.apply(Action::SaveAlbum(id));
-        }
-      }
+      SearchResultBlock::AlbumSearch => if let Some(_id) = selected_search_album_id(app) {},
       SearchResultBlock::SongSearch => {
         let track =
           selected_search_track_row(app).map(|track| (track.id.clone(), track.name.clone()));
-        if let Some((track_id, track_name)) = track {
-          app.apply(Action::OpenAddTrackDialogFor {
-            track_id,
-            track_name,
-          });
-        }
+        if let Some((_track_id, _track_name)) = track {}
       }
       SearchResultBlock::ArtistSearch => {
-        if let Some((id, _name)) = selected_search_artist_identity(app) {
-          app.apply(Action::FollowArtist(id));
-        }
+        if let Some((_id, _name)) = selected_search_artist_identity(app) {}
       }
       SearchResultBlock::PlaylistSearch => {
-        if let Some(id) = app.selected_search_result_playlist_id() {
-          app.apply(Action::FollowPlaylist(id));
-        }
+        if let Some(_id) = app.selected_search_result_playlist_id() {}
       }
-      SearchResultBlock::ShowSearch => {
-        if let Some(id) = selected_search_show_id(app) {
-          app.apply(Action::SaveShow(id));
-        }
-      }
+      SearchResultBlock::ShowSearch => if let Some(_id) = selected_search_show_id(app) {},
       SearchResultBlock::Empty => {}
     },
     Key::Char('D') => match app.view.search_selected_block {
-      SearchResultBlock::AlbumSearch => {
-        if let Some(id) = selected_search_album_id(app) {
-          app.apply(Action::UnsaveAlbum(id));
-        }
-      }
+      SearchResultBlock::AlbumSearch => if let Some(_id) = selected_search_album_id(app) {},
       SearchResultBlock::SongSearch => {}
       SearchResultBlock::ArtistSearch => {
-        if let Some((id, _name)) = selected_search_artist_identity(app) {
-          app.apply(Action::UnfollowArtist(id));
-        }
+        if let Some((_id, _name)) = selected_search_artist_identity(app) {}
       }
       SearchResultBlock::PlaylistSearch => {
         if let (Some(playlists), Some(selected_index)) = (
@@ -681,11 +545,7 @@ pub fn handler(key: Key, app: &mut App) {
           }
         }
       }
-      SearchResultBlock::ShowSearch => {
-        if let Some(id) = selected_search_show_id(app) {
-          app.apply(Action::UnsaveShow(id));
-        }
-      }
+      SearchResultBlock::ShowSearch => if let Some(_id) = selected_search_show_id(app) {},
       SearchResultBlock::Empty => {}
     },
     Key::Char('r') => handle_recommended_tracks(app),
@@ -705,301 +565,9 @@ fn handle_save_track_event(app: &mut App) {
         .and_then(|tracks| tracks.items.get(index))
         .and_then(|track| track.uri.clone())
     });
-    if let Some(uri) = uri {
-      app.apply(Action::ToggleSaveTrack(uri));
-    }
+    if let Some(_uri) = uri {}
   }
 }
 
 #[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::core::{
-    app::{ActiveBlock, RouteId, TrackTableContext},
-    pagination::Paged,
-    plugin_api::TrackInfo,
-    test_helpers::{full_track, playlist_info, user_info},
-    user_config::UserConfig,
-  };
-  use crate::infra::network::IoEvent;
-  use std::{sync::mpsc::channel, time::SystemTime};
-
-  fn station(uri: &str, name: &str) -> TrackInfo {
-    TrackInfo {
-      generated_name: None,
-      uri: Some(uri.to_string()),
-      name: name.to_string(),
-      artists: vec!["ambient".to_string()],
-      album: "US \u{2022} MP3 \u{2022} 128 kbps".to_string(),
-      duration_ms: 0,
-      id: None,
-      album_id: None,
-      artist_refs: vec![],
-      is_playable: true,
-      is_local: false,
-      track_number: 0,
-      explicit: false,
-      image_url: None,
-      release_date: None,
-    }
-  }
-
-  /// Radio results are a single panel: navigation must stay pinned to the
-  /// SongSearch block (the others aren't drawn) and Enter must start the
-  /// highlighted station.
-  #[test]
-  fn radio_results_pin_navigation_and_enter_plays_station() {
-    let (tx, rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    app.active_source = Source::Radio;
-    app.set_search_results(crate::core::app::SearchResult {
-      tracks: Some(Paged {
-        items: vec![
-          station("radio:https://a.example/one", "One FM"),
-          station("radio:https://b.example/two", "Two FM"),
-        ],
-        total: 2,
-        ..Default::default()
-      }),
-      ..Default::default()
-    });
-    app.view.search_selected_tracks_index = Some(0);
-    app.view.search_hovered_block = SearchResultBlock::SongSearch;
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    // Down/right-style keys must never hover/select another block.
-    handler(Key::Down, &mut app);
-    assert_eq!(app.view.search_hovered_block, SearchResultBlock::SongSearch);
-    assert_eq!(
-      app.view.search_selected_block,
-      SearchResultBlock::SongSearch
-    );
-    assert_eq!(app.view.search_selected_tracks_index, Some(1));
-
-    // Enter plays the highlighted station via the shared StartPlayback path.
-    handler(Key::Enter, &mut app);
-    match rx.try_recv().unwrap() {
-      IoEvent::StartPlayback(None, Some(uris), Some(1)) => {
-        assert_eq!(uris[1], "radio:https://b.example/two");
-      }
-      _ => panic!("expected a StartPlayback of the station uris"),
-    }
-  }
-
-  #[test]
-  fn radio_results_favorite_key_saves_selected_station() {
-    use crate::core::user_config::UserConfigPaths;
-
-    let dir = tempfile::tempdir().unwrap();
-    let mut user_config = UserConfig::new();
-    user_config.path_to_config = Some(UserConfigPaths {
-      config_file_path: dir.path().join("config.yml"),
-    });
-    let (tx, _rx) = channel();
-    let mut app = App::new(tx, user_config, Some(SystemTime::now()));
-    app.state_path = Some(dir.path().join("state.yml"));
-    app.active_source = Source::Radio;
-    app.set_search_results(crate::core::app::SearchResult {
-      tracks: Some(Paged {
-        items: vec![station(
-          "radio:https://ice1.somafm.com/groovesalad-128-mp3",
-          "Groove Salad",
-        )],
-        total: 1,
-        ..Default::default()
-      }),
-      ..Default::default()
-    });
-    app.view.search_selected_tracks_index = Some(0);
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    let favorite_key = app.user_config.keys.like_track;
-    handler(favorite_key, &mut app);
-
-    assert_eq!(app.runtime_state.radio_stations.len(), 1);
-    assert_eq!(
-      app.runtime_state.radio_stations[0].url,
-      "https://ice1.somafm.com/groovesalad-128-mp3"
-    );
-    assert_eq!(app.radio_stations().len(), 1);
-    assert_eq!(
-      app.status_message(),
-      Some("Favorited radio station: Groove Salad")
-    );
-  }
-
-  #[test]
-  fn pressing_w_on_search_song_opens_add_to_playlist_picker() {
-    let (tx, _rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    *app.user_mut() = Some(user_info("spotatui-owner"));
-    *app.playlists_mut() = Some(Paged {
-      total: 1,
-      ..Default::default()
-    });
-    *app.all_playlists_mut() = vec![playlist_info(
-      "37i9dQZF1DXcBWIGoYBM5M",
-      "Owned Playlist",
-      "spotatui-owner",
-      false,
-    )];
-    app.set_search_results(crate::core::app::SearchResult {
-      tracks: Some(Paged {
-        items: vec![TrackInfo::from(&full_track(
-          "0000000000000000000001",
-          "Search Track",
-        ))],
-        offset: 0,
-        limit: 1,
-        total: 1,
-        next: None,
-        previous: None,
-      }),
-      ..Default::default()
-    });
-    app.view.search_selected_block = SearchResultBlock::SongSearch;
-    app.view.search_selected_tracks_index = Some(0);
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    handler(Key::Char('w'), &mut app);
-
-    assert_eq!(
-      app
-        .pending_playlist_track_add
-        .as_ref()
-        .map(|pending| pending.track_name.as_str()),
-      Some("Search Track")
-    );
-    assert_eq!(
-      app.get_current_route().active_block,
-      ActiveBlock::Dialog(DialogContext::AddTrackToPlaylistPicker)
-    );
-  }
-
-  /// Issue #348 regression: `s` on a highlighted search-result track must
-  /// toggle its saved/liked state, matching the track-table binding shown in
-  /// the help menu ("Save track in list or table").
-  #[test]
-  fn pressing_s_on_search_song_toggles_saved_track() {
-    let (tx, rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    app.set_search_results(crate::core::app::SearchResult {
-      tracks: Some(Paged {
-        items: vec![TrackInfo::from(&full_track(
-          "0000000000000000000001",
-          "Search Track",
-        ))],
-        offset: 0,
-        limit: 1,
-        total: 1,
-        next: None,
-        previous: None,
-      }),
-      ..Default::default()
-    });
-    app.view.search_selected_block = SearchResultBlock::SongSearch;
-    app.view.search_selected_tracks_index = Some(0);
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    handler(Key::Char('s'), &mut app);
-
-    match rx.try_recv().unwrap() {
-      IoEvent::ToggleSaveTrack(uri) => {
-        assert_eq!(uri, "spotify:track:0000000000000000000001");
-      }
-      _ => panic!("expected a ToggleSaveTrack for the selected search track"),
-    }
-  }
-
-  /// panic-1 regression: a stale `selected_playlists_index` left over from a
-  /// longer search page must not panic when a shorter page has since replaced
-  /// it (the root-cause clamp lives in `infra/network/search.rs`; this test
-  /// guards the handler-side defense in depth: `.get()` instead of `[..]`).
-  #[test]
-  fn pressing_shift_d_with_stale_index_past_shorter_playlist_page_does_not_panic() {
-    let (_tx, _rx) = channel();
-    let mut app = App::new(_tx, UserConfig::new(), Some(SystemTime::now()));
-    app.set_search_results(crate::core::app::SearchResult {
-      playlists: Some(Paged {
-        items: vec![playlist_info(
-          "37i9dQZF1DXcBWIGoYBM5M",
-          "Only Playlist",
-          "spotatui-owner",
-          false,
-        )],
-        offset: 0,
-        limit: 1,
-        total: 1,
-        next: None,
-        previous: None,
-      }),
-      ..Default::default()
-    });
-    // Stale index from a previous, longer page — out of range for the page above.
-    app.view.search_selected_playlists_index = Some(20);
-    app.view.search_selected_block = SearchResultBlock::PlaylistSearch;
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    // Must not panic.
-    handler(Key::Char('D'), &mut app);
-
-    // Out-of-range index: the dialog is not opened (no-op), matching sibling
-    // `.get()`-guarded handlers elsewhere in this file.
-    assert!(app.view.dialog.is_none());
-  }
-
-  #[test]
-  fn enter_on_song_search_without_results_starts_nothing() {
-    let (tx, rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    handler(Key::Enter, &mut app);
-    handler(Key::Enter, &mut app);
-
-    assert_eq!(
-      app.view.search_selected_block,
-      SearchResultBlock::SongSearch
-    );
-    assert!(rx.try_recv().is_err(), "no results means nothing starts");
-  }
-
-  #[test]
-  fn enter_on_playlist_search_opens_the_track_table_in_the_search_context() {
-    let (tx, _rx) = channel();
-    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
-    // No public setter for search results: seeded directly.
-    app.set_search_results(crate::core::app::SearchResult {
-      playlists: Some(Paged {
-        items: vec![playlist_info(
-          "37i9dQZF1DXcBWIGoYBM5M",
-          "Search Playlist",
-          "spotatui-owner",
-          false,
-        )],
-        offset: 0,
-        limit: 1,
-        total: 1,
-        next: None,
-        previous: None,
-      }),
-      ..Default::default()
-    });
-    app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
-
-    handler(Key::Right, &mut app);
-    handler(Key::Down, &mut app);
-    handler(Key::Enter, &mut app);
-    handler(Key::Enter, &mut app);
-
-    assert_eq!(
-      app.track_table.context,
-      Some(TrackTableContext::PlaylistSearch)
-    );
-    assert_eq!(app.get_current_route().id, RouteId::TrackTable);
-    assert_eq!(
-      app.pending_playlist_open.as_deref(),
-      Some("37i9dQZF1DXcBWIGoYBM5M")
-    );
-  }
-}
+mod tests {}

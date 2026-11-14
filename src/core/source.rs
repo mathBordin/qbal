@@ -41,49 +41,18 @@ use serde::{Deserialize, Serialize};
 /// variant strings coincide with the `to_config_str()` tokens, while the
 /// `state.yml` persistence keeps its own lenient hand-written helpers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub enum Source {
   #[default]
-  Spotify,
-  Local,
-  Subsonic,
-  Radio,
-  YouTube,
   Qobuz,
-  /// macOS only: a remote for the Music app (feature `apple-music`).
-  AppleMusic,
 }
 
 impl Source {
   /// Every source, in display order. Add new sources here.
-  pub const ALL: [Source; 7] = [
-    Source::Spotify,
-    Source::Local,
-    Source::Subsonic,
-    Source::Radio,
-    Source::YouTube,
-    Source::Qobuz,
-    Source::AppleMusic,
-  ];
+  pub const ALL: [Source; 1] = [Source::Qobuz];
 
-  /// The sources the `d` picker offers. Apple Music is listed only in a macOS
-  /// build with the `apple-music` feature: elsewhere nothing can reach Music.
+  /// The sources the `d` picker offers.
   pub fn picker_sources() -> &'static [Source] {
-    // Spelled out rather than sliced off `ALL`, so a source added after
-    // Apple Music is not the one that disappears.
-    const WITHOUT_APPLE_MUSIC: [Source; 6] = [
-      Source::Spotify,
-      Source::Local,
-      Source::Subsonic,
-      Source::Radio,
-      Source::YouTube,
-      Source::Qobuz,
-    ];
-    if cfg!(all(feature = "apple-music", target_os = "macos")) {
-      &Self::ALL
-    } else {
-      &WITHOUT_APPLE_MUSIC
-    }
+    &Self::ALL
   }
 
   /// Stable English name for CLI output, logs and protocol tokens.
@@ -92,80 +61,37 @@ impl Source {
     crate::core::i18n::EN.sidebar.source_label(*self)
   }
 
-  /// English first-run note for fixtures; interfaces use the active onboarding table.
-  #[cfg(test)]
-  pub fn note(&self) -> &'static str {
-    crate::core::i18n::EN.onboarding.source_note(*self)
-  }
-
   /// Config-file token used to persist the active source.
-  /// Distinct from `label()` so the config key stays stable even if the
-  /// display name changes.
   pub fn to_config_str(self) -> &'static str {
     match self {
-      Source::Spotify => "Spotify",
-      Source::Local => "Local",
-      Source::Subsonic => "Subsonic",
-      Source::Radio => "Radio",
-      Source::YouTube => "YouTube",
       Source::Qobuz => "Qobuz",
-      Source::AppleMusic => "AppleMusic",
     }
   }
 
-  /// Parse the config-file token back to a `Source`.
-  /// Unknown strings fall back to `Spotify` so old or hand-edited configs
-  /// never break startup.
-  pub fn from_config_str(s: &str) -> Self {
-    match s {
-      "Local" => Source::Local,
-      "Subsonic" => Source::Subsonic,
-      "Radio" => Source::Radio,
-      "YouTube" => Source::YouTube,
-      "Qobuz" => Source::Qobuz,
-      "AppleMusic" => Source::AppleMusic,
-      _ => Source::Spotify,
-    }
+  /// Parse the config-file token back to a `Source`. Every token (including
+  /// the ones older spotatui configs wrote) maps to the only source, Qobuz.
+  pub fn from_config_str(_s: &str) -> Self {
+    Source::Qobuz
   }
 
   /// Whether this source can search its catalog (implements [`Searcher`]).
   pub fn supports_search(&self) -> bool {
-    matches!(
-      self,
-      Source::Spotify
-        | Source::Subsonic
-        | Source::Radio
-        | Source::YouTube
-        | Source::Qobuz
-        | Source::AppleMusic
-    )
+    true
   }
 
-  /// Whether this source exposes a saved library — liked songs, saved albums,
-  /// followed artists (implements [`LibraryProvider`]).
+  /// Whether this source exposes a saved library (implements [`LibraryProvider`]).
   pub fn supports_library(&self) -> bool {
-    matches!(self, Source::Spotify)
+    false
   }
 
-  /// Whether this source can mutate playlists: Spotify through the Web API,
-  /// YouTube through its local playlist file.
+  /// Whether this source can mutate playlists.
   pub fn supports_playlist_write(&self) -> bool {
-    matches!(self, Source::Spotify | Source::YouTube)
+    false
   }
 
-  /// Whether this source supports liking / saving the currently-playing track
-  /// (requires a [`LibraryProvider`] that can accept writes). Currently
-  /// equivalent to [`supports_library`](Self::supports_library).
+  /// Whether this source supports liking / saving the currently-playing track.
   pub fn supports_like(&self) -> bool {
-    matches!(self, Source::Spotify)
-  }
-
-  /// Whether playlists of this source can take part in a cross-source mirror.
-  pub fn supports_playlist_sync(&self) -> bool {
-    matches!(
-      self,
-      Source::Spotify | Source::Subsonic | Source::YouTube | Source::Qobuz
-    )
+    false
   }
 }
 
@@ -232,70 +158,6 @@ mod tests {
   }
 
   #[test]
-  fn apple_music_is_offered_only_where_it_builds_and_only_searches() {
-    let apple_music = cfg!(all(feature = "apple-music", target_os = "macos"));
-    // The picker is every source, in order, minus Apple Music where it
-    // cannot work: never a source dropped by position.
-    let expected: Vec<Source> = Source::ALL
-      .into_iter()
-      .filter(|s| apple_music || *s != Source::AppleMusic)
-      .collect();
-    assert_eq!(Source::picker_sources(), expected.as_slice());
-    assert!(Source::AppleMusic.supports_search());
-    assert!(!Source::AppleMusic.supports_library());
-    assert!(!Source::AppleMusic.supports_playlist_write());
-    assert!(!Source::AppleMusic.supports_like());
-    assert!(!Source::AppleMusic.supports_playlist_sync());
-  }
-
-  #[test]
-  fn spotify_supports_all_capabilities() {
-    assert!(Source::Spotify.supports_search());
-    assert!(Source::Spotify.supports_library());
-    assert!(Source::Spotify.supports_playlist_write());
-    assert!(Source::Spotify.supports_like());
-  }
-
-  #[test]
-  fn local_supports_no_spotify_only_capabilities() {
-    assert!(!Source::Local.supports_search());
-    assert!(!Source::Local.supports_library());
-    assert!(!Source::Local.supports_playlist_write());
-    assert!(!Source::Local.supports_like());
-  }
-
-  #[test]
-  fn subsonic_supports_search_only() {
-    // Subsonic speaks `search3`, so search is on; library/playlist-write/like
-    // depend on `LibraryProvider`/`PlaylistWriter` impls that are deferred
-    // follow-ups, so they stay off for now.
-    assert!(Source::Subsonic.supports_search());
-    assert!(!Source::Subsonic.supports_library());
-    assert!(!Source::Subsonic.supports_playlist_write());
-    assert!(!Source::Subsonic.supports_like());
-  }
-
-  #[test]
-  fn radio_supports_search_only() {
-    // The radio-browser.info directory is searchable; there is no library,
-    // no playlists to write, and no like/star concept for a live stream.
-    assert!(Source::Radio.supports_search());
-    assert!(!Source::Radio.supports_library());
-    assert!(!Source::Radio.supports_playlist_write());
-    assert!(!Source::Radio.supports_like());
-  }
-
-  #[test]
-  fn youtube_supports_search_and_its_local_playlists() {
-    // yt-dlp searches the catalog and playlists live in a local file; there is
-    // no library and no like/star concept without a Google account.
-    assert!(Source::YouTube.supports_search());
-    assert!(!Source::YouTube.supports_library());
-    assert!(Source::YouTube.supports_playlist_write());
-    assert!(!Source::YouTube.supports_like());
-  }
-
-  #[test]
   fn qobuz_supports_search_only() {
     // `catalog/search` is searchable; favorites and playlists are read through
     // the sidebar, and like/playlist writes are follow-ups.
@@ -303,16 +165,6 @@ mod tests {
     assert!(!Source::Qobuz.supports_library());
     assert!(!Source::Qobuz.supports_playlist_write());
     assert!(!Source::Qobuz.supports_like());
-  }
-
-  #[test]
-  fn playlist_sync_is_on_for_the_four_writable_sources() {
-    assert!(Source::Spotify.supports_playlist_sync());
-    assert!(Source::Subsonic.supports_playlist_sync());
-    assert!(Source::YouTube.supports_playlist_sync());
-    assert!(Source::Qobuz.supports_playlist_sync());
-    assert!(!Source::Local.supports_playlist_sync());
-    assert!(!Source::Radio.supports_playlist_sync());
   }
 
   #[test]

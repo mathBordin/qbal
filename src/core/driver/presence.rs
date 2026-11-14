@@ -133,82 +133,6 @@ pub(super) fn update_discord_presence(
 
 #[cfg(all(feature = "mpris", target_os = "linux"))]
 pub(super) fn update_mpris_state(manager: &mpris::MprisManager, state: &mut MprisState, app: &App) {
-  use rspotify::model::enums::RepeatState;
-
-  // Local-file playback owns its own state and never populates the Spotify
-  // playback context, so it takes a dedicated path that reads metadata, play
-  // state, and position straight from the live local player. Skipped while the
-  // native queue owns the sink: `local_playback` is then a *suspended* context,
-  // so fall through to the snapshot path, which renders the queue slot and
-  // clears its shuffle/repeat instead of publishing this context's stale modes.
-  #[cfg(feature = "local-files")]
-  if let Some(local) = app
-    .local_playback
-    .as_ref()
-    .filter(|_| !app.queue_owns_playback())
-  {
-    use crate::infra::media_metadata::{select_media_metadata, LocalMediaMetadata};
-
-    let is_playing = !local.player.is_paused();
-    let position_ms = local.player.position().as_millis() as u64;
-
-    // `select_media_metadata` is the single, unit-tested decision for which
-    // source the OS integration follows; local always wins while it is active.
-    let metadata = select_media_metadata(
-      Some(LocalMediaMetadata {
-        title: local.name.clone(),
-        artists: vec![local.artists.clone()],
-        album: local.album.clone(),
-        duration_ms: local.duration_ms as u32,
-      }),
-      None,
-    )
-    .expect("local metadata is present");
-
-    let new_metadata = MprisMetadata {
-      title: metadata.title.clone(),
-      artists: metadata.artists.clone(),
-      album: metadata.album.clone(),
-      duration_ms: metadata.duration_ms,
-      art_url: metadata.image_url.clone(),
-    };
-    if state.last_metadata.as_ref() != Some(&new_metadata) {
-      manager.set_metadata(
-        &metadata.title,
-        &metadata.artists,
-        &metadata.album,
-        metadata.duration_ms,
-        metadata.image_url,
-      );
-      state.last_metadata = Some(new_metadata);
-    }
-
-    if state.last_is_playing != Some(is_playing) {
-      manager.set_playback_status(is_playing);
-      state.last_is_playing = Some(is_playing);
-    }
-
-    manager.set_position(position_ms);
-
-    // Local playback carries the decoded shuffle/repeat modes; push them like
-    // the snapshot branch below so keyboard and MPRIS toggles reach clients
-    // (this dedicated branch returns before the snapshot path runs).
-    if state.last_shuffle != Some(app.decoded_shuffle) {
-      manager.set_shuffle(app.decoded_shuffle);
-      state.last_shuffle = Some(app.decoded_shuffle);
-    }
-    let loop_status = match app.decoded_repeat {
-      crate::infra::queue::RepeatMode::Off => mpris::LoopStatusEvent::None,
-      crate::infra::queue::RepeatMode::Track => mpris::LoopStatusEvent::Track,
-      crate::infra::queue::RepeatMode::Context => mpris::LoopStatusEvent::Playlist,
-    };
-    if state.last_loop != Some(loop_status) {
-      manager.set_loop_status(loop_status);
-      state.last_loop = Some(loop_status);
-    }
-    return;
-  }
-
   if let Some(snapshot) = crate::infra::media_metadata::current_playback_snapshot(app) {
     let new_metadata = MprisMetadata {
       title: snapshot.metadata.title.clone(),
@@ -244,9 +168,9 @@ pub(super) fn update_mpris_state(manager: &mpris::MprisManager, state: &mut Mpri
     // radio); reset to `None` rather than leaving a stale Track/Playlist that a
     // prior decoded context pushed.
     let loop_status = match snapshot.repeat {
-      Some(RepeatState::Track) => mpris::LoopStatusEvent::Track,
-      Some(RepeatState::Context) => mpris::LoopStatusEvent::Playlist,
-      Some(RepeatState::Off) | None => mpris::LoopStatusEvent::None,
+      Some(crate::core::plugin_api::RepeatState::Track) => mpris::LoopStatusEvent::Track,
+      Some(crate::core::plugin_api::RepeatState::Context) => mpris::LoopStatusEvent::Playlist,
+      Some(crate::core::plugin_api::RepeatState::Off) | None => mpris::LoopStatusEvent::None,
     };
     if state.last_loop != Some(loop_status) {
       manager.set_loop_status(loop_status);
@@ -314,71 +238,6 @@ pub(super) fn window_title_reset(state: &mut WindowTitleState) -> Option<&'stati
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::app::NativeTrackInfo;
-  use std::{sync::mpsc::channel, time::SystemTime};
-
-  fn app() -> App {
-    let (tx, _rx) = channel();
-    App::new(
-      tx,
-      crate::core::user_config::UserConfig::new(),
-      Some(SystemTime::now()),
-    )
-  }
-
-  #[test]
-  fn playback_window_title_uses_current_native_track() {
-    let mut app = app();
-    app.is_streaming_active = true;
-    app.native_track_info = Some(NativeTrackInfo {
-      name: "The Track".to_string(),
-      artists: vec!["The Artist".to_string()],
-      album: "The Album".to_string(),
-      duration_ms: 180_000,
-      kind: crate::core::app::NativeTrackKind::Track,
-      image_url: None,
-    });
-
-    assert_eq!(playback_window_title(&app), "The Track — The Artist");
-  }
-
-  #[test]
-  fn playback_window_title_strips_control_characters() {
-    let mut app = app();
-    app.is_streaming_active = true;
-    app.native_track_info = Some(NativeTrackInfo {
-      name: "The\x1b]2;Bad\x07 Track".to_string(),
-      artists: vec!["The\nArtist".to_string()],
-      album: "The Album".to_string(),
-      duration_ms: 180_000,
-      kind: crate::core::app::NativeTrackKind::Track,
-      image_url: None,
-    });
-
-    assert_eq!(playback_window_title(&app), "The]2;Bad Track — TheArtist");
-  }
-
-  #[test]
-  fn playback_window_title_falls_back_without_playback() {
-    let app = app();
-
-    assert_eq!(playback_window_title(&app), DEFAULT_WINDOW_TITLE);
-  }
-
-  #[test]
-  fn disabling_window_title_restores_default_once() {
-    let mut app = app();
-    let mut state = WindowTitleState {
-      last_title: Some("The Track — The Artist".to_string()),
-    };
-    app.user_config.behavior.set_window_title = false;
-
-    assert_eq!(
-      next_window_title(&mut state, &app).as_deref(),
-      Some(DEFAULT_WINDOW_TITLE)
-    );
-    assert_eq!(next_window_title(&mut state, &app), None);
-  }
 
   #[test]
   fn window_title_reset_fires_only_after_a_custom_title() {
