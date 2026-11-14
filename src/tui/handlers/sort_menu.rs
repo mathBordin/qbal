@@ -95,17 +95,9 @@ pub fn open_sort_menu(app: &mut App, context: SortContext) {
 }
 
 fn close_sort_menu(app: &mut App) {
-  let sidebar = app.view.sort_context == Some(SortContext::SidebarPlaylists);
   app.view.sort_menu_visible = false;
   app.view.sort_context = None;
-  app.set_current_route_state(
-    Some(if sidebar {
-      ActiveBlock::MyPlaylists
-    } else {
-      ActiveBlock::Empty
-    }),
-    None,
-  );
+  app.set_current_route_state(Some(ActiveBlock::Empty), None);
 }
 
 #[cfg(test)]
@@ -121,36 +113,36 @@ mod tests {
 
   #[test]
   fn enter_applies_the_highlighted_field_and_closes_the_menu() {
-    let mut app = app_with_open_menu(SortContext::SavedArtists);
-    // Available fields for artists: [Default, Name].
+    let mut app = app_with_open_menu(SortContext::PlaylistTracks);
+    // Available fields for tracks start with [Default, Name].
     app.view.sort_menu_selected = 1;
 
     handler(Key::Enter, &mut app);
 
-    assert_eq!(app.artist_sort.field, SortField::Name);
-    assert_eq!(app.artist_sort.order, SortOrder::Ascending);
+    assert_eq!(app.playlist_sort.field, SortField::Name);
+    assert_eq!(app.playlist_sort.order, SortOrder::Ascending);
     assert!(!app.view.sort_menu_visible);
     assert!(app.view.sort_context.is_none());
   }
 
   #[test]
   fn an_uppercase_shortcut_records_the_reversed_order() {
-    let mut app = app_with_open_menu(SortContext::SavedArtists);
+    let mut app = app_with_open_menu(SortContext::PlaylistTracks);
 
     handler(Key::Char('N'), &mut app);
 
-    assert_eq!(app.artist_sort.field, SortField::Name);
-    assert_eq!(app.artist_sort.order, SortOrder::Descending);
+    assert_eq!(app.playlist_sort.field, SortField::Name);
+    assert_eq!(app.playlist_sort.order, SortOrder::Descending);
     assert!(!app.view.sort_menu_visible);
   }
 
   #[test]
   fn a_character_without_a_shortcut_leaves_the_menu_open() {
-    let mut app = app_with_open_menu(SortContext::SavedArtists);
+    let mut app = app_with_open_menu(SortContext::PlaylistTracks);
 
     handler(Key::Char('x'), &mut app);
 
-    assert_eq!(app.artist_sort.field, SortField::Default);
+    assert_eq!(app.playlist_sort.field, SortField::Default);
     assert!(app.view.sort_menu_visible);
   }
 
@@ -163,5 +155,57 @@ mod tests {
     assert!(!app.view.sort_menu_visible);
     assert!(app.view.sort_context.is_none());
     assert_eq!(app.get_current_route().active_block, ActiveBlock::Empty);
+  }
+
+  #[test]
+  fn sorting_reorders_the_track_table_and_default_restores_its_order() {
+    use crate::core::app::TrackTableContext;
+    use crate::core::plugin_api::TrackInfo;
+    let track = |n: u32, name: &str| TrackInfo {
+      generated_name: None,
+      uri: Some(format!("qobuz:track:{n}")),
+      name: name.to_string(),
+      artists: vec!["Artist".to_string()],
+      album: "Album".to_string(),
+      duration_ms: 1000,
+      id: None,
+      album_id: None,
+      artist_refs: Vec::new(),
+      is_playable: true,
+      is_local: false,
+      track_number: n,
+      explicit: false,
+      image_url: None,
+      release_date: None,
+    };
+    let names = |app: &App| {
+      app
+        .track_table
+        .tracks
+        .iter()
+        .map(|t| t.name.clone())
+        .collect::<Vec<_>>()
+    };
+    let mut app = App::default();
+    app.set_track_table(
+      vec![track(1, "Cherry"), track(2, "apple"), track(3, "Banana")],
+      TrackTableContext::QobuzPlaylist,
+    );
+    // The cursor follows its track through the re-sort.
+    app.view.track_table_index = 0;
+
+    app.apply(Action::Sort {
+      context: SortContext::PlaylistTracks,
+      field: SortField::Name,
+    });
+    assert_eq!(names(&app), ["apple", "Banana", "Cherry"]);
+    assert_eq!(app.view.track_table_index, 2);
+
+    app.apply(Action::Sort {
+      context: SortContext::PlaylistTracks,
+      field: SortField::Default,
+    });
+    assert_eq!(names(&app), ["Cherry", "apple", "Banana"]);
+    assert_eq!(app.view.track_table_index, 0);
   }
 }

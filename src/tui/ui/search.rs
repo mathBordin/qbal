@@ -1,17 +1,15 @@
-use crate::core::app::{ActiveBlock, App, InputContext, SearchResultBlock};
+use crate::core::app::{ActiveBlock, App, SearchResultBlock};
 use crate::tui::layout::COMPACT_TOP_ROW_THRESHOLD;
 use crate::tui::theme::ThemeExt;
 use ratatui::{
-  layout::{Constraint, Layout, Rect},
+  layout::Rect,
   style::Style,
   text::{Span, Text},
-  widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+  widgets::{Block, BorderType, Borders, Paragraph},
   Frame,
 };
 
-use super::util::{
-  draw_selectable_list, get_color, get_search_results_highlight_state, join_artist_names,
-};
+use super::util::{draw_selectable_list, get_color, get_search_results_highlight_state};
 
 /// Draws the search input, Help button and Settings button into pre-split
 /// areas (see `tui::layout::split_input_help_and_settings`). Splitting is
@@ -55,11 +53,7 @@ pub fn draw_input_and_help_box(
   };
   app.view.input_scroll_offset.set(scroll_offset);
 
-  let input_title = match app.view.input_context {
-    InputContext::PlaylistTrackSearch => app.strings().screens.search_playlist,
-    InputContext::SavedTrackSearch => app.strings().screens.search_liked,
-    InputContext::GlobalSearch => app.strings().screens.search,
-  };
+  let input_title = app.strings().screens.search;
 
   let input = Paragraph::new(lines).scroll((0, scroll_offset)).block(
     Block::default()
@@ -131,183 +125,35 @@ pub fn draw_input_and_help_box(
 }
 
 pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let [song_artist_area, albums_playlist_area, podcasts_area] =
-    layout_chunk.layout(&Layout::vertical([
-      Constraint::Percentage(35),
-      Constraint::Percentage(35),
-      Constraint::Percentage(25),
-    ]));
-
-  {
-    let [songs_area, artists_area] = song_artist_area.layout(&Layout::horizontal([
-      Constraint::Percentage(50),
-      Constraint::Percentage(50),
-    ]));
-
-    let songs = match &app.search_results().tracks {
-      Some(tracks) => tracks
+  let songs: Vec<String> = app
+    .search_results()
+    .tracks
+    .as_ref()
+    .map(|tracks| {
+      tracks
         .items
         .iter()
         .map(|item| {
-          let mut song_name = "".to_string();
-          let id = item.id.clone().unwrap_or_default();
-          app.liked_song_ids_set().contains(&id);
-
-          song_name += item.display_name(app.strings());
-          song_name += &format!(" - {}", item.artists.join(", "));
-          song_name
+          format!(
+            "{} - {}",
+            item.display_name(app.strings()),
+            item.artists.join(", ")
+          )
         })
-        .collect(),
-      None => vec![],
-    };
+        .collect()
+    })
+    .unwrap_or_default();
 
-    draw_selectable_list(
-      f,
-      app,
-      songs_area,
-      app.strings().screens.songs,
-      &songs,
-      get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
-      app.view.search_selected_tracks_index,
-      &app.view.search_tracks_scroll_offset,
-    );
-
-    let artists = match &app.search_results().artists {
-      Some(artists) => artists
-        .items
-        .iter()
-        .map(|item| {
-          let mut artist = String::new();
-          if let Some(ref id) = item.id {
-            if app.followed_artist_ids_set().contains(id.as_str()) {}
-          }
-          artist.push_str(&item.name);
-          artist
-        })
-        .collect(),
-      None => vec![],
-    };
-
-    draw_selectable_list(
-      f,
-      app,
-      artists_area,
-      app.strings().screens.artists,
-      &artists,
-      get_search_results_highlight_state(app, SearchResultBlock::ArtistSearch),
-      app.view.search_selected_artists_index,
-      &app.view.search_artists_scroll_offset,
-    );
-  }
-
-  {
-    let [albums_area, playlist_area] = albums_playlist_area.layout(&Layout::horizontal([
-      Constraint::Percentage(50),
-      Constraint::Percentage(50),
-    ]));
-
-    let albums = match &app.search_results().albums {
-      Some(albums) => albums
-        .items
-        .iter()
-        .map(|item| {
-          let mut album_artist = String::new();
-          if let Some(ref id) = item.id {
-            if app.saved_album_ids_set().contains(id.as_str()) {}
-          }
-          album_artist.push_str(&format!(
-            "{} - {} ({})",
-            item.name,
-            join_artist_names(&item.artists),
-            app.strings().screens.album_type(item.album_type.as_deref())
-          ));
-          album_artist
-        })
-        .collect(),
-      None => vec![],
-    };
-
-    draw_selectable_list(
-      f,
-      app,
-      albums_area,
-      app.strings().screens.albums,
-      &albums,
-      get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
-      app.view.search_selected_album_index,
-      &app.view.search_albums_scroll_offset,
-    );
-
-    let playlists = match &app.search_results().playlists {
-      Some(playlists) => playlists
-        .items
-        .iter()
-        .map(|item| item.name.to_owned())
-        .collect::<Vec<String>>(),
-      None => vec![],
-    };
-
-    if playlists.is_empty() {
-      let warning_text = app.strings().screens.spotify_playlist_warning;
-      let warning_paragraph = Paragraph::new(warning_text)
-        .wrap(Wrap { trim: true })
-        .style(Style::default().fg(app.user_config.theme.hint.into()))
-        .block(
-          Block::default()
-            .title(Span::styled(
-              app.strings().screens.playlists,
-              get_color(
-                get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
-                app.user_config.theme,
-              ),
-            ))
-            .borders(Borders::ALL)
-            .border_style(get_color(
-              get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
-              app.user_config.theme,
-            )),
-        );
-      f.render_widget(warning_paragraph, playlist_area);
-    } else {
-      draw_selectable_list(
-        f,
-        app,
-        playlist_area,
-        app.strings().screens.playlists,
-        &playlists,
-        get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
-        app.view.search_selected_playlists_index,
-        &app.view.search_playlists_scroll_offset,
-      );
-    }
-  }
-
-  {
-    draw_selectable_list(
-      f,
-      app,
-      podcasts_area,
-      app.strings().screens.podcasts,
-      &match &app.search_results().shows {
-        Some(podcasts) => podcasts
-          .items
-          .iter()
-          .map(|item| {
-            let mut show_name = String::new();
-            if let Some(ref id) = item.id {
-              if app.saved_show_ids_set().contains(id.as_str()) {}
-            }
-            show_name.push_str(&item.name);
-            show_name
-          })
-          .collect(),
-        None => vec![],
-      },
-      get_search_results_highlight_state(app, SearchResultBlock::ShowSearch),
-      app.view.search_selected_shows_index,
-      &app.view.search_shows_scroll_offset,
-    );
-  }
+  draw_selectable_list(
+    f,
+    app,
+    layout_chunk,
+    app.strings().screens.songs,
+    &songs,
+    get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
+    app.view.search_selected_tracks_index,
+    &app.view.search_tracks_scroll_offset,
+  );
 }
 
 #[cfg(test)]
@@ -328,15 +174,38 @@ mod tests {
       .collect()
   }
 
-  /// The Spotify layout is untouched for the default source.
+  fn track(name: &str, artist: &str) -> crate::core::plugin_api::TrackInfo {
+    crate::core::plugin_api::TrackInfo {
+      generated_name: None,
+      uri: Some(format!("qobuz:track:{name}")),
+      name: name.to_string(),
+      artists: vec![artist.to_string()],
+      album: "Album".to_string(),
+      duration_ms: 180_000,
+      id: Some(name.to_string()),
+      album_id: None,
+      artist_refs: Vec::new(),
+      is_playable: true,
+      is_local: false,
+      track_number: 1,
+      explicit: false,
+      image_url: None,
+      release_date: None,
+    }
+  }
+
   #[test]
-  fn spotify_results_still_render_five_blocks() {
-    let app = App::default();
+  fn search_results_are_one_full_size_song_list() {
+    let mut app = App::default();
+    app.show_source_search_tracks("q", vec![track("Blue", "Joni"), track("Kind", "Miles")]);
     let content = rendered(&app, Rect::new(0, 0, 90, 30));
-    for spotify_panel in ["Songs", "Artists", "Albums", "Playlists", "Podcasts"] {
+    assert!(content.contains("Songs"), "{content}");
+    assert!(content.contains("Blue - Joni"), "{content}");
+    assert!(content.contains("Kind - Miles"), "{content}");
+    for removed in ["Artists", "Albums", "Playlists", "Podcasts"] {
       assert!(
-        content.contains(spotify_panel),
-        "{spotify_panel} panel should render under Spotify: {content}"
+        !content.contains(removed),
+        "{removed} pane is gone: {content}"
       );
     }
   }
@@ -363,23 +232,15 @@ mod tests {
       .collect()
   }
 
-  /// The input box title names the search it feeds, so a saved-track search is
-  /// not mistaken for a global one.
   #[test]
-  fn saved_track_search_input_titles_the_box() {
+  fn the_input_box_is_titled_search_in_the_chosen_language() {
+    use crate::core::i18n::Language;
     let mut app = App::default();
-    app.view.input_context = InputContext::SavedTrackSearch;
     app.view.input = "cherry".chars().collect();
-
+    assert!(rendered_input(&app, Rect::new(0, 0, 40, 3)).contains("Search"));
+    app.user_config.behavior.language = Language::Fr;
+    app.refresh_language();
     let content = rendered_input(&app, Rect::new(0, 0, 40, 3));
-
-    assert!(
-      content.contains("Search Liked Songs"),
-      "the input box should title the saved-track search: {content}"
-    );
-    assert!(
-      !content.contains("Search Playlist"),
-      "the saved-track search is not the playlist one: {content}"
-    );
+    assert!(content.contains(app.strings().screens.search), "{content}");
   }
 }

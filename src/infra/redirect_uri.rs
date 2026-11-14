@@ -112,13 +112,13 @@ mod tests {
   use super::*;
 
   /// An OAuth callback carries a `code=` query parameter.
-  fn spotify_callback(path: &str) -> bool {
+  fn callback_path(path: &str) -> bool {
     path.contains("code=")
   }
   #[test]
   fn valid_callback_returns_url_with_code() {
     let request = "GET /login?code=abc&state=xyz HTTP/1.1\r\nHost: 127.0.0.1:8989\r\n\r\n";
-    let url = extract_callback_url(request, spotify_callback);
+    let url = extract_callback_url(request, callback_path);
     assert!(url.is_some());
     let url = url.unwrap();
     assert!(
@@ -136,31 +136,31 @@ mod tests {
   #[test]
   fn whitespace_only_request_returns_none() {
     // Whitespace-only payload: split_whitespace() returns empty vec (len 0 ≤ 1) → None silently
-    assert!(extract_callback_url(" \r\n\r\n", spotify_callback).is_none());
+    assert!(extract_callback_url(" \r\n\r\n", callback_path).is_none());
   }
 
   #[test]
   fn preflight_single_token_returns_none() {
     // A single token (no path) also triggers the malformed branch → None, no panic
-    assert!(extract_callback_url("GET", spotify_callback).is_none());
+    assert!(extract_callback_url("GET", callback_path).is_none());
   }
 
   #[test]
   fn favicon_request_returns_none() {
     let request = "GET /favicon.ico HTTP/1.1\r\nHost: 127.0.0.1:8989\r\n\r\n";
-    assert!(extract_callback_url(request, spotify_callback).is_none());
+    assert!(extract_callback_url(request, callback_path).is_none());
   }
 
   #[test]
   fn root_request_returns_none() {
     let request = "GET / HTTP/1.1\r\nHost: 127.0.0.1:8989\r\n\r\n";
-    assert!(extract_callback_url(request, spotify_callback).is_none());
+    assert!(extract_callback_url(request, callback_path).is_none());
   }
 
   #[test]
   fn accept_predicate_decides_which_callback_paths_count() {
     let request = "GET /?code_autorisation=abc HTTP/1.1\r\nHost: localhost:8989\r\n\r\n";
-    assert!(extract_callback_url(request, spotify_callback).is_none());
+    assert!(extract_callback_url(request, callback_path).is_none());
     let url = extract_callback_url(request, |path| path.contains("code_autorisation=")).unwrap();
     assert_eq!(url, "http://localhost/?code_autorisation=abc");
   }
@@ -184,7 +184,7 @@ mod tests {
       let _ = stream.read(&mut buf).await;
     });
 
-    let result = run_accept_loop(listener, spotify_callback, CALLBACK_READ_TIMEOUT).await;
+    let result = run_accept_loop(listener, callback_path, CALLBACK_READ_TIMEOUT).await;
     client.await.unwrap();
 
     let url = result.expect("server should return Ok(url)");
@@ -227,7 +227,7 @@ mod tests {
       let _ = real.read(&mut vec![0u8; 4096]).await;
     });
 
-    let result = run_accept_loop(listener, spotify_callback, CALLBACK_READ_TIMEOUT).await;
+    let result = run_accept_loop(listener, callback_path, CALLBACK_READ_TIMEOUT).await;
     client.await.unwrap();
 
     let url = result.expect("server should return Ok(url)");
@@ -259,11 +259,7 @@ mod tests {
     // A read timeout far past the deadline: only a parallel read meets it.
     let result = tokio::time::timeout(
       std::time::Duration::from_secs(2),
-      run_accept_loop(
-        listener,
-        spotify_callback,
-        std::time::Duration::from_secs(60),
-      ),
+      run_accept_loop(listener, callback_path, std::time::Duration::from_secs(60)),
     )
     .await
     .expect("the silent connection held the callback");

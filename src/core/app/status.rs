@@ -53,13 +53,9 @@ impl App {
         self.active_announcement = Some(first);
         self.announcement_batch_dismissed = 0;
         incoming.remove(0);
-        self.display_revisions.bump(DisplayDomain::Announcement);
       }
     }
 
-    if !incoming.is_empty() {
-      self.display_revisions.bump(DisplayDomain::Announcement);
-    }
     self.pending_announcements.extend(incoming);
   }
 
@@ -76,7 +72,6 @@ impl App {
         .all(|(a, b)| same(a, b));
     if !unchanged {
       self.announcement_feed = feed.clone();
-      self.display_revisions.bump(DisplayDomain::Announcement);
     }
 
     let seen = &self.runtime_state.seen_announcement_ids;
@@ -107,7 +102,6 @@ impl App {
       self.announcement_batch_dismissed = 0;
     }
 
-    self.display_revisions.bump(DisplayDomain::Announcement);
     dismissed_id
   }
 
@@ -146,28 +140,6 @@ impl App {
     }
   }
 
-  /// Open the link of the active or a fetched announcement with this id.
-  pub(crate) fn open_announcement_url(&mut self, id: &str) {
-    let url = self
-      .active_announcement
-      .iter()
-      .chain(&self.announcement_feed)
-      .find(|announcement| announcement.id == id)
-      .and_then(|announcement| announcement.url.clone());
-    if let Some(url) = url {
-      self.open_external_url(&url);
-    }
-  }
-
-  /// Open a URL the caller checked in the system browser.
-  pub(crate) fn open_external_url(&mut self, url: &str) {
-    if let Err(e) = open::that_detached(url) {
-      log::warn!("failed to open {} in the browser: {}", url, e);
-      let message = self.strings().status.app.link_open_failed(url);
-      self.set_error_status_message(message, 6);
-    }
-  }
-
   /// The status-bar message that is live now, if any.
   pub fn status_message(&self) -> Option<&str> {
     self.status_message.as_deref()
@@ -185,9 +157,7 @@ impl App {
 
   /// Drop the live status message and its error priority.
   pub(crate) fn clear_status_message(&mut self) {
-    if self.status_message.take().is_some() {
-      self.display_revisions.bump(DisplayDomain::Status);
-    }
+    self.status_message = None;
     self.status_message_expires_at = None;
     self.status_message_is_error = false;
   }
@@ -205,7 +175,6 @@ impl App {
     let ttl = self.scaled_status_ttl(ttl_secs);
     self.status_message_expires_at = Some(Instant::now() + Duration::from_secs(ttl));
     self.status_message_is_error = false;
-    self.display_revisions.bump(DisplayDomain::Status);
   }
 
   /// Set an error status message. Errors always replace whatever is currently shown
@@ -216,7 +185,6 @@ impl App {
     let ttl = self.scaled_status_ttl(ttl_secs);
     self.status_message_expires_at = Some(Instant::now() + Duration::from_secs(ttl));
     self.status_message_is_error = true;
-    self.display_revisions.bump(DisplayDomain::Status);
   }
 
   /// Scale a status-message TTL by `status_message_ttl_percent` (default 100
@@ -229,13 +197,12 @@ impl App {
   }
 
   /// Keep the original diagnostic in the log while presenting a localized
-  /// message through the same error route, lifetime, and display revision.
+  /// message through the same error route and lifetime.
   pub fn handle_error_with_message(&mut self, e: anyhow::Error, message: String) {
     info!("error occurred: {}", e);
     self.push_navigation_stack(RouteId::Error, ActiveBlock::Error);
     self.api_error = message;
     self.api_error_expires_at = Some(Instant::now() + API_ERROR_TTL);
-    self.display_revisions.bump(DisplayDomain::Status);
   }
 
   /// Dismiss the live error: the message, its lifetime, and every navigation
@@ -243,9 +210,6 @@ impl App {
   /// with no route stack has one call to make. Dropping the frames is what
   /// stops a cleared message from leaving an error page with nothing on it.
   pub fn clear_api_error(&mut self) {
-    if !self.api_error.is_empty() || self.api_error_expires_at.is_some() {
-      self.display_revisions.bump(DisplayDomain::Status);
-    }
     self.api_error.clear();
     self.api_error_expires_at = None;
     self.drop_error_routes();
@@ -283,7 +247,6 @@ mod tests {
   #[test]
   fn localized_errors_keep_the_same_route_lifetime_and_dismissal() {
     let mut app = App::default();
-    let before = app.display_revisions().get(DisplayDomain::Status);
     app.handle_error_with_message(
       anyhow!("Original diagnostic"),
       "无法播放：Original diagnostic".into(),
@@ -291,7 +254,6 @@ mod tests {
     assert_eq!(app.api_error(), "无法播放：Original diagnostic");
     assert_eq!(app.get_current_route().id, RouteId::Error);
     assert!(app.api_error_expires_at.is_some());
-    assert!(app.display_revisions().get(DisplayDomain::Status) > before);
     app.clear_api_error();
     assert!(app.api_error().is_empty());
     assert!(app.api_error_expires_at.is_none());

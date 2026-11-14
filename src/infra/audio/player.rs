@@ -1,27 +1,16 @@
-//! Local-file audio playback engine.
+//! Audio playback engine.
 //!
-//! [`LocalPlayer`] decodes an audio file and plays it through the system's
-//! default output device, independent of librespot. The decoded audio reaches
-//! the same default device the visualizer's loopback/monitor captures, so the
-//! spectrum visualizer works for local playback without any extra wiring.
+//! [`LocalPlayer`] decodes an audio file or stream and plays it through the
+//! system's default output device. The decoded audio reaches the same default
+//! device the visualizer's monitor captures, so the visualizer needs no extra
+//! wiring.
 //!
 //! ## Encapsulation
 //!
 //! All `rodio` types are contained inside this module. The public surface is a
 //! small transport API (`play_file`/`pause`/`resume`/`seek`/`position`/
 //! `is_finished`/`set_volume`) that speaks `std` types only. This keeps the
-//! runtime free of `rodio` and makes the platform-specific output swap below a
-//! single-file change.
-//!
-//! ## Cross-platform output
-//!
-//! `rodio` drives the default output device on all three platforms, CoreAudio
-//! included. macOS was gated off here until the rodio 0.22 / cpal 0.17 output
-//! path was measured on a Mac (the two `#[ignore]`d tests below): the crashes
-//! behind that gate (issues #9/#20) were librespot's own `rodio-backend`, an
-//! older rodio on the pre-`DeviceSinkBuilder` API. librespot still uses
-//! `portaudio-backend` on macOS for that reason; this player does not share
-//! that code path and does not need it.
+//! runtime free of `rodio`.
 //!
 //! ## Losing the output device
 //!
@@ -67,7 +56,7 @@ use rodio::{Decoder, Player};
 
 use super::volume_gain;
 
-/// An audio player for local files, driving the system default output device.
+/// An audio player driving the system default output device.
 ///
 /// Cheap to hold behind an `Arc`: the heavy `MixerDeviceSink` lives on a
 /// dedicated thread, and the `Player` here is a lightweight `Arc`-backed handle.
@@ -132,8 +121,8 @@ struct Sink {
   _keepalive: mpsc::Sender<()>,
   /// Raised by our cpal error callback when the device is *removed*.
   lost: Arc<AtomicBool>,
-  /// The key identifying the device this sink was opened on (id on macOS,
-  /// name elsewhere - see `device_key`), so a default-output change can be
+  /// The key identifying the device this sink was opened on (its name - see
+  /// `device_key`), so a default-output change can be
   /// spotted (see module docs). `None` when the key could not be read, which
   /// only disables the comparison — never fakes a change.
   device_name: Option<String>,
@@ -255,8 +244,8 @@ impl LocalPlayer {
 
   /// Whether cpal reported the device *removed* (headphones unplugged, a USB
   /// DAC pulled), as against the OS merely moving its default output somewhere
-  /// else. Recovery pauses only for removal — that is what macOS itself does,
-  /// and a device the user just *plugged in* should keep playing.
+  /// else. Recovery pauses only for removal: a device the user just *plugged
+  /// in* should keep playing.
   pub fn device_removed(&self) -> bool {
     self.sink.lock().unwrap().lost.load(Ordering::Relaxed)
   }
@@ -381,9 +370,6 @@ impl LocalPlayer {
   /// comes back is given up on exactly once.
   ///
   /// **Blocking:** an attempt opens a device, like [`new`](Self::new).
-  ///
-  /// Radio has no track to restage, so a build with just `internet-radio`
-  /// never recovers a device.
   pub fn recover_device(&self) -> Reopen {
     let attempts = {
       let mut state = self.reopen.lock().unwrap();
@@ -444,7 +430,7 @@ impl LocalPlayer {
   /// size (a progressive download of a known file). Without it the reader is
   /// treated as non-seekable: the decoder is built with `with_seekable(false)`
   /// so the symphonia probe never issues the `Seek` that breaks on an infinite
-  /// HTTP (internet-radio) stream. The `Seek` bound is only there to satisfy
+  /// HTTP stream. The `Seek` bound is only there to satisfy
   /// rodio's type signature. A stream has no filename, so format detection is
   /// primed from `mime_type` (e.g. `"audio/mpeg"`) when available.
   ///
@@ -522,8 +508,8 @@ impl LocalPlayer {
     });
   }
 
-  /// Set the output volume from the user's percent, on the same logarithmic
-  /// curve as native streaming, so one setting is equally loud on every source.
+  /// Set the output volume from the user's percent, on the logarithmic curve
+  /// of [`volume_gain`](super::volume_gain).
   pub fn set_volume(&self, percent: u8) {
     self.volume_percent.store(percent, Ordering::Relaxed);
     self.player().set_volume(volume_gain(percent));
@@ -537,17 +523,11 @@ impl LocalPlayer {
   /// Whether the sink has no source playing — either nothing was ever played,
   /// or the current track played to completion (used to advance to the next
   /// track).
-  ///
-  /// Radio never polls this (an infinite stream has no end-of-track), so it is
-  /// dead code in a build with just `internet-radio`.
   pub fn is_finished(&self) -> bool {
     self.player().empty()
   }
 
   /// Seek to an absolute position within the current source.
-  ///
-  /// Radio consumes `Seek` as a no-op (nothing to seek within a live stream),
-  /// so this is dead code in a build with just `internet-radio`.
   pub fn seek(&self, pos: Duration) -> Result<()> {
     let sink = self.live_player()?;
     match self.bounded(move || sink.try_seek(pos)) {
@@ -594,7 +574,7 @@ fn open_sink() -> Result<Sink> {
   let (keepalive_tx, keepalive_rx) = mpsc::channel::<()>();
 
   std::thread::Builder::new()
-    .name("spotatui-local-audio".to_string())
+    .name("qbal-local-audio".to_string())
     .spawn(move || {
       // `open_default_sink()` would install rodio's `eprintln!` callback and
       // pick the device itself, so build the same thing by hand: the default
@@ -641,21 +621,7 @@ fn open_sink() -> Result<Sink> {
   })
 }
 
-/// What identifies the device for the default-output comparison.
-///
-/// On macOS the id is read: `description()` builds two AudioUnits through its
-/// config queries, and re-reading it every check churns the device enough to
-/// glitch USB outputs, while `id()` is a plain property read. Everywhere else
-/// the name is kept: cpal's WASAPI `id()` leaks the COM string it copies on
-/// every call, which a once-a-second poll would turn into a steady leak.
-#[cfg(target_os = "macos")]
-fn device_key(device: &rodio::Device) -> Option<String> {
-  use rodio::DeviceTrait;
-  device.id().ok().map(|id| id.to_string())
-}
-
-/// Non-macOS: the description works and carries no per-read side effect.
-#[cfg(not(target_os = "macos"))]
+/// The device's description; reading it has no side effect.
 fn device_key(device: &rodio::Device) -> Option<String> {
   use rodio::DeviceTrait;
   device.description().ok().map(|d| d.name().to_string())

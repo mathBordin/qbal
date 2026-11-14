@@ -34,9 +34,10 @@ fixtures are `pub(super) fn`s in `test_support.rs`, imported as
 - `resume_or_finish` releases the claim only where no decoded context resumes.
   A resumed decoded context keeps it: only `start_*_queue` sets the claim,
   `play_index` does not.
-- Old `last_session.yml` and queue files can still hold `spotify:` or other
-  removed-source URIs. They deserialize, and the routers ignore them; never
-  assume every queued URI is `qobuz:`.
+- A queue restored from an older session can still hold `spotify:` or other
+  non-Qobuz URIs; the queue skips them (`core::queue::is_qobuz_uri`). Never
+  assume every queued URI is `qobuz:`. A `last_session.yml` from another
+  source fails to load and is ignored.
 
 ### Errors
 

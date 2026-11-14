@@ -1,9 +1,7 @@
 //! Plugin-facing domain facade.
 //!
-//! Serde-serializable snapshots with string IDs/URIs only. rspotify types must never leak
-//! through this boundary — that is the compatibility contract for the future scripting API
-//! and multi-source refactor. All conversions from rspotify types happen in the mapping
-//! functions below; callers receive only the plain structs defined here.
+//! Serde-serializable snapshots with string IDs/URIs only: the shapes Lua plugins
+//! see, and the plain structs the rest of the app passes around.
 
 #![allow(dead_code)]
 
@@ -50,12 +48,12 @@ pub struct TrackInfo {
   /// Display album name. Retained for the scripting contract.
   pub album: String,
   pub duration_ms: u64,
-  // --- Fields below are additive (post-Phase-0). They only ever ADD keys to the
-  // serialized snapshot, so the `api_version = 4` plugin contract is preserved. ---
-  /// Spotify base62 track id (`None` for local/unknown tracks).
+  // --- Fields below were added later; they only ever ADD keys to the
+  // serialized snapshot, so older plugins keep working. ---
+  /// The source's track id, when known.
   #[serde(default)]
   pub id: Option<String>,
-  /// Spotify base62 id of the track's album, when known.
+  /// The source's id of the track's album, when known.
   #[serde(default)]
   pub album_id: Option<String>,
   /// Structured, navigable artist references (id + name). Populated when the
@@ -72,16 +70,11 @@ pub struct TrackInfo {
   #[serde(default)]
   pub explicit: bool,
   /// A directly-fetchable cover-art image URL for this track, when the source
-  /// can provide one (Subsonic getCoverArt, YouTube thumbnail, Qobuz or Spotify album art). `None` for
-  /// sources without per-track art. Additive: only adds a key to the serialized
-  /// snapshot, preserving the api_version = 4 plugin contract.
+  /// provides one.
   #[serde(default)]
   pub image_url: Option<String>,
   /// Release date of the track's album as the source reports it: `YYYY`,
-  /// `YYYY-MM` or `YYYY-MM-DD` (Spotify), or only the year (Subsonic, local
-  /// file tags). Spotify reports an unknown date as `0000`. `None` when the
-  /// source has no date. Additive: only adds a key to the serialized
-  /// snapshot, preserving the api_version = 4 plugin contract.
+  /// `YYYY-MM` or `YYYY-MM-DD`. `None` when the source has no date.
   #[serde(default)]
   pub release_date: Option<String>,
   // Identity of a generated title, retained when a queue is saved and restored.
@@ -153,8 +146,8 @@ pub struct PlaylistInfo {
   /// Owner display name (falls back to the owner id when no display name is set).
   pub owner: String,
   pub track_count: u32,
-  // --- Additive fields (post-Phase-0); see TrackInfo note above. ---
-  /// Spotify base62 playlist id, when known.
+  // --- Fields added later; see the TrackInfo note above. ---
+  /// The source's playlist id, when known.
   #[serde(default)]
   pub id: Option<String>,
   /// Owner's base62 user id, when known. Used for ownership checks (the display
@@ -184,10 +177,10 @@ impl PlaylistInfo {
   }
 }
 
-/// A navigable reference to an artist: optional Spotify id plus display name.
+/// A navigable reference to an artist: optional id plus display name.
 ///
 /// Reused by [`TrackInfo`], [`AlbumInfo`], and [`ArtistInfo`]. `id` is `None`
-/// for local/unknown sources or when the API omits it.
+/// when the API omits it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ArtistRef {
   pub id: Option<String>,
@@ -244,16 +237,15 @@ pub struct ShowInfo {
   pub name: String,
   #[serde(default)]
   pub description: String,
-  /// Show publisher (the "by …" attribution rendered in the podcast list).
+  /// Show publisher.
   #[serde(default)]
   pub publisher: String,
   #[serde(default)]
   pub image_url: Option<String>,
 }
 
-/// Where playback of an episode was last left off. Mirrors rspotify's
-/// `ResumePoint`; carried so the episode list can render the "fully played"
-/// marker and resume position.
+/// Where playback of an episode was last left off. Part of the plugin
+/// snapshot shape; Qobuz has no episodes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResumePointInfo {
   pub fully_played: bool,
@@ -266,9 +258,7 @@ pub struct EpisodeInfo {
   pub uri: Option<String>,
   pub name: String,
   pub duration_ms: u64,
-  /// Parent show name. Populated from a full episode (e.g. a queue item);
-  /// empty for simplified episodes that are already shown within their show's
-  /// context (the show-episodes list).
+  /// Parent show name.
   #[serde(default)]
   pub show_name: String,
   #[serde(default)]
@@ -277,17 +267,15 @@ pub struct EpisodeInfo {
   pub release_date: String,
   #[serde(default = "default_true")]
   pub is_playable: bool,
-  /// Resume/played state, when the source provides it (e.g. the show-episodes
-  /// list). Drives the "fully played" marker and resume-position display.
+  /// Resume/played state, when the source provides it.
   #[serde(default)]
   pub resume_point: Option<ResumePointInfo>,
   #[serde(default)]
   pub image_url: Option<String>,
 }
 
-/// A playable item in a queue or playlist: either a music track or a podcast
-/// episode. Maps from rspotify's `PlayableItem` (the `Unknown` variant maps to
-/// `None`).
+/// A playable item in a queue or playlist: a music track, or an episode (kept
+/// in the plugin snapshot shape; Qobuz has none).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PlayableInfo {
   Track(TrackInfo),
@@ -405,7 +393,7 @@ pub enum PluginWidgetKind {
 /// flattened into an explicit `kind` plus at most one populated payload field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueItemSnapshot {
-  /// `"track"` or `"episode"`.
+  /// `"track"` (or `"episode"`, which Qobuz never produces).
   pub kind: String,
   #[serde(default)]
   pub track: Option<TrackInfo>,
@@ -455,9 +443,8 @@ pub struct LyricsSnapshot {
   pub lines: Vec<LyricsLineSnapshot>,
 }
 
-/// Safe, plugin-visible behavior settings. Secrets and service credentials
-/// (sync_token, relay_server_url, subsonic credentials, discord client id,
-/// announcement feeds) are deliberately excluded.
+/// Safe, plugin-visible behavior settings. Credentials and service settings
+/// (the Discord client id, the announcement feed) are deliberately excluded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BehaviorSnapshot {
   pub seek_milliseconds: u32,
@@ -467,18 +454,13 @@ pub struct BehaviorSnapshot {
   pub enable_text_emphasis: bool,
   pub show_loading_indicator: bool,
   pub enforce_wide_search_bar: bool,
-  pub shuffle_icon: String,
-  pub repeat_track_icon: String,
-  pub repeat_context_icon: String,
   pub playing_icon: String,
-  pub paused_icon: String,
   pub set_window_title: bool,
   pub shuffle_enabled: bool,
-  pub stop_after_current_track: bool,
   pub sidebar_width_percent: u8,
   pub playbar_height_rows: u16,
   pub library_height_percent: u8,
-  /// Lowercased active source name, e.g. `"spotify"`, `"local"`.
+  /// Lowercased active source name: `"qobuz"`.
   pub active_source: String,
 }
 
@@ -534,14 +516,9 @@ pub fn config_snapshot(
       enable_text_emphasis: b.enable_text_emphasis,
       show_loading_indicator: b.show_loading_indicator,
       enforce_wide_search_bar: b.enforce_wide_search_bar,
-      shuffle_icon: b.shuffle_icon.clone(),
-      repeat_track_icon: b.repeat_track_icon.clone(),
-      repeat_context_icon: b.repeat_context_icon.clone(),
       playing_icon: b.playing_icon.clone(),
-      paused_icon: b.paused_icon.clone(),
       set_window_title: b.set_window_title,
       shuffle_enabled: runtime_state.shuffle_enabled,
-      stop_after_current_track: b.stop_after_current_track,
       sidebar_width_percent: runtime_state.sidebar_width_percent,
       playbar_height_rows: runtime_state.playbar_height_rows,
       library_height_percent: runtime_state.library_height_percent,
@@ -550,8 +527,8 @@ pub fn config_snapshot(
   }
 }
 
-/// Default for serde `is_playable` fields: a track/episode is assumed playable
-/// unless the API explicitly says otherwise.
+/// Default for serde `is_playable` fields: a track is assumed playable unless
+/// the API explicitly says otherwise.
 fn default_true() -> bool {
   true
 }
@@ -648,7 +625,6 @@ pub fn route_name(route: &crate::core::app::Route) -> String {
     RouteId::Home => "home",
     RouteId::Search => "search",
     RouteId::TrackTable => "track_table",
-    RouteId::Dialog => "dialog",
     RouteId::AnnouncementPrompt => "announcement",
     RouteId::RecapPrompt => "recap_prompt",
     RouteId::ExitPrompt => "exit_prompt",
@@ -712,26 +688,16 @@ pub fn recently_played_snapshot(app: &App) -> Vec<TrackInfo> {
     .unwrap_or_default()
 }
 
-/// The Spotify playback queue. An unavailable queue (no active device) maps to
-/// an empty snapshot rather than an error.
+/// Qbal's native queue: the queued track playing now, if any, and the rest.
 pub fn queue_snapshot(app: &App) -> QueueSnapshot {
-  let Some(queue) = app.queue.as_ref() else {
-    return QueueSnapshot::default();
-  };
+  let item =
+    |track: &TrackInfo| QueueItemSnapshot::from_playable(&PlayableInfo::Track(track.clone()));
   QueueSnapshot {
-    currently_playing: queue
-      .currently_playing
-      .as_ref()
-      .map(QueueItemSnapshot::from_playable),
-    items: queue
-      .queue
-      .iter()
-      .map(QueueItemSnapshot::from_playable)
-      .collect(),
+    currently_playing: app.queue_now_track().map(item),
+    items: app.native_queue.iter().map(item).collect(),
   }
 }
 
-/// The current search results (first page of each category).
 pub fn search_results_snapshot(app: &App) -> SearchResults {
   SearchResults {
     tracks: app
@@ -771,7 +737,7 @@ pub fn search_results_snapshot(app: &App) -> SearchResults {
 ///
 /// The driver's shared track-change detector runs **after** the script engine's
 /// tick, so on the tick a track changes the lyrics state still belongs to the
-/// previous track. Without this check, `spotatui.get_lyrics` called from a
+/// previous track. Without this check, `qbal.get_lyrics` called from a
 /// `track_change` handler - the obvious place to call it - sees a terminal
 /// status, resolves synchronously, and hands the plugin the *previous* track's
 /// lyrics; the one-shot callback is then spent by the time the real ones land.
@@ -826,8 +792,6 @@ pub fn lyrics_snapshot(app: &App) -> LyricsSnapshot {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  // --- DeviceInfo::from_rspotify ---
 
   // --- repeat_from ---
 

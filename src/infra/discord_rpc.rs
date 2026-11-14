@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const REPO_URL: &str = "https://github.com/LargeModGames/spotatui";
+const REPO_URL: &str = "https://github.com/mathBordin/ghosbuz";
 const REPO_TAGLINE: &str = "Open-source on GitHub";
 
 #[derive(Clone, Debug)]

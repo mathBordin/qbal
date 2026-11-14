@@ -21,11 +21,11 @@ const LOGIN_URL: &str = "https://play.qobuz.com/login";
 const PLAY_ORIGIN: &str = "https://play.qobuz.com";
 const BUNDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-const APP_ID_ENV: &str = "SPOTATUI_QOBUZ_APP_ID";
-const APP_SECRET_ENV: &str = "SPOTATUI_QOBUZ_APP_SECRET";
-const OAUTH_KEY_ENV: &str = "SPOTATUI_QOBUZ_OAUTH_KEY";
+const APP_ID_ENV: &str = "QBAL_QOBUZ_APP_ID";
+const APP_SECRET_ENV: &str = "QBAL_QOBUZ_APP_SECRET";
+const OAUTH_KEY_ENV: &str = "QBAL_QOBUZ_OAUTH_KEY";
 /// Overrides the saved user token (the value of `X-User-Auth-Token`).
-pub(super) const TOKEN_ENV: &str = "SPOTATUI_QOBUZ_TOKEN";
+pub(super) const TOKEN_ENV: &str = "QBAL_QOBUZ_TOKEN";
 
 /// Base64 that accepts both alphabets, with or without padding.
 const LENIENT_BASE64: GeneralPurpose = GeneralPurpose::new(

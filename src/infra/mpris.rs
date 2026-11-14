@@ -1,6 +1,6 @@
 //! MPRIS D-Bus interface for desktop media control integration
 //!
-//! Exposes spotatui as a controllable media player via D-Bus, enabling:
+//! Exposes qbal as a controllable media player via D-Bus, enabling:
 //! - Media key support (play/pause, next, previous)
 //! - Desktop environment integration (GNOME, KDE, etc.)
 //! - playerctl command-line control
@@ -55,9 +55,9 @@ pub enum MprisCommand {
   Stopped,
 }
 
-/// Object-path prefix of the track ids spotatui publishes. `/org/mpris` is
+/// Object-path prefix of the track ids qbal publishes. `/org/mpris` is
 /// reserved by the specification.
-const TRACK_ID_PREFIX: &str = "/org/spotatui/track/";
+const TRACK_ID_PREFIX: &str = "/org/qbal/track/";
 
 /// The `mpris:trackid` for a track: a D-Bus object path derived from its
 /// metadata, so every path that publishes the same track (the native player's
@@ -97,9 +97,9 @@ fn build_metadata(
 }
 
 /// Whether a `SetPosition` call is for the current track. The specification
-/// says to ignore a stale id; only an id spotatui published for another track
+/// says to ignore a stale id; only an id qbal published for another track
 /// is treated as stale. Clients that send `NoTrack` or an id of their own kept
-/// working before spotatui published any id, so they still do.
+/// working before qbal published any id, so they still do.
 fn set_position_targets_current(current: Option<&str>, requested: &str) -> bool {
   match current {
     Some(current) if requested.starts_with(TRACK_ID_PREFIX) => requested == current,
@@ -116,7 +116,7 @@ pub struct MprisManager {
 impl MprisManager {
   /// Create and start the MPRIS server
   ///
-  /// Registers spotatui as `org.mpris.MediaPlayer2.spotatui` on D-Bus
+  /// Registers qbal as `org.mpris.MediaPlayer2.qbal` on D-Bus
   /// The MPRIS server runs in a dedicated thread with its own runtime
   /// because player.run() returns a !Send future that requires LocalSet
   pub fn new() -> Result<Self> {
@@ -134,9 +134,9 @@ impl MprisManager {
       let local = tokio::task::LocalSet::new();
       local.block_on(&rt, async move {
         // Build the MPRIS player
-        let player = match Player::builder("spotatui")
-          .identity("spotatui")
-          .desktop_entry("spotatui")
+        let player = match Player::builder("qbal")
+          .identity("Qbal")
+          .desktop_entry("qbal")
           .can_play(true)
           .can_pause(true)
           .can_go_next(true)
@@ -443,7 +443,7 @@ mod tests {
   }
 
   #[test]
-  fn set_position_for_a_previous_spotatui_track_is_ignored() {
+  fn set_position_for_a_previous_qbal_track_is_ignored() {
     let current = track_object_path("Low Life", &artists(&["Dame"]), "Album", 1);
     let previous = track_object_path("Pave Low", &artists(&["Dame"]), "Album", 1);
     assert!(!set_position_targets_current(Some(&current), &previous));

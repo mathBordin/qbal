@@ -1,5 +1,5 @@
 -- Helper module for the session-stats plugin. Loaded via `require("stats")`, which resolves
--- against the plugin's own directory (spotatui adds it to package.path for directory plugins).
+-- against the plugin's own directory (qbal adds it to package.path for directory plugins).
 
 local M = {
   count = 0,

@@ -4,17 +4,17 @@
 -- webhooks, home-automation triggers, or a "what am I listening to" endpoint.
 --
 -- Install (single file; see PLUGINS.md for config path rules):
---   cp now-playing-webhook.lua "${XDG_CONFIG_HOME:-$HOME/.config}/spotatui/plugins/"
+--   cp now-playing-webhook.lua "${XDG_CONFIG_HOME:-$HOME/.config}/qbal/plugins/"
 -- Edit WEBHOOK_URL below first.
 
 local WEBHOOK_URL = "https://example.com/webhook"
 
-spotatui.on("track_change", function(pb)
+qbal.on("track_change", function(pb)
   if not pb or not pb.track then
     return
   end
 
-  local payload = spotatui.json_encode({
+  local payload = qbal.json_encode({
     event = "now_playing",
     uri = pb.track.uri,
     name = pb.track.name,
@@ -23,15 +23,15 @@ spotatui.on("track_change", function(pb)
     is_playing = pb.is_playing,
   })
 
-  spotatui.http_post(
+  qbal.http_post(
     WEBHOOK_URL,
     payload,
     { ["content-type"] = "application/json" },
     function(resp, err)
       if err then
-        spotatui.log("now-playing-webhook: request failed: " .. err)
+        qbal.log("now-playing-webhook: request failed: " .. err)
       elseif not resp.ok then
-        spotatui.log("now-playing-webhook: server returned " .. resp.status)
+        qbal.log("now-playing-webhook: server returned " .. resp.status)
       end
     end
   )

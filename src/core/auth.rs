@@ -1,4 +1,4 @@
-//! The Spotify login, as every build sees it, and private file writes.
+//! Private file writes for files that hold credentials.
 
 use anyhow::{anyhow, Result};
 use std::{fs, path::Path};

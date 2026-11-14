@@ -1,22 +1,13 @@
-//! Source-agnostic pagination containers for the multi-source domain model.
-//!
-//! These mirror the shapes of rspotify's `Page<T>` (offset-based) and
-//! `CursorBasedPage<T>` (cursor-based) with **no rspotify dependency**, so the
-//! paginated state on [`crate::core::app::App`] can hold domain items
-//! ([`crate::core::plugin_api`]) instead of `rspotify::model` types. The
-//! rspotify → domain conversion lives behind the boundary in
-//! `infra/network/mapping.rs` (`map_page` / `map_cursor_page`).
-//!
-//! Field sets intentionally drop rspotify's `href` (an API self-link the UI
-//! never reads) and keep only what the app uses for paging and display.
+//! Pagination containers for the paginated state on
+//! [`crate::core::app::App`]: offset-based ([`Paged`]) and cursor-based
+//! ([`CursorPaged`]) pages of domain items ([`crate::core::plugin_api`]).
 
 // Wired up by the per-screen migration slices, not yet by the binary.
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
-/// An offset-based page of domain items — counterpart to
-/// `rspotify::model::page::Page`.
+/// An offset-based page of domain items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Paged<T> {
   pub items: Vec<T>,
@@ -41,14 +32,13 @@ impl<T> Default for Paged<T> {
 }
 
 impl<T> Paged<T> {
-  /// Whether a following page exists (Spotify sets `next` to `null` at the end).
+  /// Whether a following page exists.
   pub fn has_next(&self) -> bool {
     self.next.is_some()
   }
 }
 
-/// A cursor-based page of domain items — counterpart to
-/// `rspotify::model::page::CursorBasedPage`.
+/// A cursor-based page of domain items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CursorPaged<T> {
   pub items: Vec<T>,
@@ -56,8 +46,7 @@ pub struct CursorPaged<T> {
   pub next: Option<String>,
   /// `cursors.after` from the API — the cursor to request the following page.
   pub cursor_after: Option<String>,
-  /// Absent when the source has returned all items (matches rspotify, which
-  /// notes the field does not always match Spotify's documentation).
+  /// Absent when the source does not report a total.
   pub total: Option<u32>,
 }
 

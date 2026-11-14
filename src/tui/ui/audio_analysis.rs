@@ -1,4 +1,4 @@
-use crate::core::app::{ActiveBlock, App, PITCH_NAMES};
+use crate::core::app::{ActiveBlock, App};
 use crate::core::pane::Pane;
 use crate::core::user_config::{normalize_tick_rate_milliseconds, VisualizerStyle};
 use crate::tui::layout::{main_layout_margin, visible_pane_area};
@@ -33,7 +33,7 @@ fn visualizer_block<'a>() -> Block<'a> {
 /// and border inset itself.
 ///
 /// This and `visualizer_bar_count` are only called behind the audio-viz
-/// feature gates; slim builds still compile (and test) them. `None` when the
+/// feature gates; builds without them still compile (and test) them. `None` when the
 /// visualizer shows neither full screen nor in a pane.
 pub fn visualizer_inner_width(app: &App) -> Option<u16> {
   let (root, margin) = if app.get_current_route().active_block == ActiveBlock::Analysis {
@@ -60,28 +60,18 @@ pub fn draw_in(f: &mut Frame<'_>, app: &App, area: Rect, margin: u16) {
   let tick_rate = app.user_config.behavior.animation_tick_rate_milliseconds;
   let tick_rate = normalize_tick_rate_milliseconds(tick_rate as i64);
   let visualizer_style = app.user_config.behavior.visualizer_style;
-  let pitch_view = app.pitch_view_shows();
-  let (style_name, chart_name) = if pitch_view {
-    (
-      app.strings().screens.spotify_pitch,
-      app.strings().screens.pitches,
-    )
-  } else {
-    (
-      match visualizer_style {
-        VisualizerStyle::Cava => "Cava",
-        VisualizerStyle::BarGraph => app.strings().screens.bar_graph,
-        VisualizerStyle::HeadUnit => app.strings().screens.head_unit,
-        VisualizerStyle::AnalogVu => app.strings().screens.analog_vu,
-        VisualizerStyle::Winamp => app.strings().screens.winamp,
-        VisualizerStyle::PhosphorScope => app.strings().screens.phosphor_scope,
-        VisualizerStyle::Outrun => app.strings().screens.outrun,
-        VisualizerStyle::RackEq => app.strings().screens.rack_eq,
-        VisualizerStyle::Cassette => app.strings().screens.cassette_deck,
-      },
-      app.strings().screens.spectrum,
-    )
+  let style_name = match visualizer_style {
+    VisualizerStyle::Cava => "Cava",
+    VisualizerStyle::BarGraph => app.strings().screens.bar_graph,
+    VisualizerStyle::HeadUnit => app.strings().screens.head_unit,
+    VisualizerStyle::AnalogVu => app.strings().screens.analog_vu,
+    VisualizerStyle::Winamp => app.strings().screens.winamp,
+    VisualizerStyle::PhosphorScope => app.strings().screens.phosphor_scope,
+    VisualizerStyle::Outrun => app.strings().screens.outrun,
+    VisualizerStyle::RackEq => app.strings().screens.rack_eq,
+    VisualizerStyle::Cassette => app.strings().screens.cassette_deck,
   };
+  let chart_name = app.strings().screens.spectrum;
 
   let info_block = Block::default()
     .title(Span::styled(
@@ -102,21 +92,9 @@ pub fn draw_in(f: &mut Frame<'_>, app: &App, area: Rect, margin: u16) {
     .title(Span::styled(bar_chart_title, gray))
     .border_style(gray);
 
-  if pitch_view {
-    draw_pitch(
-      f,
-      app,
-      info_block,
-      bar_chart_block,
-      [info_area, visualizer_area],
-    );
-    return;
-  }
-
   // Check if we have spectrum data from local audio capture
   if let Some(ref spectrum) = app.spectrum_data {
-    // Info panel with status
-    // Use ASCII-safe symbols instead of emojis for Windows compatibility
+    // Info panel with status, in ASCII-safe symbols rather than emoji
     let status_text = if app.audio_capture_active {
       app.strings().screens.capturing_audio
     } else {
@@ -191,11 +169,7 @@ pub fn draw_in(f: &mut Frame<'_>, app: &App, area: Rect, margin: u16) {
       Line::from(""),
       #[cfg(target_os = "linux")]
       Line::from(app.strings().screens.capture_hint_linux),
-      #[cfg(target_os = "windows")]
-      Line::from(app.strings().screens.capture_hint_windows),
-      #[cfg(target_os = "macos")]
-      Line::from(app.strings().screens.capture_hint_macos),
-      #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+      #[cfg(not(target_os = "linux"))]
       Line::from(app.strings().screens.capture_hint_other),
     ];
 
@@ -236,71 +210,9 @@ fn head_unit_view(app: &App) -> head_unit::HeadUnitView {
       is_playing: snapshot.is_playing,
       shuffle: snapshot.shuffle,
       repeat: snapshot.repeat.is_some_and(|r| r != RepeatState::Off),
-      live: snapshot.is_live,
     },
     None => head_unit::HeadUnitView::default(),
   }
-}
-
-/// The Spotify pitch view: tempo, key and time signature of the current section,
-/// and the 12 pitch bars of the current segment.
-fn draw_pitch(
-  f: &mut Frame<'_>,
-  app: &App,
-  info_block: Block<'_>,
-  chart_block: Block<'_>,
-  [info_area, chart_area]: [Rect; 2],
-) {
-  let theme = &app.user_config.theme;
-  let text = Style::default().fg(theme.text.into());
-  let hint = Span::styled(
-    app.strings().screens.visualizer_style_hint,
-    Style::default().fg(theme.hint.into()),
-  );
-
-  let _position = app.analysis_position_ms(Instant::now()).unwrap_or(0);
-  let info = vec![hint];
-  f.render_widget(
-    Paragraph::new(Line::from(info)).block(info_block),
-    info_area,
-  );
-
-  let inner = chart_block.inner(chart_area);
-  f.render_widget(chart_block, chart_area);
-  let [bars_area, labels_area] = inner.layout(&Layout::vertical([
-    Constraint::Min(1),
-    Constraint::Length(1),
-  ]));
-  let count = visualizer_bar_count(VisualizerStyle::Cava, bars_area.width);
-  let bands: Vec<f32> = interpolate_bands(&app.pitch_levels(), count)
-    .into_iter()
-    .map(|value| value as f32)
-    .collect();
-  render_cava(f, &bands, bars_area, theme.analysis_bar.into());
-  f.render_widget(
-    Paragraph::new(pitch_labels(labels_area.width, count)).style(text),
-    labels_area,
-  );
-}
-
-fn pitch_labels(width: u16, bars: usize) -> String {
-  let mut line = vec![' '; usize::from(width)];
-  if bars < 2 {
-    return line.into_iter().collect();
-  }
-  let (bar_width, spacing) = cava_bar_layout(width, bars as u16);
-  let step = bar_width + spacing;
-  let x_offset = width.saturating_sub(bars as u16 * step - spacing) / 2;
-  for (pitch, name) in PITCH_NAMES.iter().enumerate() {
-    let bar = (pitch * (bars - 1) + 5) / 11;
-    let x = usize::from(x_offset + bar as u16 * step + bar_width / 2);
-    for (offset, letter) in name.chars().enumerate() {
-      if let Some(cell) = line.get_mut(x + offset) {
-        *cell = letter;
-      }
-    }
-  }
-  line.into_iter().collect()
 }
 
 /// Render bar graph-style visualization using tui-bar-graph
@@ -573,16 +485,5 @@ mod tests {
       !content.contains("Press q to exit"),
       "spectrum title must not still show the default key: {content}"
     );
-  }
-
-  #[test]
-  fn pitch_labels_run_from_c_under_the_first_bar_to_b_under_the_last() {
-    let line = pitch_labels(120, visualizer_bar_count(VisualizerStyle::Cava, 120));
-
-    assert_eq!(line.chars().count(), 120);
-    assert!(line.trim_start().starts_with("C "), "{line:?}");
-    assert!(line.trim_end().ends_with('B'), "{line:?}");
-    let names: Vec<&str> = line.split_whitespace().collect();
-    assert_eq!(names, PITCH_NAMES);
   }
 }

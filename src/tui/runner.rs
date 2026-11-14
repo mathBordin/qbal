@@ -1,4 +1,4 @@
-use crate::core::app::{self, ActiveBlock, App, RouteId};
+use crate::core::app::{ActiveBlock, App, RouteId};
 use crate::core::driver::{Driver, TickEnv};
 use crate::core::pane::Pane;
 use crate::core::user_config::UserConfig;
@@ -17,12 +17,7 @@ use crossterm::{
 use log::info;
 use ratatui::backend::Backend;
 use ratatui::DefaultTerminal;
-use std::{
-  cmp::{max, min},
-  io::stdout,
-  sync::Arc,
-  time::Instant,
-};
+use std::{io::stdout, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 
 /// Whether the terminal renders real pixels. False until the renderer is
@@ -38,10 +33,6 @@ fn cover_art_full_image_support() -> bool {
   {
     false
   }
-}
-
-fn back_key_clears_playlist_filter(app: &mut App, active_block: ActiveBlock) -> bool {
-  active_block == ActiveBlock::TrackTable && handlers::clear_active_track_filter(app)
 }
 
 /// The runner normally handles the configurable back key before `handle_app`.
@@ -67,9 +58,6 @@ fn modal_captures_key_before_back(app: &App) -> bool {
 /// copes with it.
 fn key_reaches_handlers_before_back(app: &App, key: Key) -> bool {
   if modal_captures_key_before_back(app) {
-    return true;
-  }
-  if handlers::playlist_picker_captures_key(app, key) {
     return true;
   }
   help_menu_captures_key_before_back(app, key)
@@ -120,8 +108,8 @@ fn animation_active(app: &App) -> bool {
 /// to quit and the loop must break.
 ///
 /// Extracted from the loop so the ordering of these branches is testable: the bug
-/// this guards against is not "does the DJ handler cope with `q`" but "does `q`
-/// ever get as far as the DJ handler". `Key::Ctrl('c')` stays at the call site,
+/// this guards against is not "does a screen's handler cope with `q`" but "does
+/// `q` ever get as far as that handler". `Key::Ctrl('c')` stays at the call site,
 /// because it is an unconditional quit that predates any of this.
 fn dispatch_key(key: Key, app: &mut App) -> bool {
   let key = match key.plain_arrow() {
@@ -149,9 +137,7 @@ fn dispatch_key(key: Key, app: &mut App) -> bool {
   } else if key_reaches_handlers_before_back(app, key) {
     handlers::handle_app(key, app);
   } else if key == app.user_config.keys.back {
-    if !handlers::leave_focused_pane(app)
-      && !back_key_clears_playlist_filter(app, current_active_block)
-    {
+    if !handlers::leave_focused_pane(app) {
       if current_active_block == ActiveBlock::Settings {
         handlers::handle_app(key, app);
       } else if app.get_current_route().active_block == ActiveBlock::AnnouncementPrompt {
@@ -224,7 +210,6 @@ pub async fn start_ui(
     let mut app = app.lock().await;
     app.view.terminal_input_caps.keyboard_enhancement_supported = keyboard_enhancement_supported;
     app.view.terminal_input_caps.keyboard_enhancement_enabled = keyboard_enhancement_enabled;
-    app.view.terminal_input_caps.ctrl_punct_reliable = app::CapabilityState::Unknown;
     app.keep_pane_focus_in_layout();
   }
   let mut route_depth = app.lock().await.navigation_depth();
@@ -253,11 +238,6 @@ pub async fn start_ui(
           app.view.help_menu_offset = 0;
           app.view.help_menu_page = 0;
           app.view.size = size;
-
-          let potential_limit = max((size.height as i32) - 13, 0) as u32;
-          let max_limit = min(potential_limit, 50);
-          let _large_search_limit = min((f32::from(size.height) / 1.4) as u32, max_limit);
-          let _small_search_limit = min((f32::from(size.height) / 2.85) as u32, max_limit / 2);
 
           app.view.help_menu_max_lines = (size.height as u32).saturating_sub(8);
         }
@@ -365,14 +345,6 @@ pub async fn start_ui(
         }
       }
       event::Event::Tick(elapsed) => {
-        // The frontend owns the macOS main thread, so its run loop is pumped
-        // here rather than by the driver.
-        #[cfg(all(feature = "macos-media", target_os = "macos"))]
-        {
-          use objc2_foundation::{NSDate, NSRunLoop};
-          NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.001));
-        }
-
         let mut app = app.lock().await;
         // The visualizer bar count is frontend geometry (terminal width and
         // layout margin), so it is resolved here and injected.
@@ -386,7 +358,7 @@ pub async fn start_ui(
           TickEnv {
             now: Instant::now(),
             #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-            viz: viz_bars.map(crate::core::driver::VizNeed::Bars),
+            viz_bars,
             #[cfg(feature = "art-decode")]
             cover_art_full_image_support: cover_art_full_image_support(),
           },
@@ -426,7 +398,7 @@ mod tests {
     assert!(animation_active(&app));
 
     app.spectrum_data = None;
-    app.note_analysis_clock(true, Instant::now());
+    app.note_playing(true);
     assert!(animation_active(&app));
   }
 
@@ -436,7 +408,7 @@ mod tests {
     app.change_pane_layout(|tree| tree.close(Pane::Visualizer));
     app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
     app.set_lyrics(
-      app::LyricsStatus::Found,
+      crate::core::app::LyricsStatus::Found,
       Some(vec![(0, "one".to_string()), (5_000, "two".to_string())]),
       false,
     );
@@ -452,7 +424,7 @@ mod tests {
   #[test]
   fn a_screen_that_covers_the_panes_drops_their_fast_tick_and_capture() {
     let mut app = crate::tui::layout::app_with_panes(160, 50);
-    app.note_analysis_clock(true, Instant::now());
+    app.note_playing(true);
     app.push_navigation_stack(RouteId::Settings, ActiveBlock::Settings);
 
     assert!(!animation_active(&app));

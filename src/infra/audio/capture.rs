@@ -1,6 +1,5 @@
 use super::analyzer::{create_shared_analyzer, spectrum_for, SharedAnalyzer, SpectrumData};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-#[cfg(not(target_os = "windows"))]
 use cpal::BufferSize;
 use cpal::{Device, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,12 +33,6 @@ impl AudioCaptureManager {
 
     // Try to find a loopback/monitor device
     let device = Self::find_loopback_device(&host, allow_default_input)?;
-
-    // Device name is now stored internally for debugging if needed
-    let _device_name = device
-      .description()
-      .ok()
-      .map(|description| description.name().to_string());
 
     // Get a compatible config that won't interfere with playback
     let config = Self::get_compatible_config(&device)?;
@@ -80,12 +73,6 @@ impl AudioCaptureManager {
   /// Prefers: default output monitor > bluetooth > speakers > HDMI
   #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
   fn find_loopback_device(host: &cpal::Host, allow_default_input: bool) -> Option<Device> {
-    #[cfg(target_os = "windows")]
-    {
-      // On Windows, WASAPI supports loopback on output devices
-      host.default_output_device()
-    }
-
     #[cfg(target_os = "linux")]
     {
       // On Linux with PipeWire/PulseAudio, look for a monitor or ALSA loopback device
@@ -141,34 +128,15 @@ impl AudioCaptureManager {
       None
     }
 
-    #[cfg(target_os = "macos")]
-    {
-      // On macOS, audio loopback requires virtual audio device
-      if let Some(device) = host.default_input_device() {
-        return Some(device);
-      }
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    #[cfg(not(target_os = "linux"))]
     {
       host.default_input_device()
     }
-
-    #[cfg(target_os = "macos")]
-    None
   }
 
   /// Get a stream config that won't interfere with playback
   /// Uses default buffer size to let the audio server manage timing
   fn get_compatible_config(device: &Device) -> Option<StreamConfig> {
-    #[cfg(target_os = "windows")]
-    {
-      if let Ok(config) = device.default_output_config() {
-        return Some(config.into());
-      }
-    }
-
-    #[cfg(not(target_os = "windows"))]
     {
       // Get the default config and ensure we use default buffer size
       if let Ok(config) = device.default_input_config() {

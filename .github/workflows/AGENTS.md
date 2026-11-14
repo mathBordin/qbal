@@ -6,8 +6,7 @@
   and `headless` (`--locked --no-default-features`).
   Reproduce them locally with `cargo test` / `cargo clippy -- -D warnings` and
   the same commands with `--no-default-features`.
-- CI runs on Linux only. The `#[cfg(target_os = "macos")]` and
-  `#[cfg(target_os = "windows")]` arms are never compiled there.
+- CI runs on Linux only, the only platform Qbal supports.
 - `coverage` runs `cargo llvm-cov` on the default feature set and uploads to
   Codecov; a failed upload never fails the job.
 - `gates-ratchet` (pull requests only) compares `tools/gates.count` against the

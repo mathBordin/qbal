@@ -6,8 +6,6 @@ pub mod discord_rpc;
 // leg lints this module in full.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod history;
-#[cfg(all(feature = "macos-media", target_os = "macos"))]
-pub mod macos_media;
 pub mod media_metadata;
 #[cfg(all(feature = "mpris", target_os = "linux"))]
 pub mod mpris;

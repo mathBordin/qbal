@@ -12,23 +12,16 @@ use ratatui::{
 use super::columns::resolve_columns;
 use super::columns::{resolve_columns_localized, ResolvedColumn, TableColumnSet};
 use super::util::{get_color, millis_to_minutes, release_year};
-use crate::tui::theme::ThemeExt;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TableId {
-  Song,
-}
+use crate::tui::theme::{EmphasisExt, ThemeExt};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColumnId {
   #[default]
   None,
   Title,
-  Liked,
 }
 
 pub struct TableHeader {
-  pub id: TableId,
   pub items: Vec<TableHeaderItem>,
 }
 
@@ -47,7 +40,7 @@ pub struct TableHeaderItem {
 
 #[derive(Clone)]
 pub struct TableItem {
-  pub id: String,
+  pub uri: Option<String>,
   pub format: Vec<String>,
 }
 
@@ -110,14 +103,12 @@ fn visible_window_anchored<'a, T>(
 fn table_columns(app: &App, table: TableColumnSet, layout_width: u16) -> Vec<ResolvedColumn> {
   let configured = match table {
     TableColumnSet::Songs => &app.user_config.tables.songs,
-    TableColumnSet::Albums => &app.user_config.tables.albums,
   };
   resolve_columns_localized(table, layout_width, configured, &app.strings().screens)
 }
 
-fn table_header(id: TableId, columns: &[ResolvedColumn]) -> TableHeader {
+fn table_header(columns: &[ResolvedColumn]) -> TableHeader {
   TableHeader {
-    id,
     items: columns
       .iter()
       .map(|column| TableHeaderItem {
@@ -135,11 +126,10 @@ fn track_table_item(
   strings: &crate::core::i18n::Strings,
 ) -> TableItem {
   TableItem {
-    id: track.id.clone().unwrap_or_default(),
+    uri: track.uri.clone(),
     format: columns
       .iter()
       .map(|column| match column.id.as_str() {
-        "liked" => String::new(),
         "index" => track.track_number.to_string(),
         "title" => track.display_name(strings).to_owned(),
         "artist" => track.artists.join(", "),
@@ -156,7 +146,7 @@ fn track_table_item(
 
 pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let columns = table_columns(app, TableColumnSet::Songs, layout_chunk.width);
-  let header = table_header(TableId::Song, &columns);
+  let header = table_header(&columns);
 
   let current_route = app.get_current_route();
   let highlight_state = (
@@ -217,17 +207,24 @@ fn draw_table(
     .add_modifier(Modifier::BOLD | Modifier::REVERSED);
 
   let (title, header) = table_layout;
+  let playing_uri =
+    crate::infra::media_metadata::current_playback_snapshot(app).and_then(|s| s.item_uri);
+  // The marker goes on the title cell, or the first cell when the columns omit the title.
+  let title_index = header.get_index(ColumnId::Title).unwrap_or(0);
 
   let rows = items.iter().enumerate().map(|(i, item)| {
-    let formatted_row = item.format.clone();
+    let mut formatted_row = item.format.clone();
     let mut style = app.user_config.theme.base_style(); // default styling
 
-    // if table displays songs
-    if header.id == TableId::Song {
-      // Show this the liked icon if the song is liked
-      if let Some(_liked_idx) = header.get_index(ColumnId::Liked) {
-        if app.liked_song_ids_set().contains(item.id.as_str()) {}
-      }
+    if playing_uri.is_some() && item.uri == playing_uri {
+      mark_playing(
+        &mut formatted_row,
+        title_index,
+        &app.user_config.behavior.playing_icon,
+      );
+      style = Style::default()
+        .fg(app.user_config.theme.active.into())
+        .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD));
     }
 
     // Next check if the item is under selection.
@@ -264,6 +261,13 @@ fn draw_table(
   f.render_widget(table, layout_chunk);
 }
 
+/// Prefix the playing row's title cell with the playing icon.
+fn mark_playing(cells: &mut [String], title_index: usize, icon: &str) {
+  if let Some(cell) = cells.get_mut(title_index) {
+    cell.insert_str(0, &format!("{icon} "));
+  }
+}
+
 pub fn table_scroll_offset(selected_index: usize, visible_rows: usize) -> usize {
   if visible_rows == 0 {
     return 0;
@@ -291,7 +295,7 @@ mod tests {
   fn track(i: u32) -> TrackInfo {
     TrackInfo {
       generated_name: None,
-      uri: Some(format!("spotify:track:{i:022}")),
+      uri: Some(format!("qobuz:track:{i}")),
       name: format!("Track {i}"),
       artists: vec![format!("Artist {i}")],
       album: format!("Album {i}"),
@@ -320,6 +324,16 @@ mod tests {
       release_date: release_date.map(str::to_string),
       ..track(1)
     }
+  }
+
+  #[test]
+  fn the_playing_marker_prefixes_the_title_cell_or_the_first_one() {
+    let mut cells = vec!["3".to_string(), "Blue".to_string()];
+    mark_playing(&mut cells, 1, "▶");
+    assert_eq!(cells, ["3", "▶ Blue"]);
+    let mut cells = vec!["Joni".to_string()];
+    mark_playing(&mut cells, 5, "▶");
+    assert_eq!(cells, ["Joni"]);
   }
 
   #[test]

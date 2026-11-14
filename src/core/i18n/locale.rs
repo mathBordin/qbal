@@ -108,79 +108,7 @@ pub fn system_language() -> Language {
 
 fn read_system_language() -> Language {
   let values = ["LC_ALL", "LC_MESSAGES", "LANG"].map(|key| std::env::var(key).ok());
-  if values
-    .iter()
-    .flatten()
-    .any(|value| !value.trim().is_empty())
-  {
-    return system_language_with(values.each_ref().map(|value| value.as_deref()), None);
-  }
-  let native = native_language();
-  system_language_with([None, None, None], native.as_deref())
-}
-
-#[cfg(target_os = "macos")]
-fn native_language() -> Option<String> {
-  // defaults reads the user's preferred UI languages without changing locale
-  // or spawning a shell. The first language alone decides the UI language.
-  let output = std::process::Command::new("/usr/bin/defaults")
-    .args(["read", "-g", "AppleLanguages"])
-    .output()
-    .ok()?;
-  if !output.status.success() {
-    return None;
-  }
-  let text = String::from_utf8(output.stdout).ok()?;
-  apple_language_with(&text).map(str::to_owned)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn apple_language_with(value: &str) -> Option<&str> {
-  value
-    .trim()
-    .strip_prefix('(')?
-    .split([',', ')'])
-    .next()
-    .map(|language| language.trim().trim_matches('"'))
-    .filter(|language| !language.is_empty())
-}
-
-#[cfg(target_os = "windows")]
-fn native_language() -> Option<String> {
-  use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
-  let mut count = 0;
-  let mut length = 0;
-  // Both calls use owned buffers. The first returns the required UTF-16 size;
-  // the second writes at most that many code units, including the double NUL.
-  unsafe {
-    if GetUserPreferredUILanguages(
-      MUI_LANGUAGE_NAME,
-      &mut count,
-      std::ptr::null_mut(),
-      &mut length,
-    ) == 0
-      || length == 0
-    {
-      return None;
-    }
-    let mut buffer = vec![0u16; length as usize];
-    if GetUserPreferredUILanguages(
-      MUI_LANGUAGE_NAME,
-      &mut count,
-      buffer.as_mut_ptr(),
-      &mut length,
-    ) == 0
-    {
-      return None;
-    }
-    let end = buffer.iter().position(|&unit| unit == 0)?;
-    (end > 0).then(|| String::from_utf16_lossy(&buffer[..end]))
-  }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn native_language() -> Option<String> {
-  None
+  system_language_with(values.each_ref().map(|value| value.as_deref()), None)
 }
 
 #[cfg(test)]
@@ -230,14 +158,5 @@ mod tests {
       Language::PtBr
     );
     assert_eq!(system_language_with([None, None, None], None), Language::En);
-  }
-
-  #[test]
-  fn apple_language_lists_name_the_first_language() {
-    assert_eq!(
-      apple_language_with("(\n    \"pt-BR\",\n    en\n)"),
-      Some("pt-BR")
-    );
-    assert_eq!(apple_language_with("()"), None);
   }
 }

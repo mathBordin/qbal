@@ -41,14 +41,12 @@ pub struct ViewState {
   pub input: Vec<char>,
   pub input_idx: usize,
   pub input_cursor_position: u16,
-  pub input_context: InputContext,
   /// Horizontal scroll offset for the input box, computed during rendering.
   pub input_scroll_offset: Cell<u16>,
 
   // Sidebar, library and table cursors
   pub home_scroll: u16,
   pub selected_playlist_index: Option<usize>,
-  pub album_list_index: usize,
   pub queue_selected_index: usize,
   /// Hold the last sidebar block the user was on.
   /// Defaults to [`SidebarBlock::Library`]
@@ -67,12 +65,7 @@ pub struct ViewState {
   pub track_table_scroll_offset: Cell<usize>,
   /// The sidebar row the cursor is on, by identity.
   pub library_selected: LibraryTarget,
-  // The search screen: one cursor per result block, plus its focus.
-  pub search_selected_album_index: Option<usize>,
-  pub search_selected_artists_index: Option<usize>,
-  pub search_selected_playlists_index: Option<usize>,
   pub search_selected_tracks_index: Option<usize>,
-  pub search_selected_shows_index: Option<usize>,
   pub search_hovered_block: SearchResultBlock,
   pub search_selected_block: SearchResultBlock,
 
@@ -88,12 +81,6 @@ pub struct ViewState {
   /// Formatted Help rows for the current width/keys/filter; `None` until the
   /// Help menu is first prepared for rendering.
   pub help_menu_model: Option<HelpMenuModel>,
-
-  // Modal dialogs
-  /// Which modal dialog is open, if any.
-  pub dialog: Option<String>,
-  /// The yes/no cursor of the open dialog.
-  pub confirm: bool,
 
   /// Scroll/browse state for the lyrics view.
   pub lyrics_view: LyricsViewState,
@@ -116,9 +103,6 @@ pub struct ViewState {
   /// Selected index in the Stats screen's Top Tracks list
   pub stats_selected_track: usize,
 
-  /// Cursor in the mirror picker dialog.
-  pub playlist_sync_picker_index: usize,
-
   // Sort menu state
   /// Whether the sort menu popup is visible
   pub sort_menu_visible: bool,
@@ -133,16 +117,6 @@ pub struct ViewState {
   /// Global animation tick counter, incremented every tick.
   pub animation_tick: u64,
 
-  // Add-to-playlist picker dialog
-  /// Selected playlist index in the add-to-playlist picker dialog
-  pub playlist_picker_selected_index: usize,
-  /// Folder ID the add-to-playlist picker dialog is viewing (0 = root)
-  pub playlist_picker_folder_id: usize,
-  /// Search query narrowing the add-to-playlist picker to matching playlists
-  pub playlist_picker_filter: String,
-  /// Whether typed keys are currently editing [`Self::playlist_picker_filter`]
-  pub playlist_picker_filter_editing: bool,
-
   // Plugin surfaces
   /// Vertical scroll for the focused plugin screen.
   pub plugin_screen_scroll: u16,
@@ -150,10 +124,6 @@ pub struct ViewState {
   pub plugin_popup_scroll: u16,
 
   pub search_tracks_scroll_offset: Cell<usize>,
-  pub search_artists_scroll_offset: Cell<usize>,
-  pub search_albums_scroll_offset: Cell<usize>,
-  pub search_playlists_scroll_offset: Cell<usize>,
-  pub search_shows_scroll_offset: Cell<usize>,
   pub library_scroll_offset: Cell<usize>,
   pub playlist_scroll_offset: Cell<usize>,
   pub settings_scroll_offset: Cell<usize>,

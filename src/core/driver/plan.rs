@@ -1,7 +1,7 @@
 //! Pure per-tick decisions, split out of [`super::Driver::tick`] in the house
 //! style: scalars in, plain data out. Each one used to live inline in the
 //! terminal event loop, where it was untestable without an audio sink, a
-//! Spotify session, or a real clock; here every decision runs against fake
+//! network session, or a real clock; here every decision runs against fake
 //! inputs. The driver probes live state (`player.is_finished()`, `Instant`),
 //! asks these functions what to do, then applies the answer.
 
@@ -10,7 +10,7 @@ use crate::core::art::CoverArtStatus;
 use crate::infra::queue::{advance_decision, Decision, RepeatMode};
 use std::time::{Duration, Instant};
 
-/// How often the active non-Spotify playback session is persisted to
+/// How often the active playback session is persisted to
 /// `last_session.yml` while it keeps playing.
 const SESSION_SAVE_INTERVAL: Duration = Duration::from_secs(3);
 
@@ -104,7 +104,7 @@ pub(super) enum CoverArtAction {
   Fetch,
   /// Same art as already requested: leave everything alone.
   Keep,
-  /// No art to show (radio, art disabled, nothing playing): drop any stale
+  /// No art to show (no cover, art disabled, nothing playing): drop any stale
   /// image once, then show `status` in the pane.
   Drop { clear: bool, status: CoverArtStatus },
 }
@@ -136,16 +136,6 @@ pub(super) fn cover_art_action(
   }
 }
 
-/// The base62 id of the playing Spotify track, if it can have an audio analysis.
-pub(super) fn audio_analysis_track(
-  session: bool,
-  is_track: bool,
-  item_id: Option<&str>,
-) -> Option<&str> {
-  let base62 = |id: &&str| id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric());
-  item_id.filter(|id| session && is_track && base62(id))
-}
-
 /// How far the position must fall back on the same item for it to count as
 /// playing again (repeat one, the same track twice in a row) rather than as
 /// the clock catching up.
@@ -170,8 +160,6 @@ pub(super) fn playback_transition(last: &PlaybackMark, now: &PlaybackMark) -> bo
 mod tests {
   use super::*;
 
-  const TRACK: &str = "0DiWol3AO6WpXZgp0goxAV";
-
   fn mark(uri: Option<&str>, progress_ms: u128) -> PlaybackMark {
     PlaybackMark {
       uri: uri.map(str::to_string),
@@ -182,12 +170,12 @@ mod tests {
   #[test]
   fn another_item_is_a_playback_transition() {
     assert!(playback_transition(
-      &mark(Some("spotify:track:a"), 90_000),
-      &mark(Some("spotify:track:b"), 0)
+      &mark(Some("qobuz:track:a"), 90_000),
+      &mark(Some("qobuz:track:b"), 0)
     ));
     assert!(playback_transition(
       &mark(None, 0),
-      &mark(Some("spotify:track:a"), 0)
+      &mark(Some("qobuz:track:a"), 0)
     ));
   }
 
@@ -195,8 +183,8 @@ mod tests {
   fn the_same_item_starting_again_is_a_playback_transition() {
     assert!(
       playback_transition(
-        &mark(Some("spotify:track:a"), 178_000),
-        &mark(Some("spotify:track:a"), 400)
+        &mark(Some("qobuz:track:a"), 178_000),
+        &mark(Some("qobuz:track:a"), 400)
       ),
       "repeat one, or the same track twice in a row"
     );
@@ -204,34 +192,16 @@ mod tests {
 
   #[test]
   fn the_same_item_playing_on_is_no_transition() {
-    let playing = mark(Some("spotify:track:a"), 60_000);
+    let playing = mark(Some("qobuz:track:a"), 60_000);
     assert!(!playback_transition(
       &playing,
-      &mark(Some("spotify:track:a"), 61_000)
+      &mark(Some("qobuz:track:a"), 61_000)
     ));
     assert!(
-      !playback_transition(&playing, &mark(Some("spotify:track:a"), 58_500)),
+      !playback_transition(&playing, &mark(Some("qobuz:track:a"), 58_500)),
       "a small step back is the polled clock catching up"
     );
     assert!(!playback_transition(&mark(None, 0), &mark(None, 0)));
-  }
-
-  #[test]
-  fn a_spotify_track_has_an_analysis_only_with_a_session() {
-    assert_eq!(audio_analysis_track(true, true, Some(TRACK)), Some(TRACK));
-    assert_eq!(audio_analysis_track(false, true, Some(TRACK)), None);
-  }
-
-  #[test]
-  fn episodes_spotify_local_files_and_hex_ids_get_no_analysis() {
-    assert_eq!(audio_analysis_track(true, false, Some(TRACK)), None);
-    for id in [
-      "spotify:local:Daft+Punk:Discovery:One+More+Time:320",
-      "c0ffee00c0ffee00c0ffee00c0ffee00",
-    ] {
-      assert_eq!(audio_analysis_track(true, true, Some(id)), None, "{id}");
-    }
-    assert_eq!(audio_analysis_track(true, true, None), None);
   }
 
   #[test]
@@ -373,7 +343,7 @@ mod tests {
 
     #[test]
     fn losing_the_art_drops_the_stale_image_once() {
-      // A track with art was playing; now radio (no art) is: clear once...
+      // A track with art was playing; now one without art is: clear once...
       assert_eq!(
         cover_art_action(None, Some("url-a"), true, true, true),
         CoverArtAction::Drop {

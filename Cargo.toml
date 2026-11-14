@@ -1,13 +1,12 @@
 [package]
-name = "spotatui"
+name = "qbal"
 description = "Terminal music player for Qobuz"
-homepage = "https://spotatui.com"
-documentation = "https://github.com/LargeModGames/spotatui/tree/main/docs"
-repository = "https://github.com/LargeModGames/spotatui"
+documentation = "https://github.com/mathBordin/ghosbuz/tree/main/docs"
+repository = "https://github.com/mathBordin/ghosbuz"
 keywords = ["music-player", "qobuz", "tui", "terminal", "music"]
 categories = ["command-line-utilities", "multimedia::audio"]
-version = "0.48.0"
-authors = ["LargeModGames <LargeModGames@gmail.com>"]
+version = "0.1.0"
+authors = ["mathBordin", "LargeModGames (upstream spotatui)"]
 edition = "2021"
 rust-version = "1.90"
 license = "MIT"
@@ -85,7 +84,7 @@ stream-download = { version = "0.24", default-features = false, features = ["req
 rodio = { version = "0.22" }
 
 # Streaming dependencies: our maintained librespot fork, published on crates.io
-# as spotatui-librespot-* (upstream 0.8.0 + CDN 530 fallback for silent playback,
+# as qbal-librespot-* (upstream 0.8.0 + CDN 530 fallback for silent playback,
 # dealer reconnect/session-loss recovery, OAuth callback listener hardening,
 # previous-on-first-track restarting instead of stopping (#366), Spirc ignoring
 # play-request ids of direct `Player::load`s so a queued track's end cannot stop
@@ -93,7 +92,7 @@ rodio = { version = "0.22" }
 # and the SpClient calls of the internal API that replaces the Web API
 # - upstream 0.8 cannot be substituted). The `package =` rename keeps `librespot_*` imports and
 # `librespot-*/feature` refs unchanged; `=`-pinned so all seven crates upgrade in
-# lockstep. See SPOTATUI_FORK.md in the fork repo for the carried patches.
+# lockstep. See QBAL_FORK.md in the fork repo for the carried patches.
 # No default features: the TLS stack is chosen per target below.
 futures = "0.3.32"
 url = "2.5"
@@ -105,45 +104,20 @@ keepawake = "0.6"
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
 pipewire = { version = "0.10", optional = true }
 
-[target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
-arboard = { version = "3.4", features = ["wayland-data-control"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }
-arboard = "3.4"
-# On Windows we default to rodio for audio output.
-# Without this, librespot-playback falls back to the `pipe` sink which writes raw audio bytes
-# to stdout (breaking the TUI and producing no audible output).
-smtc-tokio = { version = "0.1.0", optional = true }
-
 # MPRIS D-Bus support (Linux only)
 [target.'cfg(target_os = "linux")'.dependencies]
 mpris-server = { version = "0.10", optional = true }
 
-# macOS: librespot-playback + Now Playing / Media Key support
-# On macOS we use portaudio-backend by default to avoid the pipe sink fallback (which outputs to stdout).
-# Rodio has compatibility issues with macOS CoreAudio and Bluetooth devices (AirPods, etc.)
-# causing SIGSEGV crashes. See Issue #9 and #20.
-[target.'cfg(target_os = "macos")'.dependencies]
-arboard = "3.4"
-objc2-media-player = { version = "0.3", optional = true }
-objc2-foundation = { version = "0.3", optional = true }
-objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["NSImage"] }
-objc2 = { version = "0.6", optional = true }
-block2 = { version = "0.6", optional = true }
-
 [features]
-default = ["audio-viz-cpal", "macos-media", "discord-rpc", "mpris", "windows-media", "scripting", "tui"]
+default = ["audio-viz-cpal", "discord-rpc", "mpris", "scripting", "tui"]
 # The terminal frontend: gates `mod tui` and owns the terminal-only crates.
 # The headless CI leg omits it, so any `crate::tui` import from core/infra/cli
 # is a compile error there - that is what keeps a second frontend from silently
 # re-coupling to the terminal one.
 tui = ["dep:unicode-segmentation", "dep:ratatui", "dep:crossterm", "dep:tui-bar-graph", "dep:colorgrad"]
 audio-viz = ["realfft", "pipewire"]
-audio-viz-cpal = ["realfft", "cpal"]  # Alternative for Windows/macOS or if pipewire issues
-mpris = ["mpris-server"]  # MPRIS D-Bus integration (Linux only)
-macos-media = ["objc2-media-player", "objc2-foundation", "objc2-app-kit", "objc2", "block2"]  # macOS Now Playing integration
-windows-media = ["smtc-tokio"] # windows SMTC integration
+audio-viz-cpal = ["realfft", "cpal"]  # ALSA monitor/loopback capture through cpal
+mpris = ["mpris-server"]  # MPRIS D-Bus integration
 discord-rpc = ["discord-rich-presence"]
 # The frontend-agnostic decode half of cover art: fetch + `image`-decode into
 # the store frontends render from (also feeds the adaptive theme's palette
@@ -160,13 +134,13 @@ tempfile = "3"
 openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [lib]
-name = "spotatui"
+name = "qbal"
 path = "src/lib.rs"
 
 [[bin]]
 bench = false
-path = "src/bin/spotatui.rs"
-name = "spotatui"
+path = "src/bin/qbal.rs"
+name = "qbal"
 
 [profile.release]
 codegen-units = 1  # Better optimization
@@ -175,13 +149,13 @@ opt-level = "s"    # Prioritize small binary size
 strip = true       # Remove debug symbols
 
 [package.metadata.deb]
-maintainer = "LargeModGames <LargeModGames@gmail.com>"
-copyright = "2025, LargeModGames"
+maintainer = "mathBordin"
+copyright = "2021 Alexander Keliris, 2025 LargeModGames, 2026 mathBordin"
 license-file = ["LICENSE", "4"]
 depends = "$auto"
 section = "utils"
 priority = "optional"
 assets = [
-  ["target/release/spotatui", "usr/bin/", "755"],
-  ["README.md", "usr/share/doc/spotatui/README", "644"],
+  ["target/release/qbal", "usr/bin/", "755"],
+  ["README.md", "usr/share/doc/qbal/README", "644"],
 ]

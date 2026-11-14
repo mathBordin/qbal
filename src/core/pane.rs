@@ -16,7 +16,8 @@ pub enum Pane {
   CoverArt,
   Queue,
   MiniPlayer,
-  /// The GUI's now-playing panel; the TUI never opens it.
+  /// A now-playing panel some older saved layouts name; the terminal never
+  /// opens it and drops it when the layout loads.
   NowPlaying,
 }
 

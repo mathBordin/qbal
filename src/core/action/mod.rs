@@ -3,31 +3,26 @@
 //!
 //! Every producer that is not the network layer's own result handling routes
 //! its `App` mutations through here: the Lua scripting engine drains its
-//! queued actions into `apply`, the mutating DJ/MCP tools call `apply`
-//! directly, and the terminal handlers adopt it screen by screen as the
-//! conversion sub-PRs land. Each arm delegates to the same ownership-aware
-//! `App` method the equivalent keybinding uses, so the
-//! `queue_owns_playback()` / `active_decoded_source()` /
-//! native-streaming predicate order is evaluated in one place and the
-//! native fast paths and throttling/coalescing are honoured automatically.
+//! queued actions into `apply`, and the terminal handlers adopt it screen by
+//! screen. Each arm delegates to the same ownership-aware `App` method the
+//! equivalent keybinding uses, so the `queue_owns_playback()` /
+//! `active_decoded_source()` predicate order is evaluated in one place and
+//! throttling/coalescing are honoured automatically.
 //!
 //! Design rules (enforced by review plus the gates in `src/gates.rs`):
 //!
-//! - No rspotify type appears in [`Action`]; payloads are strings, scalars,
-//!   and the `core::plugin_api` snapshot types.
+//! - Payloads are strings, scalars, and the `core::plugin_api` snapshot types.
 //! - No raw `IoEvent` payload either: a producer that can smuggle an
 //!   arbitrary event is outside the vocabulary. Arms may dispatch events,
 //!   but the variant set is the contract.
-//! - Playback starts go through `App::start_playback_uris` /
-//!   `App::start_playback_context`; no arm builds a `StartPlayback` event
-//!   by hand.
+//! - Playback starts go through `App::start_playback_uris`; no arm builds a
+//!   `StartPlayback` event by hand.
 //! - Matches in this module are exhaustive: the deny below refuses a
 //!   catch-all arm, and the `wildcard_arms_in_action_tree` gate keeps the
 //!   count at zero, tests included.
 //! - Address by identity (URIs, ids, names), never by list ordinal.
 //!
-//! The serde derives are the wire shape for future frontend codegen; they
-//! are deliberately in place before any second frontend consumes them.
+//! The serde derives give the vocabulary a stable wire shape.
 
 // The compiler half of the catch-all gate: a new variant must be placed.
 #![deny(
@@ -39,7 +34,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::plugin_api::{PluginPopup, PluginScreenContent, TrackInfo};
 use crate::core::sort::{SortContext, SortField};
-use crate::core::source::Source;
 use crate::core::theme::{Color, ThemeField};
 
 mod apply;
@@ -80,8 +74,8 @@ pub enum Action {
   VolumeDown,
   /// Ensure shuffle matches the given state (intent, not a toggle).
   SetShuffle(bool),
-  /// Toggle shuffle, matching the shuffle key exactly (source-gated: decoded
-  /// queues reorder in place, radio and the native queue slot no-op).
+  /// Toggle shuffle, matching the shuffle key exactly (a playlist reorders in
+  /// place; the native queue slot reports that shuffle does not apply).
   ToggleShuffle,
   /// Cycle repeat off, then context, then track, matching the repeat key.
   CycleRepeat,
@@ -95,22 +89,7 @@ pub enum Action {
     uris: Vec<String>,
     offset: Option<usize>,
   },
-  /// Play a Spotify context URI (album/playlist/artist/show), optionally
-  /// from a 0-based track offset.
-  PlayContext {
-    uri: String,
-    offset: Option<usize>,
-  },
-  /// Play one track URI as the first track inside a Spotify context URI:
-  /// the playlist Enter-start that keeps the selected track first even with
-  /// shuffle on (the network layer deliberately does not trim the uri list
-  /// when a context is present).
-  PlayTrackInContext {
-    context: String,
-    track: String,
-  },
-  /// Add one track to the native cross-source queue (the queue key). Distinct
-  /// from [`Action::AddToQueue`], the Spotify Web API queue.
+  /// Add one track to the native queue (the queue key).
   QueueTrack(TrackInfo),
   /// Jump to one native-queue item, addressed by URI with the 0-based position
   /// as the tie-breaker for duplicates.
@@ -130,11 +109,7 @@ pub enum Action {
     from: usize,
     to: usize,
   },
-  /// Empty the native queue; the track playing now keeps playing.
-  ClearQueue,
-  /// Run a search against the active browse source's catalog; falls back to
-  /// the Spotify catalog when the active source has no own search (the
-  /// Local-files scope behaves this way too).
+  /// Run a search against the active source's catalog.
   SearchActiveSource(String),
   /// message, ttl_secs
   Notify(String, u64),
@@ -146,12 +121,6 @@ pub enum Action {
   Navigate(NavTarget),
   /// Pop the navigation stack (same as the back key).
   Back,
-  /// Fetch the next page of a paginated list surface - the shared "hit the
-  /// end of the list" consequence that GUI infinite scroll also fires.
-  /// Self-guarding: a no-op when no next page exists. Page-flipped surfaces
-  /// (saved albums, saved shows, show episodes) move the visible page when it
-  /// is cached.
-  LoadMore(ListTarget),
   /// Sort a list surface by a field, like the sort menu: the field already
   /// in effect flips the direction instead.
   Sort {
@@ -166,16 +135,10 @@ pub enum Action {
   /// Open a library sidebar section and fetch its data, mirroring the
   /// library row's Enter consequence exactly.
   OpenLibrary(LibraryTarget),
-  /// Switch the active browse source (and persist the choice), then fetch
-  /// the sidebar data that source needs. Browse scope only: never
-  /// interrupts playback.
-  SelectSource(Source),
   /// Generate a listening recap. The period is resolved at apply time: the
   /// selected period on the Stats screen when that screen is current, 30
   /// days anywhere else.
   GenerateRecap,
-  /// Generate a listening recap for the selected Stats period, whatever the route.
-  GenerateStatsRecap,
   /// Step the Stats period through its ring and reload; relative because the
   /// period type is not part of the wire shape.
   CycleStatsPeriod {
@@ -195,17 +158,6 @@ pub enum Action {
   /// Commit the Settings screen's staged rows and write `config.yml`; the
   /// outcome says whether the write succeeded.
   SaveSettings,
-  /// Set one settings row and write `config.yml`; the outcome says whether
-  /// the write succeeded. An unknown id or a value of the wrong kind changes nothing.
-  SetSetting {
-    id: String,
-    value: SettingInput,
-  },
-  /// Press the button of one settings row (Soloist Path: download from
-  /// Spotify). A row without a button changes nothing.
-  PressSettingButton {
-    id: String,
-  },
   /// Cycle the visualizer style and persist it.
   CycleVisualizerStyle,
   /// Open the monthly recap in the browser and close its popup.
@@ -218,16 +170,6 @@ pub enum Action {
   /// and show the next pending one.
   DismissAnnouncement {
     id: String,
-  },
-  /// Open the link of the active or a fetched announcement with this id in the
-  /// system browser; the URL comes from the feed, never the producer.
-  OpenAnnouncementUrl {
-    id: String,
-  },
-  /// Open a Welcome page link in the system browser: the Discord invite or a
-  /// link target in the embedded changelog, any other URL is ignored.
-  OpenChangelogLink {
-    url: String,
   },
   /// Publish (retained) content for a registered plugin screen.
   SetScreenContent {
@@ -249,16 +191,7 @@ pub enum ActionOutcome {
   SettingsSaved { saved: bool },
 }
 
-/// A settings row's new value from a frontend; a choice row takes `Text`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SettingInput {
-  Bool(bool),
-  Number(i64),
-  Text(String),
-}
-
-/// An absolute repeat mode, mirroring Spotify's three states without the
-/// rspotify type.
+/// An absolute repeat mode: off, one track, or the whole list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepeatSetting {
   Off,
@@ -290,7 +223,7 @@ impl NavTarget {
     NavTarget::MiniPlayer,
   ];
 
-  /// The name used by `spotatui.navigate(name)`.
+  /// The name used by `qbal.navigate(name)`.
   pub fn name(self) -> &'static str {
     match self {
       NavTarget::Home => "home",
@@ -307,24 +240,6 @@ impl NavTarget {
   pub fn from_name(name: &str) -> Option<NavTarget> {
     NavTarget::ALL.into_iter().find(|t| t.name() == name)
   }
-}
-
-/// A paginated list surface [`Action::LoadMore`] can advance. Grows
-/// additively as later screens adopt continuous pagination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ListTarget {
-  /// The open playlist's track table (MyPlaylists / PlaylistSearch).
-  PlaylistTracks,
-  /// The liked-songs (saved tracks) table.
-  SavedTracks,
-  /// The saved-albums list (page-flipped, not continuous).
-  SavedAlbums,
-  /// The saved-podcasts list (page-flipped, not continuous).
-  SavedShows,
-  /// The followed-artists list (cursor-paged, continuous).
-  SavedArtists,
-  /// The open show's episode list; the show is resolved at apply time.
-  ShowEpisodes,
 }
 
 /// A resource deep-link [`Action::Open`] can address, by id.

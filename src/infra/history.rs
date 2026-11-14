@@ -95,15 +95,6 @@ struct HistoryCollector {
   last_observed_at: Option<Instant>,
 }
 
-/// Decides when the cloud now-playing state needs an update. Pushes on track
-/// change, play/pause flip, seek discontinuity, and a heartbeat (also while
-/// paused, so the public widget can show "paused" instead of decaying to
-/// offline); clears once when track playback stops mid-session.
-#[derive(Default)]
-struct NowPlayingTracker {}
-
-impl NowPlayingTracker {}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecapPeriod {
   SevenDays,
@@ -159,28 +150,13 @@ pub struct StatsData {
 
 const STATS_LIST_LIMIT: usize = 20;
 
-/// `filtered` is the selected period's qualified listens and `listens` every recorded one.
+/// `filtered` is the selected period's qualified listens.
 /// Build frontend details from counts and durations in the selected language.
 pub fn build_stats_data_with(
   filtered: &[ListenRecord],
-  listens: &[ListenRecord],
-  _period: RecapPeriod,
   strings: &crate::core::i18n::Strings,
 ) -> StatsData {
-  let now = Local::now();
-  let qualified: Vec<ListenRecord> = listens
-    .iter()
-    .filter(|record| record.qualified)
-    .cloned()
-    .collect();
-  let _week: Vec<ListenRecord> = qualified
-    .iter()
-    .filter(|record| in_period(record, RecapPeriod::SevenDays, &now))
-    .cloned()
-    .collect();
   let top_artists = aggregate_top_artists_with(filtered, STATS_LIST_LIMIT, strings);
-  let _all_time = aggregate_top_artists_with(&qualified, usize::MAX, strings);
-  let _in_period_ranks = aggregate_top_artists_with(filtered, usize::MAX, strings);
   StatsData {
     total_plays: filtered.len(),
     total_time_ms: filtered.iter().map(|record| record.listened_ms).sum(),
@@ -277,7 +253,6 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
     let mut collector = HistoryCollector::default();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
     let mut last_auto_check = Instant::now();
-    let _http_client = crate::infra::network::requests::shared_http_client().clone();
     let mut network_tasks: JoinSet<()> = JoinSet::new();
 
     // Check on startup
@@ -288,14 +263,11 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
     // re-reading the ever-growing listens file after every track).
     let mut day_totals: Option<BTreeMap<NaiveDate, u64>> = match tokio::task::spawn_blocking(|| {
       let listens = load_listens()?;
-      Ok::<_, anyhow::Error>((
-        qualified_day_totals(&listens),
-        latest_playlist_listens(&listens),
-      ))
+      Ok::<_, anyhow::Error>(qualified_day_totals(&listens))
     })
     .await
     {
-      Ok(Ok((totals, _playlist_listens))) => Some(totals),
+      Ok(Ok(totals)) => Some(totals),
       Ok(Err(error)) => {
         log::warn!("failed to load listens for streak cache: {}", error);
         None
@@ -308,11 +280,6 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
     if let Some(totals) = &day_totals {
       app.lock().await.listening_streaks = Some(streaks_from_day_totals(totals));
     }
-
-    let _history_sync_in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    // Now-playing tracking state
-    let _now_playing_tracker = NowPlayingTracker::default();
 
     loop {
       tokio::select! {
@@ -373,8 +340,8 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
 /// monthly check and the in-app `generate_recap` key.
 pub fn recap_output_path() -> Result<PathBuf> {
   crate::core::paths::app_state_dir()
-    .map(|dir| dir.join("spotatui-recap.html"))
-    .ok_or_else(|| anyhow!("cannot resolve the spotatui state directory"))
+    .map(|dir| dir.join("qbal-recap.html"))
+    .ok_or_else(|| anyhow!("cannot resolve the qbal state directory"))
 }
 
 fn last_recap_file_path() -> Result<PathBuf> {
@@ -538,17 +505,6 @@ pub fn load_listens() -> Result<Vec<ListenRecord>> {
   }
 
   Ok(listens)
-}
-
-fn latest_playlist_listens(listens: &[ListenRecord]) -> crate::core::sort::PlaylistLastListens {
-  let mut latest = crate::core::sort::PlaylistLastListens::new();
-  for record in listens {
-    if let Some(uri) = record.context_uri.as_deref().filter(|_uri| false) {
-      let last = latest.entry(uri.to_string()).or_insert(record.ended_at);
-      *last = (*last).max(record.ended_at);
-    }
-  }
-  latest
 }
 
 impl HistoryCollector {
@@ -756,7 +712,7 @@ fn listens_file_path() -> Result<PathBuf> {
 fn history_state_file_path(file_name: &str) -> Result<PathBuf> {
   crate::core::paths::app_state_dir()
     .map(|dir| dir.join(HISTORY_SUBDIR).join(file_name))
-    .ok_or_else(|| anyhow!("cannot resolve the spotatui state directory"))
+    .ok_or_else(|| anyhow!("cannot resolve the qbal state directory"))
 }
 
 fn append_listen_record(record: &ListenRecord) -> Result<()> {
@@ -1457,7 +1413,7 @@ fn render_history_recap_html_with(
 <body>
   <div class="app-container">
     <header class="app-header">
-      <h1><span class="brand-logo">spota</span><span class="brand-accent">tui</span></h1>
+      <h1><span class="brand-accent">Q</span><span class="brand-logo">bal</span></h1>
       <p>{recap_title}</p>
       <p class="app-desc">{summary}</p>
     </header>
@@ -1475,7 +1431,7 @@ fn render_history_recap_html_with(
             <div class="card-glow"></div>
 
             <div class="card-header">
-              <span class="card-brand">spota<span style="color:var(--accent)">tui</span></span>
+              <span class="card-brand"><span style="color:var(--accent)">Q</span>bal</span>
               <span id="card-period" class="period-badge">{title}</span>
             </div>
             
@@ -1514,8 +1470,8 @@ fn render_history_recap_html_with(
             </div>
             
             <div class="card-footer">
-              <span class="card-footer-left">{generated_by}<strong>spotatui</strong></span>
-              <span class="card-footer-right">github.com/LargeModGames/spotatui</span>
+              <span class="card-footer-left">{generated_by}<strong>Qbal</strong></span>
+              <span class="card-footer-right">github.com/mathBordin/ghosbuz</span>
             </div>
           </div>
         </div>
@@ -1570,7 +1526,7 @@ fn render_history_recap_html_with(
   </div>
 
   <script>
-    // Raw (JS-escaped, not HTML-escaped) card data emitted by spotatui: the
+    // Raw (JS-escaped, not HTML-escaped) card data emitted by qbal: the
     // requested period first, the toggle alternative second.
     const CARDS = [{card_js}, {alt_card_js}];
     let activeCard = 0;
@@ -1728,10 +1684,10 @@ fn render_history_recap_html_with(
       // Header: brand left, period badge right
       ctx.textAlign = 'left';
       ctx.font = '800 20px "Plus Jakarta Sans", sans-serif';
-      ctx.fillStyle = TEXT;
-      ctx.fillText('spota', 32, 52);
       ctx.fillStyle = ACCENT;
-      ctx.fillText('tui', 32 + ctx.measureText('spota').width, 52);
+      ctx.fillText('Q', 32, 52);
+      ctx.fillStyle = TEXT;
+      ctx.fillText('bal', 32 + ctx.measureText('Q').width, 52);
 
       ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
       const badgeText = card.period.toUpperCase();
@@ -1824,7 +1780,7 @@ fn render_history_recap_html_with(
       ctx.textAlign = 'right';
       ctx.fillStyle = ACCENT;
       ctx.font = '400 11px "JetBrains Mono", monospace';
-      ctx.fillText('github.com/LargeModGames/spotatui', CARD_W - 32, 642);
+      ctx.fillText('github.com/mathBordin/ghosbuz', CARD_W - 32, 642);
       ctx.restore();
 
       // Card border on top of everything
@@ -1858,7 +1814,7 @@ fn render_history_recap_html_with(
           const link = document.createElement('a');
           const dateStr = new Date().toISOString().slice(0, 10);
           const periodSlug = CARDS[activeCard].period.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-          link.download = `spotatui-recap-${{periodSlug}}-${{dateStr}}.png`;
+          link.download = `qbal-recap-${{periodSlug}}-${{dateStr}}.png`;
           link.href = canvas.toDataURL('image/png');
           link.click();
         }} catch (err) {{
@@ -2000,21 +1956,9 @@ pub fn aggregate_top_artists_with(
 ) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
   for record in listens {
-    // Spotify credits one artist per entry, so a name such as "Mumford & Sons"
-    // stays whole. Other sources arrive as one joined string and are split.
-    let credited_separately = record.item_uri.as_deref().is_some_and(|_uri| false);
+    // Artists can arrive as one joined string, so each entry is split.
     for artist_combo in &record.artists {
-      let individual_artists = if credited_separately {
-        let name = artist_combo.trim();
-        if name.is_empty() {
-          Vec::new()
-        } else {
-          vec![name.to_string()]
-        }
-      } else {
-        split_artists(artist_combo)
-      };
-      for artist in individual_artists {
+      for artist in split_artists(artist_combo) {
         let entry = totals.entry(artist).or_insert((0, 0));
         entry.0 += record.listened_ms;
         entry.1 += 1;
@@ -2335,7 +2279,7 @@ mod tests {
       album: "Album".to_string(),
       item_kind: HistoryItemKind::Track,
       item_id: Some(format!("id-{day}")),
-      item_uri: Some(format!("spotify:track:id-{day}")),
+      item_uri: Some(format!("qobuz:track:id-{day}")),
       context_uri: None,
       source: HistoryPlaybackSource::NativeContext,
       image_url: None,
@@ -2409,7 +2353,7 @@ mod tests {
   }
 
   #[test]
-  fn top_artists_counts_each_credited_spotify_artist_separately() {
+  fn top_artists_counts_each_credited_artist_separately() {
     let mut r = record_at(20, 100_000, true);
     r.artists = vec!["Kygo".into(), "Max McNown".into()];
     let top = aggregate_top_artists(&[r], 10);
@@ -2560,13 +2504,12 @@ mod tests {
       source: PlaybackSource::ExternalDevice,
       progress_ms: 10_000,
       is_playing,
-      is_live: false,
       shuffle: false,
       repeat: None,
     }
   }
 
-  /// A paused snapshot of a Subsonic `uri`: paused, so the collector never
+  /// A paused snapshot of `uri`: paused, so the collector never
   /// counts listening time and never appends to the real listens file.
   fn subsonic_snapshot(uri: &str, title: &str, artists: &[&str]) -> PlaybackSnapshot {
     let mut snap = snapshot(title, false);
@@ -2715,13 +2658,13 @@ mod tests {
     let entries = aggregate_top_tracks(&records, 3);
     assert_eq!(entries.len(), 3);
     assert_eq!(entries[0].display, "Track 8 - Artist");
-    assert_eq!(entries[0].uri.as_deref(), Some("spotify:track:id-8"));
+    assert_eq!(entries[0].uri.as_deref(), Some("qobuz:track:id-8"));
   }
 
   #[test]
   fn stats_data_totals_only_reflect_given_records() {
     let records = vec![record_at(20, 100_000, true), record_at(21, 50_000, true)];
-    let stats = build_stats_data_with(&records, &records, RecapPeriod::All, &crate::core::i18n::EN);
+    let stats = build_stats_data_with(&records, &crate::core::i18n::EN);
     assert_eq!(stats.total_plays, 2);
     assert_eq!(stats.total_time_ms, 150_000);
     assert_eq!(stats.top_tracks.len(), 2);
@@ -2745,7 +2688,7 @@ mod tests {
     let hash = html.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
       (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     });
-    assert_eq!(hash, 0x1b2a30a5f7841662);
+    assert_eq!(hash, 0x4f8cf7ce405be707);
   }
 
   #[test]

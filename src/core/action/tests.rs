@@ -1,32 +1,9 @@
-//! Differential tests for `App::apply`: one test per arm (or small arm
-//! family), pinning the exact observable behavior — dispatched `IoEvent`s
-//! and `App` state — that the scripting effect drain had before the port.
-//!
-//! House pattern: `app_with_channel` keeps the `IoEvent` receiver alive;
-//! `IoEvent` derives nothing, so assertions pattern-match. Catch-all match
-//! arms are spelled `_other` because this directory's gate counts bare
-//! wildcard arms.
+//! Tests for `App::apply`.
 
-use super::NavTarget;
+use super::{Action, NavTarget, RepeatSetting};
+use crate::core::app::App;
 use crate::core::theme::ThemeField;
-
-// --- transport ---
-
-// --- transport without a Spotify session ---
-
-// --- jump-to navigation ---
-
-// --- recap ---
-
-// --- playback starts ---
-
-// --- library / playlists ---
-
-// --- status messages ---
-
-// --- navigation ---
-
-// --- plugin surfaces ---
+use crate::infra::queue::RepeatMode;
 
 #[test]
 fn theme_field_names_round_trip() {
@@ -37,43 +14,16 @@ fn theme_field_names_round_trip() {
 }
 
 #[test]
+fn set_repeat_with_nothing_playing_leaves_the_mode_alone() {
+  let mut app = App::default();
+  app.apply(Action::SetRepeat(RepeatSetting::Track));
+  assert_eq!(app.decoded_repeat, RepeatMode::Off);
+}
+
+#[test]
 fn nav_target_names_round_trip() {
   for target in NavTarget::ALL {
     assert_eq!(NavTarget::from_name(target.name()), Some(target));
   }
   assert_eq!(NavTarget::from_name("nowhere"), None);
 }
-
-// --- DJ ---
-
-// --- pagination, open family, source-routed search, library rows, dialogs ---
-
-// --- LoadMore ---
-
-// --- Open family ---
-
-// --- SearchActiveSource (Action::Search stays Spotify-only) ---
-
-// --- playback starts ---
-
-// --- dialogs ---
-
-// --- playlist sync ---
-
-// --- library sections ---
-
-// --- SelectSource ---
-
-// --- the now-playing item family ---
-
-// --- the listening party family ---
-
-// --- decoded-source playlists, sidebar folders and saved stations ---
-
-// --- podcasts, episodes, the native queue and the Discover page ---
-
-// --- the create-playlist form and the friends social graph ---
-
-// --- stats, settings, sort and the native queue ---
-
-// --- the DJ screen's own actions (no-ops without ai-dj) ---

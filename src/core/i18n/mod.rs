@@ -1,10 +1,8 @@
 //! Frontend-neutral, serializable UI messages. Add English fields first; each
 //! translated instance inherits untranslated fields from its English instance.
-pub mod gui;
 pub mod help;
 mod locale;
 mod message;
-pub mod onboarding;
 pub mod popups;
 pub mod recap;
 pub mod screens;
@@ -17,10 +15,8 @@ pub use locale::{system_language, Language};
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct Strings {
   pub recap: recap::RecapStrings,
-  pub onboarding: onboarding::OnboardingStrings,
   pub popups: popups::PopupStrings,
   pub status: StatusStrings,
-  pub gui: gui::GuiStrings,
   pub screens: screens::ScreenStrings,
   pub settings: settings::SettingsStrings,
   pub sidebar: sidebar::SidebarStrings,
@@ -29,13 +25,11 @@ pub struct Strings {
 
 pub static EN: Strings = Strings {
   recap: recap::EN,
-  onboarding: onboarding::EN,
   popups: popups::EN,
   status: StatusStrings {
     app: status_app::EN,
     infra: status_infra::EN,
   },
-  gui: gui::EN,
   screens: screens::EN,
   settings: settings::EN,
   sidebar: sidebar::EN,
@@ -46,13 +40,11 @@ pub static EN: Strings = Strings {
 #[allow(clippy::needless_update)]
 pub static PT_BR: Strings = Strings {
   recap: recap::PT_BR,
-  onboarding: onboarding::PT_BR,
   popups: popups::PT_BR,
   status: StatusStrings {
     app: status_app::PT_BR,
     infra: status_infra::PT_BR,
   },
-  gui: gui::PT_BR,
   screens: screens::PT_BR,
   settings: settings::PT_BR,
   sidebar: sidebar::PT_BR,
@@ -64,13 +56,11 @@ pub static PT_BR: Strings = Strings {
 #[allow(clippy::needless_update)]
 pub static FR: Strings = Strings {
   recap: recap::FR,
-  onboarding: onboarding::FR,
   popups: popups::FR,
   status: StatusStrings {
     app: status_app::FR,
     infra: status_infra::FR,
   },
-  gui: gui::FR,
   screens: screens::FR,
   settings: settings::FR,
   sidebar: sidebar::FR,

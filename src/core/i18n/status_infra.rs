@@ -23,17 +23,13 @@ pub struct InfraStatusStrings {
   pub qobuz_step_stream: &'static str,
   pub qobuz_operation_failed: &'static str,
   pub qobuz_no_full_stream: &'static str,
-  pub music_queue_unsupported: &'static str,
-  pub queue_repeat_unsupported: &'static str,
-  pub queue_shuffle_unsupported: &'static str,
   pub queue_no_uri: &'static str,
   pub queue_finished: &'static str,
   pub audio_disconnected: &'static str,
-  pub source_playback_unavailable: &'static str,
+  pub queue_not_qobuz: &'static str,
   pub queue_play_failed: &'static str,
   pub queue_playing: &'static str,
   pub queue_audio_unavailable: &'static str,
-  pub spotify_not_connected: &'static str,
   pub recap_created: &'static str,
   pub history_failed: &'static str,
   pub recap_failed: &'static str,
@@ -47,13 +43,11 @@ pub struct InfraStatusStrings {
   pub history_this_month: &'static str,
   pub history_this_year: &'static str,
   pub monthly_recap_ready: &'static str,
-  pub queue_local_source: &'static str,
   pub local_root_folder: &'static str,
   pub local_unknown_track: &'static str,
 }
 
-// Each helper's callers sit behind an optional source or frontend, so only the
-// build with all of them (CI's all-sources leg) checks that none is dead.
+// Typed formatters for the templates above.
 impl InfraStatusStrings {
   pub fn audio_init_failed(&self, error: &str) -> String {
     super::format_template(self.audio_init_failed, &[("error", error)])
@@ -72,9 +66,6 @@ impl InfraStatusStrings {
       self.qobuz_operation_failed,
       &[("step", step), ("error", error)],
     )
-  }
-  pub fn source_playback_unavailable(&self, source: &str) -> String {
-    super::format_template(self.source_playback_unavailable, &[("source", source)])
   }
   pub fn queue_play_failed(&self, name: &str, error: &str) -> String {
     super::format_template(self.queue_play_failed, &[("name", name), ("error", error)])
@@ -160,17 +151,13 @@ pub const EN: InfraStatusStrings = InfraStatusStrings {
   qobuz_operation_failed: "Qobuz: {step}: {error}",
   qobuz_no_full_stream:
     "Qobuz did not offer this track in full: streaming needs a paid Qobuz subscription",
-  music_queue_unsupported: "Apple Music tracks can't be queued",
-  queue_repeat_unsupported: "Repeat does not apply to this source",
-  queue_shuffle_unsupported: "Shuffle does not apply to this source",
   queue_no_uri: "Skipped a queued track with no URI",
   queue_finished: "Queue finished",
   audio_disconnected: "Audio output device disconnected.",
-  source_playback_unavailable: "{source} playback isn't available in this build",
+  queue_not_qobuz: "Skipped a queued track: Qbal only plays Qobuz tracks",
   queue_play_failed: "Cannot play {name}: {error}",
   queue_playing: "♪ {name} (queue)",
   queue_audio_unavailable: "No audio output for queue playback: {error}",
-  spotify_not_connected: "Spotify not connected. Press `d` and pick Spotify to log in.",
   recap_created: "Listening recap generated at {path} ({count} listens)",
   history_failed: "failed to load listening history: {error}",
   recap_failed: "Failed to generate recap: {error}",
@@ -184,7 +171,6 @@ pub const EN: InfraStatusStrings = InfraStatusStrings {
   history_this_month: "This Month",
   history_this_year: "This Year",
   monthly_recap_ready: "Monthly listening recap ready at {path} ({count} listens)",
-  queue_local_source: "Local",
   local_root_folder: "(root)",
   local_unknown_track: "Unknown Track",
 };
@@ -214,17 +200,13 @@ pub const PT_BR: InfraStatusStrings = InfraStatusStrings {
   qobuz_operation_failed: "Qobuz: {step}: {error}",
   qobuz_no_full_stream:
     "O Qobuz não ofereceu esta faixa completa: o streaming exige uma assinatura paga do Qobuz",
-  music_queue_unsupported: "Faixas do Apple Music não podem entrar na fila",
-  queue_repeat_unsupported: "Repetir não se aplica a esta fonte",
-  queue_shuffle_unsupported: "O modo aleatório não se aplica a esta fonte",
   queue_no_uri: "Uma faixa da fila sem URI foi pulada",
   queue_finished: "Fila concluída",
   audio_disconnected: "Dispositivo de saída de áudio desconectado.",
-  source_playback_unavailable: "A reprodução de {source} não está disponível nesta versão",
+  queue_not_qobuz: "Faixa da fila ignorada: o Qbal só toca faixas do Qobuz",
   queue_play_failed: "Não é possível tocar {name}: {error}",
   queue_playing: "♪ {name} (fila)",
   queue_audio_unavailable: "Sem saída de áudio para tocar a fila: {error}",
-  spotify_not_connected: "Spotify não conectado.",
   recap_created: "Retrospectiva gerada em {path} ({count} reproduções)",
   history_failed: "falha ao carregar o histórico de reprodução: {error}",
   recap_failed: "Falha ao gerar a retrospectiva: {error}",
@@ -238,7 +220,6 @@ pub const PT_BR: InfraStatusStrings = InfraStatusStrings {
   history_this_month: "Este mês",
   history_this_year: "Este ano",
   monthly_recap_ready: "Retrospectiva mensal pronta em {path} ({count} reproduções)",
-  queue_local_source: "Local",
   local_root_folder: "(raiz)",
   local_unknown_track: "Faixa desconhecida",
   ..EN
@@ -269,17 +250,13 @@ pub const FR: InfraStatusStrings = InfraStatusStrings {
   qobuz_operation_failed: "Qobuz : {step} : {error}",
   qobuz_no_full_stream:
     "Qobuz n'a pas fourni ce titre en entier : le streaming nécessite un abonnement Qobuz payant",
-  music_queue_unsupported: "Les titres Apple Music ne peuvent pas être ajoutés à la file",
-  queue_repeat_unsupported: "La répétition ne s'applique pas à cette source",
-  queue_shuffle_unsupported: "La lecture aléatoire ne s'applique pas à cette source",
   queue_no_uri: "Un titre de la file sans URI a été ignoré",
   queue_finished: "File terminée",
   audio_disconnected: "Périphérique de sortie audio déconnecté.",
-  source_playback_unavailable: "La lecture de {source} n'est pas disponible dans cette version",
+  queue_not_qobuz: "Titre de la file ignoré : Qbal ne lit que des titres Qobuz",
   queue_play_failed: "Impossible de lire {name} : {error}",
   queue_playing: "♪ {name} (file)",
   queue_audio_unavailable: "Aucune sortie audio pour la lecture de la file : {error}",
-  spotify_not_connected: "Spotify non connecté.",
   recap_created: "Bilan d'écoute généré dans {path} ({count} écoutes)",
   history_failed: "échec du chargement de l'historique d'écoute : {error}",
   recap_failed: "Échec de la génération du bilan : {error}",
@@ -293,7 +270,6 @@ pub const FR: InfraStatusStrings = InfraStatusStrings {
   history_this_month: "Ce mois-ci",
   history_this_year: "Cette année",
   monthly_recap_ready: "Bilan mensuel prêt dans {path} ({count} écoutes)",
-  queue_local_source: "Local",
   local_root_folder: "(racine)",
   local_unknown_track: "Titre inconnu",
   ..EN

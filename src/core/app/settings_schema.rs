@@ -80,7 +80,7 @@ impl std::fmt::Debug for SettingValue {
 
 const STARTUP_ROUTE_SETTING_OPTIONS: &[&str] = &["home", "stats"];
 
-/// The startup routes that open populated without a Spotify session.
+/// The startup routes that need nothing before they can open.
 const STARTUP_ROUTE_SESSION_FREE_OPTIONS: &[&str] = &["home", "stats"];
 
 /// What a settings row needs; an unmet key row stays with a hint, any other unmet row is hidden.
@@ -91,57 +91,10 @@ pub(crate) fn setting_requirement(id: &str) -> Requirement {
   }
 }
 
-/// The one button a settings row can carry, beside its value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SettingButton {
-  DownloadSoloist,
-  GetSoloistKey,
-}
-
-pub(crate) fn setting_button(id: &str) -> Option<SettingButton> {
-  match id {
-    "behavior.soloist_path" if false => Some(SettingButton::DownloadSoloist),
-    "behavior.soloist_api_key" if false => Some(SettingButton::GetSoloistKey),
-    _ => None,
-  }
-}
-
-impl App {
-  /// A row's button label, and whether its work runs (the button is then off).
-  pub(crate) fn setting_button_label(&self, id: &str) -> Option<(&'static str, bool)> {
-    let strings = &self.strings().settings;
-    setting_button(id).map(|button| match button {
-      SettingButton::DownloadSoloist if self.soloist_download_runs() => {
-        (strings.soloist_downloading_button, true)
-      }
-      SettingButton::DownloadSoloist => (strings.soloist_download_button, false),
-      SettingButton::GetSoloistKey => (strings.soloist_get_key_button, false),
-    })
-  }
-
-  pub(crate) fn press_setting_button(&mut self, id: &str) {
-    match setting_button(id) {
-      Some(SettingButton::DownloadSoloist) => {}
-      Some(SettingButton::GetSoloistKey) => {
-        self.open_external_url("https://developer.spotify.com/dashboard/soloist");
-      }
-      None => {}
-    }
-  }
-
-  fn soloist_download_runs(&self) -> bool {
-    {
-      false
-    }
-  }
-}
-
 const PLAYLIST_TRACK_SORT_SETTING_OPTIONS: &[&str] = &[
   "default",
   "name",
   "name:desc",
-  "date_added",
-  "date_added:desc",
   "artist",
   "artist:desc",
   "album",
@@ -279,12 +232,6 @@ impl App {
         value: SettingValue::Bool(self.user_config.behavior.enforce_wide_search_bar),
       },
       SettingItem {
-        id: "behavior.group_folders_first".to_string(),
-        name: strings.behavior_group_folders_first_name.to_string(),
-        description: strings.behavior_group_folders_first_description.to_string(),
-        value: SettingValue::Bool(self.user_config.behavior.group_folders_first),
-      },
-      SettingItem {
         id: "behavior.disable_mouse_inputs".to_string(),
         name: strings.behavior_disable_mouse_inputs_name.to_string(),
         description: strings
@@ -303,14 +250,6 @@ impl App {
         name: strings.behavior_enable_discord_rpc_name.to_string(),
         description: strings.behavior_enable_discord_rpc_description.to_string(),
         value: SettingValue::Bool(self.user_config.behavior.enable_discord_rpc),
-      },
-      SettingItem {
-        id: "behavior.stop_after_current_track".to_string(),
-        name: strings.behavior_stop_after_current_track_name.to_string(),
-        description: strings
-          .behavior_stop_after_current_track_description
-          .to_string(),
-        value: SettingValue::Bool(self.user_config.behavior.stop_after_current_track),
       },
       SettingItem {
         id: "behavior.keepawake_enabled".to_string(),
@@ -336,24 +275,6 @@ impl App {
             .name()
             .to_string(),
           crate::core::user_config::StartupBehavior::options(),
-        ),
-      },
-      // The desktop app, which shares this config, captures only on these.
-      #[cfg(any(target_os = "linux", target_os = "windows"))]
-      SettingItem {
-        id: "behavior.player_bar_visualizer".to_string(),
-        name: strings.behavior_player_bar_visualizer_name.to_string(),
-        description: strings
-          .behavior_player_bar_visualizer_description
-          .to_string(),
-        value: SettingValue::Cycle(
-          self
-            .user_config
-            .behavior
-            .player_bar_visualizer
-            .name()
-            .to_string(),
-          crate::core::user_config::PlayerBarVisualizer::options(),
         ),
       },
       SettingItem {
@@ -524,34 +445,10 @@ impl App {
       SettingsCategory::Behavior => self.behavior_setting_items(),
       SettingsCategory::Icons => vec![
         SettingItem {
-          id: "behavior.shuffle_icon".to_string(),
-          name: strings.behavior_shuffle_icon_name.to_string(),
-          description: strings.behavior_shuffle_icon_description.to_string(),
-          value: SettingValue::String(self.user_config.behavior.shuffle_icon.clone()),
-        },
-        SettingItem {
-          id: "behavior.repeat_track_icon".to_string(),
-          name: strings.behavior_repeat_track_icon_name.to_string(),
-          description: strings.behavior_repeat_track_icon_description.to_string(),
-          value: SettingValue::String(self.user_config.behavior.repeat_track_icon.clone()),
-        },
-        SettingItem {
-          id: "behavior.repeat_context_icon".to_string(),
-          name: strings.behavior_repeat_context_icon_name.to_string(),
-          description: strings.behavior_repeat_context_icon_description.to_string(),
-          value: SettingValue::String(self.user_config.behavior.repeat_context_icon.clone()),
-        },
-        SettingItem {
           id: "behavior.playing_icon".to_string(),
           name: strings.behavior_playing_icon_name.to_string(),
           description: strings.behavior_playing_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.playing_icon.clone()),
-        },
-        SettingItem {
-          id: "behavior.paused_icon".to_string(),
-          name: strings.behavior_paused_icon_name.to_string(),
-          description: strings.behavior_paused_icon_description.to_string(),
-          value: SettingValue::String(self.user_config.behavior.paused_icon.clone()),
         },
         SettingItem {
           id: "behavior.gauge_filled_icon".to_string(),
@@ -564,12 +461,6 @@ impl App {
           name: strings.behavior_gauge_unfilled_icon_name.to_string(),
           description: strings.behavior_gauge_unfilled_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.gauge_unfilled_icon.clone()),
-        },
-        SettingItem {
-          id: "behavior.active_source_icon".to_string(),
-          name: strings.behavior_active_source_icon_name.to_string(),
-          description: strings.behavior_active_source_icon_description.to_string(),
-          value: SettingValue::String(self.user_config.behavior.active_source_icon.clone()),
         },
         SettingItem {
           id: "behavior.sort_ascending_icon".to_string(),
@@ -942,7 +833,7 @@ impl App {
         .is_available()
   }
 
-  /// The startup routes the cycle offers; a stored Spotify route stays in it so the cycle cannot strand it.
+  /// The startup routes the cycle offers; a stored route outside the short list keeps the full one so the cycle cannot strand it.
   fn startup_route_options(&self) -> &'static [&'static str] {
     let current = self.user_config.behavior.startup_route.as_str();
     if !STARTUP_ROUTE_SESSION_FREE_OPTIONS.contains(&current) {
@@ -1049,29 +940,6 @@ mod tests {
       app.user_config.behavior.language = crate::core::i18n::Language::En;
       app.refresh_language();
     }
-  }
-
-  #[test]
-  fn the_icons_tab_edits_both_repeat_icons() {
-    let mut app = App::default();
-    app.view.settings_category = SettingsCategory::Icons;
-    app.load_settings_for_category();
-    for (id, value) in [
-      ("behavior.repeat_track_icon", "R1"),
-      ("behavior.repeat_context_icon", "RA"),
-    ] {
-      let item = app
-        .settings_items
-        .iter_mut()
-        .find(|item| item.id == id)
-        .unwrap_or_else(|| panic!("{id} row"));
-      item.value = SettingValue::String(value.to_string());
-    }
-
-    app.apply_settings_changes();
-
-    assert_eq!(app.user_config.behavior.repeat_track_icon, "R1");
-    assert_eq!(app.user_config.behavior.repeat_context_icon, "RA");
   }
 
   fn keybinding_rows_with_f5_help_and_home_search() -> App {

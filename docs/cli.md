@@ -1,146 +1,53 @@
 # CLI
 
-Beyond the terminal UI, spotatui has a command-line interface for playback, search, playlists, sync and plugins.
-
-```bash
-spotatui [OPTIONS] [SUBCOMMAND]
-```
-
-Running `spotatui` with no subcommand starts the terminal UI. `spotatui --help` and `spotatui <subcommand> --help` list every flag.
+Running `qbal` with no subcommand opens the terminal UI. The subcommands below
+work without it.
 
 ## Top-level flags
 
 | Flag | Purpose |
 | --- | --- |
-| `-t, --tick-rate <MS>` | UI tick rate, 1 to 999 ms |
-| `-c, --config <PATH>` | Use another config file |
-| `--reconfigure-auth` | Forget the cached Spotify login and log in again |
+| `-t, --tick-rate <MS>` | UI refresh interval in milliseconds for non-animated screens |
+| `-c, --config <PATH>` | Use this `config.yml` instead of `~/.config/qbal/config.yml` |
 | `--completions <SHELL>` | Print shell completions: `bash`, `zsh`, `fish`, `powershell` or `elvish` |
-| `--play-file <PATH>` | Play a local audio file at startup (local-files builds) |
-| `--debug` | Verbose logging for a bug report, see [Logging](configuration.md#logging) |
-| `-U, --no-update` | Skip the auto-update check for this launch (self-update builds) |
+| `--debug` | Verbose log for bug reports (same as `QBAL_LOG=debug`); works after a subcommand too |
+| `-h, --help` / `-V, --version` | Help and version |
 
-## Output format
-
-`--format` (on `playback`, `play`, `list` and `search`) takes these placeholders: `%a` artist, `%b` album, `%p` playlist, `%t` track, `%h` show, `%u` URI, `%f` flags, `%s` status, `%v` volume, `%d` device, `%r` progress.
-
-## `playback` (alias `pb`)
-
-Control playback on the active device. With no flag it prints the status.
-
-| Flag | Purpose |
-| --- | --- |
-| `-d, --device <NAME>` | Target a device by name |
-| `-t, --toggle` | Pause or resume |
-| `-s, --status` | Print the playback status |
-| `--share-track` / `--share-album` | Print the URL of the current track or album (use alone) |
-| `--transfer <NAME>` | Move playback to another device |
-| `--like` / `--dislike` | Like or unlike the current track |
-| `--shuffle` | Toggle shuffle |
-| `--repeat` | Cycle the repeat mode |
-| `-n, --next` | Next track (repeat the flag to skip more) |
-| `-p, --previous` | Previous track (twice goes to the actual previous track) |
-| `--seek <±SECONDS>` | Seek relative (`+10`, `-10`) or absolute (`10`) |
-| `-v, --volume <0-100>` | Set the volume |
-
-`--next` and `--previous` cannot be combined with other flags.
+Install completions, for example for bash:
 
 ```bash
-spotatui pb --toggle
-spotatui pb --volume 60
+qbal --completions bash > ~/.local/share/bash-completion/completions/qbal
 ```
-
-## `play` (alias `p`)
-
-Play a Spotify URI, or search by name and play the first match. Give exactly one of `--uri` or `--name`.
-
-| Flag | Purpose |
-| --- | --- |
-| `-u, --uri <URI>` | A `spotify:track:`, `album:`, `artist:`, `playlist:` or `show:` URI |
-| `-n, --name <NAME>` | Search and play the first match; needs one type flag below |
-| `-b, --album` / `-a, --artist` / `-t, --track` / `-w, --show` / `-p, --playlist` | What to search for |
-| `-q, --queue` | Queue the track instead of playing it (tracks only) |
-| `-r, --random` | Play a random track (playlists only) |
-| `-d, --device <NAME>` | Target a device by name |
-
-```bash
-spotatui play --track --name "bohemian rhapsody"
-spotatui play --playlist --name "Your Playlist" --random
-```
-
-## `list` (alias `l`)
-
-| Flag | Purpose |
-| --- | --- |
-| `-d, --devices` | List devices |
-| `-p, --playlists` | List your playlists |
-| `--liked` | List your liked songs |
-| `--playlist-tracks <URI>` | List the tracks of a playlist, given its `spotify:playlist:` URI or `open.spotify.com/playlist/` link |
-| `--limit <N>` | Maximum results: 1-50, or any number of tracks with `--playlist-tracks` |
-
-With `--playlist-tracks`, every track of the playlist is listed unless `--limit` stops it earlier, and the default format is `%t - %a (%u)`. A playlist episode fills `%t` with its name and `%h` with its show.
-
-```bash
-spotatui list --liked --limit 50
-spotatui list --playlist-tracks spotify:playlist:37i9dQZF1DXcBWIGoYBM5M --format '%t - %a'
-spotatui list --playlist-tracks "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abc" --limit 20
-```
-
-## `search` (alias `s`)
-
-```bash
-spotatui search "daft punk" --artists --limit 10
-```
-
-| Flag | Purpose |
-| --- | --- |
-| `<SEARCH>` | The query |
-| `-b, --albums` / `-a, --artists` / `-p, --playlists` / `-t, --tracks` / `-w, --shows` | What to search |
-| `--limit <1-10>` | Maximum results |
-
-## `sync`
-
-Sync the linked playlists across sources (see [Playlist sync](playlist-sync.md)). It needs no Spotify device and exits non-zero when the sync fails.
-
-| Flag | Purpose |
-| --- | --- |
-| `--link <NAME>` | Only the link with this master playlist name or id |
-| `--dry-run` | Report what would change, write nothing |
 
 ## `history recap`
 
 Make a shareable HTML recap from your local listening history.
 
 ```bash
-spotatui history recap --period 30d --output recap.html
+qbal history recap --period 30d --output recap.html
 ```
 
 | Flag | Purpose |
 | --- | --- |
 | `--period <PERIOD>` | `7d`, `30d` (default), `month`, `year` or `all` |
-| `-o, --output <PATH>` | Output file (default `spotatui-recap.html`) |
-
-## `mcp`
-
-The MCP server for coding agents (mcp-server builds, which include every prebuilt terminal binary; the desktop app has no `spotatui mcp`). `spotatui mcp` is the stdio server an agent starts; `spotatui mcp status` checks the setup and exits non-zero when it is not ready (`--json` for machine-readable output). See [MCP setup](mcp-setup.md).
+| `-o, --output <PATH>` | Output file (default `qbal-recap.html`) |
 
 ## `plugin`
 
-Install and manage Lua plugins (needs `git`). See [Scripting](scripting.md).
+Install and manage Lua plugins (needs `git`). Plugins are cloned into
+`~/.config/qbal/plugins/<name>/`. See [Scripting](scripting.md).
 
 ```bash
-spotatui plugin add owner/repo [--force]   # or a full git URL
-spotatui plugin list                       # alias: ls
-spotatui plugin remove <NAME>              # alias: rm
-spotatui plugin update [NAME]
-spotatui plugin new <NAME> [--force]
+qbal plugin add owner/repo [--force]   # or a full git URL
+qbal plugin list                       # alias: ls
+qbal plugin remove <NAME>              # alias: rm
+qbal plugin update [NAME]
+qbal plugin new <NAME> [--force]
 ```
 
-## `update`
+## Environment variables
 
-Self-update builds only.
-
-```bash
-spotatui update            # print the current and the latest version
-spotatui update --install  # download, check, and install the latest version (-i)
-```
+| Variable | Purpose |
+| --- | --- |
+| `QBAL_LOG` | Log level: `error`, `warn`, `info` (default), `debug` or `trace` |
+| `QBAL_DISCORD_APP_ID` | Discord application id for Rich Presence (see [Configuration](configuration.md#discord-rich-presence)) |

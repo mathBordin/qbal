@@ -12,7 +12,7 @@ pub struct SessionPlay {
   pub title: String,
   pub artists: Vec<String>,
   pub album: String,
-  /// The scheme names the source; `None` for a Spotify local file.
+  /// The scheme names the source; `None` when the track has no URI.
   pub uri: Option<String>,
   pub image_url: Option<String>,
 }
@@ -26,6 +26,5 @@ impl App {
       self.session_plays.remove(0);
     }
     self.session_plays.push(play);
-    self.display_revisions.bump(DisplayDomain::Session);
   }
 }

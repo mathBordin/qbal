@@ -7,11 +7,6 @@ impl App {
     // Apply settings to user_config and save to file
     self.apply_settings_changes();
 
-    #[cfg(target_os = "macos")]
-    if self.user_config.keys.open_settings != Key::Ctrl(',') {
-      self.keybinding_runtime.effective_open_settings = None;
-      self.keybinding_runtime.fallback_reason = None;
-    }
     if let Err(e) = self.user_config.save_config() {
       let message = self.strings().settings.save_failed(&e.to_string());
       self.handle_error_with_message(anyhow::anyhow!("Failed to save settings: {}", e), message);
@@ -22,66 +17,22 @@ impl App {
     true
   }
 
-  /// Set one Behavior row and write `config.yml`, past the Settings screen's staged rows.
-  pub(crate) fn set_setting(&mut self, id: &str, input: crate::core::action::SettingInput) -> bool {
-    use crate::core::action::SettingInput;
-    let Some(mut item) = self
-      .behavior_setting_items()
-      .into_iter()
-      .find(|item| item.id == id && self.setting_offered(item))
-    else {
-      return false;
-    };
-    item.value = match (item.value, input) {
-      (SettingValue::Bool(_), SettingInput::Bool(v)) => SettingValue::Bool(v),
-      (SettingValue::Number(_), SettingInput::Number(v)) => SettingValue::Number(v),
-      (SettingValue::String(_), SettingInput::Text(v)) => SettingValue::String(v),
-      (SettingValue::Cycle(_, options), SettingInput::Text(v)) if options.contains(&v.as_str()) => {
-        SettingValue::Cycle(v, options)
-      }
-      _ => return false,
-    };
-    let staged = std::mem::replace(&mut self.settings_items, vec![item]);
-    let staged_saved = std::mem::take(&mut self.settings_saved_items);
-    let saved = self.save_settings_from_items();
-    self.settings_items = staged;
-    self.settings_saved_items = staged_saved;
-    self.refresh_settings_labels();
-    // Also after a failed write: the live value changed all the same.
-    self.display_revisions.bump(DisplayDomain::Settings);
-    saved
-  }
-
   /// Override live theme colors field by field, the runtime `set_theme` path.
   pub(crate) fn set_theme_colors(
     &mut self,
     pairs: Vec<(crate::core::theme::ThemeField, crate::core::theme::Color)>,
   ) {
-    let before = self.user_config.theme;
     for (field, color) in pairs {
       self.user_config.theme.set(field, color);
-    }
-    if self.user_config.theme != before {
-      self.display_revisions.bump(DisplayDomain::Theme);
     }
   }
 
   /// Cycles through every style in `VisualizerStyle::all()` order (Cava, Bar
   /// Graph, Head Unit, Analog VU, Winamp, Phosphor Scope, Outrun, Rack EQ,
-  /// Cassette Deck), then the Spotify pitch view while a Spotify track plays.
-  /// Both the style and the pitch view choice are saved.
+  /// Cassette Deck) and saves the choice.
   pub(crate) fn cycle_visualizer_style(&mut self) {
     let style = self.user_config.behavior.visualizer_style;
-    let first = VisualizerStyle::all()[0];
-    let next = if self.pitch_view_shows() {
-      first
-    } else if self.pitch_view_available() && style.next() == first {
-      self.choose_pitch_view(true);
-      return;
-    } else {
-      style.next()
-    };
-    self.choose_pitch_view(false);
+    let next = style.next();
     if next != style {
       self.user_config.behavior.visualizer_style = next;
       // Save the config so the preference persists
@@ -96,6 +47,7 @@ impl App {
     let mut settings_error: Option<String> = None;
     // What is actually on screen right now, put back by the reconciliation at
     // the end so an adaptive-theme fade continues from it.
+    #[cfg(feature = "art-decode")]
     let theme_before = self.user_config.theme;
     #[cfg(feature = "art-decode")]
     let cover_art_theme_before = self.user_config.behavior.cover_art_theme;
@@ -149,14 +101,12 @@ impl App {
               crate::core::user_config::qobuz_quality_from_label(v);
           }
         }
-        "behavior.playback_poll_seconds" => if let SettingValue::Number(_v) = &setting.value {},
         "behavior.table_scroll_padding" => {
           if let SettingValue::Number(v) = &setting.value {
             self.user_config.behavior.table_scroll_padding =
               (*v).clamp(0, i64::from(u16::MAX)) as u16;
           }
         }
-        "behavior.like_animation_frames" => if let SettingValue::Number(_v) = &setting.value {},
         "behavior.enable_text_emphasis" => {
           if let SettingValue::Bool(v) = &setting.value {
             self.user_config.behavior.enable_text_emphasis = *v;
@@ -177,11 +127,6 @@ impl App {
             self.user_config.behavior.enforce_wide_search_bar = *v;
           }
         }
-        "behavior.group_folders_first" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.group_folders_first = *v;
-          }
-        }
         "behavior.disable_mouse_inputs" => {
           if let SettingValue::Bool(v) = &setting.value {
             self.user_config.behavior.disable_mouse_inputs = *v;
@@ -197,21 +142,10 @@ impl App {
             self.user_config.behavior.enable_discord_rpc = *v;
           }
         }
-        "behavior.stop_after_current_track" => {
-          if let SettingValue::Bool(v) = &setting.value {
-            self.user_config.behavior.stop_after_current_track = *v;
-          }
-        }
         "behavior.startup_behavior" => {
           if let SettingValue::Cycle(v, _) = &setting.value {
             self.user_config.behavior.startup_behavior =
               crate::core::user_config::StartupBehavior::from_name(v);
-          }
-        }
-        "behavior.player_bar_visualizer" => {
-          if let SettingValue::Cycle(v, _) = &setting.value {
-            self.user_config.behavior.player_bar_visualizer =
-              crate::core::user_config::PlayerBarVisualizer::from_name(v);
           }
         }
         "behavior.startup_route" => {
@@ -223,15 +157,6 @@ impl App {
           if let SettingValue::Cycle(v, _) = &setting.value {
             self.user_config.behavior.default_sort_playlist_tracks = v.clone();
           }
-        }
-        "behavior.default_sort_saved_albums" => {
-          if let SettingValue::Cycle(_v, _) = &setting.value {}
-        }
-        "behavior.default_sort_saved_artists" => {
-          if let SettingValue::Cycle(_v, _) = &setting.value {}
-        }
-        "behavior.default_sort_recently_played" => {
-          if let SettingValue::Cycle(_v, _) = &setting.value {}
         }
         "behavior.sidebar_position" => {
           if let SettingValue::Cycle(v, _) = &setting.value {
@@ -265,16 +190,6 @@ impl App {
             self.user_config.behavior.enable_media_keys = *v;
           }
         }
-        "behavior.enable_streaming" => if let SettingValue::Bool(_v) = &setting.value {},
-        "behavior.streaming_device_name" => {
-          if let SettingValue::String(v) = &setting.value {
-            let name = v.trim();
-            if !name.is_empty() {}
-          }
-        }
-        "behavior.streaming_bitrate" => if let SettingValue::Cycle(_v, _) = &setting.value {},
-        "behavior.streaming_audio_cache" => if let SettingValue::Bool(_v) = &setting.value {},
-        "behavior.streaming_autoplay" => if let SettingValue::Bool(_v) = &setting.value {},
         "behavior.enable_announcements" => {
           if let SettingValue::Bool(v) = &setting.value {
             self.user_config.behavior.enable_announcements = *v;
@@ -290,7 +205,6 @@ impl App {
             self.user_config.behavior.enable_monthly_recap_prompt = *v;
           }
         }
-        "behavior.pin_community_playlist" => if let SettingValue::Bool(_v) = &setting.value {},
         "behavior.announcement_feed_url" => {
           if let SettingValue::String(v) = &setting.value {
             let trimmed = v.trim();
@@ -301,36 +215,9 @@ impl App {
             };
           }
         }
-        "behavior.sync_token" => {
-          if let SettingValue::String(v) = &setting.value {
-            let _trimmed = v.trim();
-          }
-        }
-        "behavior.liked_icon" => if let SettingValue::String(_v) = &setting.value {},
-        "behavior.shuffle_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.shuffle_icon = v.clone();
-          }
-        }
-        "behavior.repeat_track_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.repeat_track_icon = v.clone();
-          }
-        }
-        "behavior.repeat_context_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.repeat_context_icon = v.clone();
-          }
-        }
-        "behavior.paused_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.paused_icon = v.clone();
-          }
-        }
         "behavior.playing_icon"
         | "behavior.gauge_filled_icon"
         | "behavior.gauge_unfilled_icon"
-        | "behavior.episode_played_icon"
         | "behavior.sort_ascending_icon"
         | "behavior.sort_descending_icon" => {
           if let SettingValue::String(v) = &setting.value {
@@ -342,7 +229,6 @@ impl App {
                 "behavior.gauge_unfilled_icon" => {
                   self.user_config.behavior.gauge_unfilled_icon = v.clone()
                 }
-                "behavior.episode_played_icon" => {}
                 "behavior.sort_ascending_icon" => {
                   self.user_config.behavior.sort_ascending_icon = v.clone()
                 }
@@ -355,11 +241,6 @@ impl App {
             } else {
               settings_error = Some(self.strings().settings.icon_width(&setting.name));
             }
-          }
-        }
-        "behavior.active_source_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.active_source_icon = v.clone();
           }
         }
         "behavior.list_highlight_icon" => {
@@ -560,31 +441,6 @@ impl App {
             }
           }
         }
-        "keys.jump_to_album" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
-        "keys.jump_to_artist_album" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
-        "keys.jump_to_context" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
-        "keys.manage_devices" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
-        "keys.listening_party" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
         "keys.decrease_volume" => {
           if let SettingValue::Key(v) = &setting.value {
             if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
@@ -620,26 +476,11 @@ impl App {
             }
           }
         }
-        "keys.like_track" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
         "keys.generate_recap" => {
           if let SettingValue::Key(v) = &setting.value {
             if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
               self.user_config.keys.generate_recap = key;
             }
-          }
-        }
-        "keys.copy_song_url" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
-          }
-        }
-        "keys.copy_album_url" => {
-          if let SettingValue::Key(v) = &setting.value {
-            if let Ok(_key) = crate::core::user_config::parse_key_public(v.clone()) {}
           }
         }
         "keys.audio_analysis" => {
@@ -830,9 +671,6 @@ impl App {
     self.refresh_settings_labels();
     #[cfg(feature = "art-decode")]
     self.reconcile_cover_theme_after_settings(theme_before, cover_art_theme_before);
-    if self.user_config.theme != theme_before {
-      self.display_revisions.bump(DisplayDomain::Theme);
-    }
     if let Some(message) = settings_error {
       self.set_status_message(message, 4);
     }

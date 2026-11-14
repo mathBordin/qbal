@@ -1,22 +1,9 @@
 use super::*;
 
-/// Domain-level representation of the playback queue.
-/// Replaces `rspotify::model::CurrentUserQueue` in `App` state.
-#[derive(Debug, Clone, PartialEq)]
-pub struct QueueState {
-  pub currently_playing: Option<PlayableInfo>,
-  pub queue: Vec<PlayableInfo>,
-}
-
 impl App {
-  /// Add a track to the native cross-source queue.
-  ///
-  /// Rejects tracks with no URI and radio streams (a live stream is not a finite
-  /// track). Spotify tracks on an external Connect device keep today's Web-API
-  /// queue behavior (there is no native sink to play them through); everything
-  /// else is pushed onto [`Self::native_queue`].
+  /// Add a track to the native queue. Tracks without a URI are rejected.
   pub fn add_track_to_native_queue(&mut self, track: TrackInfo) {
-    // Music keeps its own queue, which spotatui can't reach.
+    // Music keeps its own queue, which qbal can't reach.
 
     let Some(uri) = track.uri.clone() else {
       self.set_status_message(self.strings().status.app.queue_no_uri, 3);
@@ -82,39 +69,14 @@ impl App {
     self.native_queue.insert(to, item);
   }
 
-  /// Empty the native queue; the playing slot and a suspended context stay.
-  pub(crate) fn clear_native_queue(&mut self) {
-    self.native_queue.clear();
-  }
-
-  /// Whether the native queue's playback slot currently owns the output (either a
-  /// decoded queued track or a native-streamed Spotify one). The single gated
-  /// entry point for every queue-ownership check; reduces to `false` in a build
-  /// where the slot cannot exist (slim, or one whose only decoded source is
-  /// internet radio, which is never queueable).
+  /// Whether the native queue's playback slot currently owns the output. The
+  /// single entry point for every queue-ownership check.
   pub fn queue_owns_playback(&self) -> bool {
-    {
-      self.queue_now.is_some()
-    }
+    self.queue_now.is_some()
   }
 
-  /// Whether the queue slot is playing a Spotify track via native streaming.
-  /// While true, librespot owns the sink and any still-`Some` decoded
-  /// `*_playback` struct is a *suspended* context that must stay invisible to
-  /// the decoded-ownership predicates (`active_decoded_source`,
-  /// `active_decoded_player`, transport routing) — otherwise a space-bar toggle
-  /// or media key would resume the suspended player on top of librespot.
-  pub(crate) fn queue_now_is_spotify(&self) -> bool {
-    {
-      false
-    }
-  }
-
-  /// The queue slot's player when it is playing a *decoded* queued track (local /
-  /// Subsonic / Qobuz / YouTube). `None` for a Spotify slot or an empty slot. Gated
-  /// on exactly those four sources: they are the decoded ones a queue item can
-  /// name, so a build whose only decoded source is internet radio has no
-  /// decoded slot to look up.
+  /// The queue slot's player while it plays a queued track; `None` for an
+  /// empty slot.
   pub fn queue_now_decoded_player(&self) -> Option<&Arc<crate::infra::audio::LocalPlayer>> {
     match self.queue_now.as_ref()? {
       QueueNowPlaying::Decoded(d) => Some(&d.player),
@@ -133,11 +95,9 @@ impl App {
   /// The track currently playing through the queue slot, if any. Used by
   /// persistence to prepend it back onto the saved queue so a mid-queue quit
   /// doesn't lose the in-flight track.
-  pub(super) fn queue_now_track(&self) -> Option<&TrackInfo> {
-    {
-      match self.queue_now.as_ref()? {
-        QueueNowPlaying::Decoded(d) => Some(&d.track),
-      }
+  pub(crate) fn queue_now_track(&self) -> Option<&TrackInfo> {
+    match self.queue_now.as_ref()? {
+      QueueNowPlaying::Decoded(d) => Some(&d.track),
     }
   }
 

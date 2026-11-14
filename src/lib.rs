@@ -1,4 +1,4 @@
-//! spotatui as a library: one core shared by every frontend.
+//! qbal as a library: one core shared by every frontend.
 //!
 //! The modules stay private; the public API is exactly the entry points the
 //! bin shims in `src/bin/` need, nothing else. The `tui` frontend module is

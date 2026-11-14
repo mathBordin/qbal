@@ -15,7 +15,7 @@ impl KeepAwake {
         .sleep(true)
         .display(true)
         .reason("Playing music")
-        .app_name("spotatui")
+        .app_name("qbal")
         .create()
         .ok()
     });
@@ -43,7 +43,7 @@ impl KeepAwake {
   }
 }
 
-/// Creating and dropping on one thread matters on Windows, where the request is per thread.
+/// Creating and dropping the request on one thread keeps it tied to one owner.
 fn spawn_worker<T: 'static>(create: impl Fn() -> Option<T> + Send + 'static) -> Sender<bool> {
   let (tx, rx) = std::sync::mpsc::channel::<bool>();
   let spawned = std::thread::Builder::new()

@@ -12,11 +12,7 @@ pub(super) struct AlreadyRunning {
 
 impl std::fmt::Display for AlreadyRunning {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(
-      f,
-      "spotatui is already running{}. Quit it first; Spotify playback can still be controlled with `spotatui playback`.",
-      self.holder
-    )
+    write!(f, "Qbal is already running{}. Quit it first.", self.holder)
   }
 }
 

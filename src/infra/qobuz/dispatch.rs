@@ -1,15 +1,14 @@
 //! Qobuz browse/search/login/playback routing.
 //!
-//! The seam that keeps the Spotify [`Network`](crate::infra::network)
-//! Spotify-only: [`route_qobuz_event`] is called from the runtime IoEvent pump
-//! after the Subsonic dispatch and before Radio. An event that targets the
-//! Qobuz source (a browse, search, or login request, or a `qobuz:` playback
-//! URI) is handled here and consumed; anything else falls through.
+//! [`route_qobuz_event`] is called from the runtime IoEvent pump after the
+//! queue router. An event that targets Qobuz (a browse, search, or login
+//! request, or a `qobuz:` playback URI) is handled here and consumed; anything
+//! else falls through to [`Network`](crate::infra::network).
 //!
 //! ## Playback
 //!
-//! Qobuz playback owns [`App::qobuz_playback`] and never writes Spotify or
-//! librespot fields. A track plays while it downloads (`stream::progressive`):
+//! Qobuz playback owns [`App::qobuz_playback`]. A track plays while it
+//! downloads (`stream::progressive`):
 //! the session is published at once (marked `advancing`, like the native queue
 //! slot) and a detached task fetches segment 0, opens the stream, and builds
 //! the decoder, which waits for the first bytes. The pump keeps serving every
@@ -60,7 +59,7 @@ enum Direction {
 /// Intercept events that target the Qobuz source.
 ///
 /// Returns `true` if the event was handled (and must **not** be forwarded to
-/// the Spotify network), `false` to let the normal dispatch run.
+/// the network layer), `false` to let the normal dispatch run.
 pub async fn route_qobuz_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
   match event {
     IoEvent::GetQobuzPlaylists => {
@@ -563,8 +562,8 @@ fn spawn_fetch(
 }
 
 /// Look the current track up in the catalogue when it is a placeholder (a URI
-/// started from outside the track table, as an MCP or AI DJ `play_now` sends,
-/// #716), so the playbar and the OS media controls show its title instead of
+/// started from outside the track table, as a plugin's `qbal.play_uri` sends),
+/// so the playbar and the OS media controls show its title instead of
 /// the URI. Runs on its own task: neither the pump nor the stream waits for
 /// it. The answer lands only while the session still plays that fetch and
 /// that row; a failed lookup keeps the placeholder and never stops playback.

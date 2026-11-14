@@ -1,5 +1,4 @@
-use crate::core::app::{ActiveBlock, AnnouncementLevel, App, DialogContext, HelpMenuModel};
-use crate::core::plugin_api::PlayableInfo;
+use crate::core::app::{AnnouncementLevel, App, HelpMenuModel};
 use crate::core::plugin_api::PopupLine;
 use ratatui::{
   layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -316,13 +315,6 @@ mod help_menu_tests {
   }
 }
 
-fn queue_item_line(item: &PlayableInfo, strings: &crate::core::i18n::Strings) -> String {
-  match item {
-    PlayableInfo::Track(t) => format!("{} - {}", t.display_name(strings), t.artists.join(", ")),
-    PlayableInfo::Episode(e) => format!("{} - {}", e.name, e.show_name),
-  }
-}
-
 /// Build the dimmed "up next from context" preview rows shown under the native
 /// queue: what resumes once the queue drains. Returns an empty vector when
 /// nothing is suspended and no queued items are pending, so `draw_queue` omits
@@ -333,7 +325,7 @@ fn queue_item_line(item: &PlayableInfo, strings: &crate::core::i18n::Strings) ->
 /// pending over a still-playing context) it is that context's own upcoming
 /// tracks. Rows read from the still-alive per-source `*_playback` state.
 fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
-  // Format the upcoming rows of a Subsonic/YouTube `TrackInfo` context list.
+  // Format the upcoming rows of the playlist.
   fn track_rows(
     tracks: &[crate::core::plugin_api::TrackInfo],
     start: usize,
@@ -346,21 +338,6 @@ fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
       .map(|t| format!("{} - {}", t.name, t.artists.join(", ")))
       .collect()
   }
-
-  // The Spotify Web-API mirror's upcoming list (native or external context).
-  let spotify_mirror = |max: usize| -> Vec<String> {
-    app
-      .queue
-      .as_ref()
-      .map(|q| {
-        q.queue
-          .iter()
-          .take(max)
-          .map(|item| queue_item_line(item, app.strings()))
-          .collect()
-      })
-      .unwrap_or_default()
-  };
 
   // 1. A suspended context is authoritative: the queue is draining over it.
   if let Some(ctx) = app.queue_suspended.as_ref() {
@@ -381,7 +358,6 @@ fn context_preview_lines(app: &App, max: usize) -> Vec<String> {
     if let Some(s) = app.qobuz_playback.as_ref() {
       return track_rows(&s.tracks, s.index + 1, max);
     }
-    return spotify_mirror(max);
   }
 
   Vec::new()
@@ -398,16 +374,13 @@ pub fn draw_queue_in(f: &mut Frame<'_>, app: &App, area: Rect) {
   let style = app.user_config.theme.base_style();
   let mut items: Vec<ListItem> = Vec::new();
 
-  // Row 0: "Now playing" header. Prefer the native queue slot's current track;
-  // fall back to the Spotify Web-API mirror (external Connect device) otherwise.
+  // Row 0: "Now playing" header: the queued track when the queue owns
+  // playback, otherwise whatever the playlist is playing.
   let now_text = app
     .queue_now_display()
     .or_else(|| {
-      app
-        .queue
-        .as_ref()
-        .and_then(|q| q.currently_playing.as_ref())
-        .map(|item| queue_item_line(item, app.strings()))
+      crate::infra::media_metadata::current_playback_snapshot(app)
+        .map(|s| format!("{} - {}", s.metadata.title, s.primary_artist()))
     })
     .unwrap_or_else(|| "—".to_string());
   items.push(
@@ -423,9 +396,6 @@ pub fn draw_queue_in(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   // The native queue is the selectable list.
   if app.native_queue.is_empty() {
-    // With an empty native queue, fall back to displaying the legacy Spotify
-    // mirror only when controlling an external Connect device (the queue there
-    // lives Spotify-side). Otherwise show a hint.
     if !app.queue_owns_playback() {
       // While the queue owns playback the last queued track is the "Now playing"
       // row above, so an "empty" hint would contradict it — omit it there.
@@ -441,17 +411,10 @@ pub fn draw_queue_in(f: &mut Frame<'_>, app: &App, area: Rect) {
     }
   } else {
     for track in &app.native_queue {
-      let source = crate::core::queue::queue_item_source(track.uri.as_deref().unwrap_or(""));
-      let label = if source == crate::core::queue::QueueItemSource::LocalFile {
-        app.strings().popups.source_local
-      } else {
-        crate::core::queue::source_label(source)
-      };
       let line = format!(
-        "{} - {}  [{}]",
+        "{} - {}",
         track.display_name(app.strings()),
         track.artists.join(", "),
-        label
       );
       items.push(ListItem::new(line).style(style));
     }
@@ -534,15 +497,11 @@ pub fn draw_error_screen(f: &mut Frame<'_>, app: &App) {
       Style::default().fg(app.user_config.theme.text.into()),
     )),
     Line::from(Span::styled(
-      app.strings().popups.check_premium,
+      app.strings().popups.check_subscription,
       Style::default().fg(app.user_config.theme.text.into()),
     )),
     Line::from(Span::styled(
-      app.strings().popups.check_device,
-      Style::default().fg(app.user_config.theme.text.into()),
-    )),
-    Line::from(Span::styled(
-      app.strings().popups.check_spotifyd,
+      app.strings().popups.check_audio,
       Style::default().fg(app.user_config.theme.text.into()),
     )),
     Line::from(Span::styled(
@@ -684,12 +643,12 @@ mod error_screen_tests {
   #[test]
   fn error_screen_names_the_log_file_and_the_debug_flag() {
     let mut app = App::default();
-    app.log_path = "/tmp/spotatui_logs/spotatuilog42".to_string();
+    app.log_path = "/tmp/qbal_logs/qballog42".to_string();
 
     let rendered = rendered_error_screen(&app);
 
     assert!(
-      rendered.contains("/tmp/spotatui_logs/spotatuilog42"),
+      rendered.contains("/tmp/qbal_logs/qballog42"),
       "the error screen must name the log file a reporter has to attach:\n{rendered}"
     );
     assert!(
@@ -719,7 +678,7 @@ mod error_screen_tests {
   /// A log path under a CJK user directory is twice as wide as it is long.
   #[test]
   fn error_screen_shows_a_double_width_log_path_in_full() {
-    let path = format!("{}/spotatui.log", "中".repeat(65));
+    let path = format!("{}/qbal.log", "中".repeat(65));
     let mut app = App::default();
     app.log_path = path.clone();
 
@@ -740,54 +699,6 @@ mod error_screen_tests {
 #[cfg(test)]
 mod queue_tests {}
 
-pub fn draw_dialog(f: &mut Frame<'_>, app: &App) {
-  let dialog_context = match app.get_current_route().active_block {
-    ActiveBlock::Dialog(context) => context,
-    _ => return,
-  };
-
-  match dialog_context {
-    DialogContext::PlaylistSearch => {
-      if let Some(playlist) = app.view.dialog.as_ref() {
-        let text = vec![
-          Line::from(Span::raw(app.strings().popups.delete_playlist_question)),
-          Line::from(Span::styled(
-            playlist.as_str(),
-            Style::default().add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-          )),
-          Line::from(Span::raw(app.strings().popups.question_mark)),
-        ];
-        draw_confirmation_dialog(f, app, app.strings().popups.confirm, text, 45);
-      }
-    }
-    DialogContext::PersistKeybindingFallback => {
-      if let Some(open_settings_key) = app.pending_keybinding_persist_key() {
-        let text = vec![
-          Line::from(Span::raw(app.strings().popups.fallback_terminal)),
-          Line::from(Span::raw(app.strings().popups.fallback_question)),
-          Line::from(Span::styled(
-            app
-              .strings()
-              .popups
-              .save_shortcut(&open_settings_key.to_string()),
-            Style::default().add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-          )),
-        ];
-        draw_confirmation_dialog(
-          f,
-          app,
-          app.strings().popups.save_shortcut_fallback,
-          text,
-          66,
-        );
-      }
-    }
-    DialogContext::AddTrackToPlaylistPicker => {
-      draw_add_track_to_playlist_picker_dialog(f, app);
-    }
-  }
-}
-
 /// A modal box centred horizontally and a third of the way down `bounds`, clamped
 /// to fit. Shared so every overlay in the app sits in the same place.
 pub(crate) fn centered_modal_rect(
@@ -800,163 +711,6 @@ pub(crate) fn centered_modal_rect(
   let left = bounds.x + bounds.width.saturating_sub(width) / 2;
   let top = bounds.y + bounds.height.saturating_sub(height) / 3;
   Rect::new(left, top, width, height)
-}
-
-fn draw_confirmation_dialog(
-  f: &mut Frame<'_>,
-  app: &App,
-  title: &str,
-  text: Vec<Line<'_>>,
-  requested_width: u16,
-) {
-  let rect = centered_modal_rect(f.area(), requested_width, 10);
-  f.render_widget(Clear, rect);
-
-  let block = Block::default()
-    .title(Span::styled(
-      title,
-      Style::default()
-        .fg(app.user_config.theme.header.into())
-        .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-    ))
-    .borders(Borders::ALL)
-    .style(app.user_config.theme.base_style())
-    .border_style(Style::default().fg(app.user_config.theme.inactive.into()));
-  f.render_widget(block, rect);
-
-  let vchunks = Layout::default()
-    .direction(Direction::Vertical)
-    .margin(1)
-    .constraints([Constraint::Min(3), Constraint::Length(3)])
-    .split(rect);
-
-  let text = Paragraph::new(text)
-    .wrap(Wrap { trim: true })
-    .style(app.user_config.theme.base_style())
-    .alignment(Alignment::Center);
-  f.render_widget(text, vchunks[0]);
-
-  let hchunks = Layout::default()
-    .direction(Direction::Horizontal)
-    .horizontal_margin(3)
-    .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-    .split(vchunks[1]);
-
-  let ok = Paragraph::new(Span::raw(app.strings().popups.ok))
-    .style(Style::default().fg(if app.view.confirm {
-      app.user_config.theme.hovered.into()
-    } else {
-      app.user_config.theme.inactive.into()
-    }))
-    .alignment(Alignment::Center);
-  f.render_widget(ok, hchunks[0]);
-
-  let cancel = Paragraph::new(Span::raw(app.strings().popups.cancel))
-    .style(Style::default().fg(if app.view.confirm {
-      app.user_config.theme.inactive.into()
-    } else {
-      app.user_config.theme.hovered.into()
-    }))
-    .alignment(Alignment::Center);
-  f.render_widget(cancel, hchunks[1]);
-}
-
-fn draw_add_track_to_playlist_picker_dialog(f: &mut Frame<'_>, app: &App) {
-  let rect = centered_modal_rect(f.area(), 70, 20);
-  f.render_widget(Clear, rect);
-
-  let block = Block::default()
-    .title(Span::styled(
-      app.strings().popups.add_track_title,
-      Style::default()
-        .fg(app.user_config.theme.header.into())
-        .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-    ))
-    .borders(Borders::ALL)
-    .style(app.user_config.theme.base_style())
-    .border_style(Style::default().fg(app.user_config.theme.inactive.into()));
-  f.render_widget(block, rect);
-
-  let vchunks = Layout::default()
-    .direction(Direction::Vertical)
-    .margin(1)
-    .constraints([
-      Constraint::Length(2),
-      Constraint::Length(1),
-      Constraint::Min(3),
-      Constraint::Length(1),
-    ])
-    .split(rect);
-
-  let track_name = app
-    .pending_playlist_track_add
-    .as_ref()
-    .map(|p| p.track_name.as_str())
-    .unwrap_or(app.strings().popups.selected_track);
-
-  let header = Paragraph::new(Line::from(Span::raw(
-    app.strings().popups.choose_playlist(track_name),
-  )))
-  .wrap(Wrap { trim: true })
-  .style(app.user_config.theme.base_style());
-  f.render_widget(header, vchunks[0]);
-
-  let theme = app.user_config.theme;
-  let popups = &app.strings().popups;
-  let filter = app.view.playlist_picker_filter.as_str();
-  let search_line = if app.view.playlist_picker_filter_editing {
-    Line::from(vec![
-      Span::styled(
-        popups.playlist_picker_search_prompt,
-        Style::default().fg(theme.active.into()),
-      ),
-      Span::raw(filter),
-      Span::styled("▏", Style::default().fg(theme.active.into())),
-      Span::styled(
-        popups.playlist_picker_search_edit_hint,
-        Style::default().fg(theme.inactive.into()),
-      ),
-    ])
-  } else if !filter.is_empty() {
-    Line::from(vec![
-      Span::styled(
-        popups.playlist_picker_search_prompt,
-        Style::default().fg(theme.active.into()),
-      ),
-      Span::raw(filter),
-    ])
-  } else {
-    Line::from(Span::styled(
-      popups.playlist_picker_search_hint(&app.user_config.keys.search.to_string()),
-      Style::default().fg(theme.inactive.into()),
-    ))
-  };
-  f.render_widget(
-    Paragraph::new(search_line).style(theme.base_style()),
-    vchunks[1],
-  );
-
-  let _list_state = ListState::default();
-
-  {
-    let _is_own_playlist = |playlist: &crate::core::plugin_api::PlaylistInfo| -> bool {
-      // Local YouTube playlists carry no owner id — they are always the
-      // user's own (no "(collab)" suffix).
-      playlist.owner_id.is_none()
-        || app
-          .user()
-          .as_ref()
-          .is_some_and(|user| Some(user.id.as_str()) == playlist.owner_id.as_deref())
-    };
-  }
-
-  let footer = Paragraph::new(app.strings().popups.playlist_picker_controls(
-    &app.user_config.keys.move_down.to_string(),
-    &app.user_config.keys.move_up.to_string(),
-  ))
-  .style(Style::default().fg(app.user_config.theme.inactive.into()))
-  .alignment(Alignment::Center);
-  f.render_widget(footer, vchunks[3]);
 }
 
 pub fn draw_announcement_prompt(f: &mut Frame<'_>, app: &App) {
@@ -1140,9 +894,7 @@ pub fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
         .shortcut()
         .map(|c| format!(" ({})", c))
         .unwrap_or_default();
-      let indicator = if *field == current_sort.field
-        && context != crate::core::sort::SortContext::SidebarPlaylists
-      {
+      let indicator = if *field == current_sort.field {
         format!(
           " {}",
           current_sort.order.indicator_icon(
@@ -1155,13 +907,7 @@ pub fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
       };
       let text = format!(
         "{}{}{}",
-        if context == crate::core::sort::SortContext::SidebarPlaylists
-          && *field == crate::core::sort::SortField::Default
-        {
-          app.strings().popups.sort_spotify
-        } else {
-          app.strings().popups.sort_field(*field)
-        },
+        app.strings().popups.sort_field(*field),
         shortcut,
         indicator
       );
@@ -1181,11 +927,7 @@ pub fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
     .collect();
 
   let title = match context {
-    crate::core::sort::SortContext::SidebarPlaylists => app.strings().popups.sort_playlists,
     crate::core::sort::SortContext::PlaylistTracks => app.strings().popups.sort_tracks,
-    crate::core::sort::SortContext::SavedAlbums => app.strings().popups.sort_albums,
-    crate::core::sort::SortContext::SavedArtists => app.strings().popups.sort_artists,
-    crate::core::sort::SortContext::RecentlyPlayed => app.strings().popups.sort_title,
   };
 
   let list = List::new(items)
@@ -1287,9 +1029,3 @@ fn build_popup_line<'a>(pl: &'a PopupLine) -> Line<'a> {
   }
   Line::from(Span::styled(pl.text.clone(), style))
 }
-
-#[cfg(test)]
-mod playlist_sync_picker_tests {}
-
-#[cfg(test)]
-mod playlist_picker_localization_tests {}

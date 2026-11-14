@@ -174,7 +174,7 @@ fn run_pipewire_capture(
     *pw::keys::STREAM_CAPTURE_SINK => "true",
   };
 
-  let stream = pw::stream::StreamBox::new(&core, "spotatui-audio-viz", props)?;
+  let stream = pw::stream::StreamBox::new(&core, "qbal-audio-viz", props)?;
 
   let active_clone = active.clone();
   let analyzer_clone = analyzer.clone();

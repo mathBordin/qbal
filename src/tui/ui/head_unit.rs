@@ -71,7 +71,6 @@ pub struct HeadUnitView {
   pub is_playing: bool,
   pub shuffle: bool,
   pub repeat: bool,
-  pub live: bool,
 }
 
 /// Bands per channel the analyzer should produce. The analyzer mirrors the
@@ -751,9 +750,7 @@ fn draw_readout(buf: &mut Buffer, area: Rect, view: &HeadUnitView, level: f32, v
   x += draw_digits(buf, area, x, &digits, lit, vfd) + 1;
 
   let small = Style::default().fg(rgb(vfd.label));
-  let state = if view.live {
-    "LIVE"
-  } else if view.is_playing {
+  let state = if view.is_playing {
     "PLAY"
   } else if clock.is_some() {
     "PAUSE"

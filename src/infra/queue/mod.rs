@@ -1,21 +1,19 @@
-//! Native cross-source queue playback engine.
+//! Native queue playback engine.
 //!
 //! [`App::native_queue`](crate::core::app::App::native_queue) holds the queue
 //! state, while this module is the engine that consumes it:
-//! [`dispatch::route_queue_event`]
-//! plays queued tracks through the shared decoded-audio sink, overlaying the
-//! per-source playback contexts without mutating them, and resumes the
-//! underlying context once the queue drains.
+//! [`dispatch::route_queue_event`] plays queued tracks through the shared
+//! decoded-audio sink, overlaying the Qobuz playlist session without mutating
+//! it, and resumes that session once the queue drains.
 //!
 //! ## Playback slot vs. suspended context
 //!
 //! [`QueueNowPlaying`] is what the queue slot is *currently* playing. It never
-//! touches the per-source `*_playback` structs — those are the context to
-//! resume, recorded in `App::queue_suspended`. When the suspended context is a
-//! decoded source, the queue slot **reuses that context's `Arc<LocalPlayer>`**
-//! (the sink is reloaded with the queued track); only when Spotify or nothing is
-//! suspended does it open a fresh player. This keeps the "never two live players
-//! on one output device" invariant.
+//! touches `qobuz_playback`, the context to resume, recorded in
+//! `App::queue_suspended`. When a playlist is suspended, the queue slot
+//! **reuses its `Arc<LocalPlayer>`** (the sink is reloaded with the queued
+//! track); only when nothing is suspended does it open a fresh player. This
+//! keeps the "never two live players on one output device" invariant.
 
 pub mod dispatch;
 
@@ -23,7 +21,7 @@ use crate::core::plugin_api::TrackInfo;
 
 /// Snapshot the `TrackInfo`s for `uris` in order from the track table, then
 /// the search results (a play can come from either view). A URI in neither,
-/// which is what an MCP or AI DJ start usually sends (#716), gets a
+/// which is what a plugin's `qbal.play_uri` usually sends, gets a
 /// placeholder named after the URI, like the native queue's opaque items, so
 /// it still plays and `start_idx` still lines up with `uris`.
 pub fn snapshot_tracks(
@@ -53,8 +51,7 @@ pub fn is_placeholder(track: &TrackInfo) -> bool {
 }
 
 /// The URI of `tracks[index]` when that row is a placeholder, so the source
-/// knows to look its metadata up. YouTube needs no lookup: its download
-/// prints the metadata.
+/// knows to look its metadata up.
 pub fn placeholder_uri(tracks: &[TrackInfo], index: usize) -> Option<String> {
   tracks
     .get(index)
@@ -104,7 +101,7 @@ fn placeholder_track(uri: &str) -> TrackInfo {
   }
 }
 
-/// Why a queue episode ended: a drained queue resumes the suspended context,
+/// Why a queue run ended: a drained queue resumes the suspended context,
 /// a lost output device resumes nothing.
 pub enum QueueEnd {
   Drained,
@@ -115,8 +112,7 @@ pub enum QueueEnd {
 /// native queue is in the picture.
 ///
 /// Pure data so the full decision table is unit-testable without an audio
-/// device. `#[allow(dead_code)]` because a slim build (no source features) never
-/// calls it — clippy's slim run does not compile the tests that do.
+/// device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
   /// Nothing to do (still playing, or a track change is already in flight).
@@ -131,13 +127,9 @@ pub enum Decision {
   RepeatTrack,
 }
 
-/// Repeat mode for a decoded (non-Spotify) source's auto-advance / skip logic.
-///
-/// The canonical repeat state for the decoded sources (`App::decoded_repeat`),
-/// kept source-neutral here so the pure queue/source modules never name an
-/// rspotify type (translated to `RepeatState` only at the Spotify-shaped edges,
-/// e.g. the media-metadata snapshot). `#[allow(dead_code)]` for the same reason
-/// as [`Decision`]: a slim build never constructs it.
+/// Repeat mode for the Qobuz session's auto-advance and skip logic
+/// (`App::decoded_repeat`); translated to the plugin-facing `RepeatState` only
+/// in the media-metadata snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RepeatMode {
   /// No repeat: advance then tear down at the end of the context.
@@ -150,7 +142,7 @@ pub enum RepeatMode {
 }
 
 impl RepeatMode {
-  /// The next mode in the user-facing cycle, mirroring Spotify's
+  /// The next mode in the user-facing cycle:
   /// Off -> Repeat All -> Repeat One -> Off.
   pub fn next(self) -> Self {
     match self {
@@ -414,10 +406,6 @@ fn restore_in_place<T>(items: &mut Vec<T>, backup: &ShuffleBackup, current: usiz
 /// Returns whether playback restarted. On `false` the caller must tear its
 /// session down — an empty sink left in place would read as end-of-track and
 /// re-fire replay every runner tick.
-///
-/// Gated on the *queueable* decoded sources rather than `audio-decode`: replay
-/// is the repeat-one path of a finite track list. Internet radio decodes audio
-/// too, but a live stream has no track to re-decode.
 pub async fn replay_file(
   player: std::sync::Arc<crate::infra::audio::LocalPlayer>,
   path: std::path::PathBuf,
@@ -483,14 +471,9 @@ async fn dropping_the_abort_handle_cancels_the_download_task() {
   assert!(res.unwrap_err().is_cancelled());
 }
 
-/// A queued *decoded* track playing through the shared [`LocalPlayer`] sink
-/// (local file, Subsonic, or YouTube). Kept separate from the per-source
-/// `*_playback` structs so the underlying context is preserved for resume.
-///
-/// Gated on exactly those three sources, not `audio-decode`: they are the ones
-/// [`dispatch::try_play_queued`] can play. Internet radio pulls `audio-decode`
-/// in as well, but a live stream is never a queue item, so a radio-only build
-/// can never construct this.
+/// A queued track playing through the shared [`LocalPlayer`] sink. Kept
+/// separate from `qobuz_playback` so the suspended playlist is preserved for
+/// resume.
 pub struct DecodedQueuePlayback {
   /// The output-device sink. Shared (`Arc::ptr_eq`) with the suspended context's
   /// player when there is one, so no second device is opened.
@@ -500,18 +483,15 @@ pub struct DecodedQueuePlayback {
   /// Guards the empty-sink window during a queue advance from being read as
   /// end-of-track by the runner tick (mirrors the per-source `advancing` guard).
   pub advancing: bool,
-  /// Generation stamp for the slot's background fetch. A Subsonic/YouTube
-  /// download runs off the IoEvent pump (so it never blocks other events); its
-  /// completion only plays and finalizes when the slot still carries the same
-  /// stamp — a skip or teardown in the meantime republished the slot with a new
-  /// one, and the stale result is silently discarded. Only *read* by the
-  /// Subsonic/YouTube fetch-completion path, so a build with neither (e.g. a
-  /// local-files-only build) writes it without reading it.
+  /// Generation stamp for the slot's background fetch. The download runs off
+  /// the IoEvent pump (so it never blocks other events); its completion only
+  /// plays and finalizes when the slot still carries the same stamp — a skip
+  /// or teardown in the meantime republished the slot with a new one, and the
+  /// stale result is silently discarded.
   pub fetch_id: u64,
-  /// The tempfile backing a downloaded track (Subsonic / YouTube). `None` for a
-  /// local file, which is played straight from disk. Held purely to keep the
-  /// file alive on disk for the duration of playback (dropped with the slot), so
-  /// it is never read back.
+  /// The tempfile backing the downloaded track. Held purely to keep the file
+  /// alive on disk for the duration of playback (dropped with the slot), so it
+  /// is never read back.
   pub tempfile: Option<tempfile::NamedTempFile>,
   /// The handle to abort the background download task if the slot is cleared
   /// or replaced before the download completes.
@@ -522,15 +502,8 @@ pub struct DecodedQueuePlayback {
   pub quality: Option<String>,
 }
 
-/// What the native queue's playback slot is currently playing.
-///
-/// A build with no *queueable* source (neither native streaming nor a decoded
-/// source that owns a finite track list) cannot play a queued track at all, so
-/// this type is gated to builds that can; the `App::queue_now` field shares that
-/// gate, and every call site goes through the unconditional
-/// `App::queue_owns_playback()` accessor. Note internet radio is deliberately
-/// absent from both halves of the gate: it decodes audio, but a `radio:` URI is
-/// never a queue item, so it can neither fill nor own this slot.
+/// What the native queue's playback slot is currently playing. Call sites ask
+/// through `App::queue_owns_playback()`.
 pub enum QueueNowPlaying {
   Decoded(DecodedQueuePlayback),
 }
@@ -585,7 +558,7 @@ mod tests {
     fn snapshot_falls_back_to_search_results_for_search_to_play() {
       // The track table holds a browsed playlist while the played uris come
       // from the search results: both views must be consulted.
-      let table = vec![track("spotify:track:x", "Browsed")];
+      let table = vec![track("qobuz:track:x", "Browsed")];
       let search = vec![track("youtube:searched", "Searched")];
       let snap = snapshot_tracks(&table, Some(&search), &["youtube:searched".to_string()]);
       assert_eq!(snap.len(), 1);
@@ -820,7 +793,7 @@ mod tests {
   }
 
   #[test]
-  fn repeat_mode_cycles_like_spotify() {
+  fn repeat_mode_cycles_off_all_one() {
     // Off -> Repeat All -> Repeat One -> Off.
     assert_eq!(RepeatMode::Off.next(), RepeatMode::Context);
     assert_eq!(RepeatMode::Context.next(), RepeatMode::Track);

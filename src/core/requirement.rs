@@ -1,6 +1,5 @@
 //! What a sidebar row, a key, or a setting needs before it can do anything:
-//! a Spotify session, a capability of the active source, or one particular
-//! source. The three terminal tables (sidebar, help menu, settings) carry a
+//! a capability of the active source. The three terminal tables (sidebar, help menu, settings) carry a
 //! [`Requirement`] per row and filter through [`availability`], so the rows
 //! a frontend offers and the keys that work cannot disagree.
 
@@ -23,10 +22,8 @@ impl Capability {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Requirement {
   None,
-  /// The active source must have the capability; under Spotify a session too.
+  /// The active source must have the capability.
   Capability(Capability),
-  /// Met when any one is met; unmet, it reports the first one.
-  AnyOf(&'static [Requirement]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -64,12 +61,6 @@ pub fn availability(requirement: Requirement, source: Source) -> Availability {
         Availability::Available
       }
     }
-    Requirement::AnyOf(options) => options
-      .iter()
-      .map(|option| availability(*option, source))
-      .find(|met| met.is_available())
-      .or_else(|| options.first().map(|first| availability(*first, source)))
-      .unwrap_or(Availability::Available),
   }
 }
 

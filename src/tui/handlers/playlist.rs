@@ -5,16 +5,15 @@ use crate::core::app::{ActiveBlock, SidebarBlock};
 use crate::core::source::Source;
 use crate::tui::event::Key;
 
-/// Total rows in the sidebar Playlists panel. For Spotify this is the leading
-/// "+ Add Playlist" row + playlists/folders; for Local it is the folder count
-/// (no write capability, so no "Add Playlist").
+/// Total rows in the sidebar Playlists panel: the Qobuz favorites and
+/// playlists.
 pub(crate) fn total_display_count(app: &App) -> usize {
   match app.active_source {
     Source::Qobuz => app.qobuz_playlists().len(),
   }
 }
 
-/// Open a non-Spotify playlist's tracks in the shared track table.
+/// Open a Qobuz playlist's tracks in the shared track table.
 pub(super) fn open_source_playlist(app: &mut App, uri: Option<String>) {
   if let Some(uri) = uri {
     app.apply(Action::Open(OpenTarget::SourcePlaylist(uri)));

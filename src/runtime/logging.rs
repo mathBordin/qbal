@@ -1,4 +1,4 @@
-//! Pure helpers behind the `--debug` flag / `SPOTATUI_LOG` env var: level
+//! Pure helpers behind the `--debug` flag / `QBAL_LOG` env var: level
 //! resolution, the per-target `level_for` list, the startup header text, the
 //! compiled-feature list, and the log-tail extraction the panic hook appends
 //! to the crash log. Kept side-effect-free so they can be unit-tested without
@@ -7,7 +7,7 @@
 use log::LevelFilter;
 
 /// Resolves the effective log level from the `--debug` flag and the raw
-/// `SPOTATUI_LOG` env value (the caller reads the env var; this fn never
+/// `QBAL_LOG` env value (the caller reads the env var; this fn never
 /// touches the environment itself, so it stays testable).
 ///
 /// When both are given, the MORE VERBOSE of the two wins. An unparseable env
@@ -27,7 +27,7 @@ pub(super) fn resolve_log_level(
       None => (
         None,
         Some(format!(
-          "invalid SPOTATUI_LOG value '{raw}': expected one of off, error, warn, info, debug, trace"
+          "invalid QBAL_LOG value '{raw}': expected one of off, error, warn, info, debug, trace"
         )),
       ),
     },
@@ -55,40 +55,14 @@ fn parse_level(raw: &str) -> Option<LevelFilter> {
   }
 }
 
-/// Our own crates raised at `--debug`. `spotatui_librespot_playback` is
-/// deliberately excluded here — it logs per audio packet and would drown the
-/// file — and only joins the list at `trace`.
-const DEBUG_TARGETS: &[&str] = &[
-  "spotatui",
-  "spotatui_librespot_core",
-  "spotatui_librespot_connect",
-  "spotatui_librespot_oauth",
-  "spotatui_librespot_metadata",
-  "spotatui_librespot_protocol",
-  "spotatui_librespot_audio",
-];
-
-const PLAYBACK_TARGET: &str = "spotatui_librespot_playback";
-
-/// The `level_for` overrides to layer on top of the global fern level.
-///
-/// fern's `level_for` matches on `::` module-path boundaries, so the target
-/// `spotatui` does NOT also cover `spotatui_librespot_core` and friends —
-/// each crate needs its own entry. Dependencies (reqwest, hyper, rustls, h2,
-/// ...) are intentionally never listed: the global dispatch level already
-/// covers them, so a new dependency added later can't accidentally get noisy
-/// just because it wasn't added to a pin list here.
+/// The `level_for` overrides to layer on top of the global fern level: only
+/// our own crate is raised at `--debug`/`trace`. Dependencies (reqwest, hyper,
+/// rustls, ...) are intentionally never listed: the global dispatch level
+/// already covers them, so a new dependency cannot get noisy just because it
+/// was left out of a list here.
 pub(super) fn target_levels(resolved: LevelFilter) -> Vec<(&'static str, LevelFilter)> {
   match resolved {
-    LevelFilter::Trace => DEBUG_TARGETS
-      .iter()
-      .chain(std::iter::once(&PLAYBACK_TARGET))
-      .map(|&target| (target, LevelFilter::Trace))
-      .collect(),
-    LevelFilter::Debug => DEBUG_TARGETS
-      .iter()
-      .map(|&target| (target, LevelFilter::Debug))
-      .collect(),
+    LevelFilter::Trace | LevelFilter::Debug => vec![(env!("CARGO_CRATE_NAME"), resolved)],
     _ => Vec::new(),
   }
 }
@@ -129,8 +103,6 @@ feature_list![
   "scripting",
   "mpris",
   "discord-rpc",
-  "macos-media",
-  "windows-media",
 ];
 
 /// The always-on startup line written once at the top of every log, so a bug
@@ -151,7 +123,7 @@ pub(super) fn startup_header(
     features.join(", ")
   };
   format!(
-    "spotatui {version} startup | os={os} arch={arch} | features: {features_str} | terminal: TERM={term} TERM_PROGRAM={term_program} Windows Terminal={wt}",
+    "qbal {version} startup | os={os} arch={arch} | features: {features_str} | terminal: TERM={term} TERM_PROGRAM={term_program} Windows Terminal={wt}",
     term = term.unwrap_or("unknown"),
     term_program = term_program.unwrap_or("unknown"),
     wt = if wt_session { "yes" } else { "no" },
@@ -308,29 +280,13 @@ mod tests {
   }
 
   #[test]
-  fn target_levels_lists_seven_crates_at_debug_excluding_playback() {
-    let targets = target_levels(LevelFilter::Debug);
-    assert_eq!(targets.len(), 7);
-    assert!(targets
-      .iter()
-      .all(|&(_, level)| level == LevelFilter::Debug));
-    assert!(targets.iter().any(|&(t, _)| t == "spotatui"));
-    assert!(targets.iter().any(|&(t, _)| t == "spotatui_librespot_core"));
-    assert!(!targets
-      .iter()
-      .any(|&(t, _)| t == "spotatui_librespot_playback"));
-  }
-
-  #[test]
-  fn target_levels_lists_all_eight_crates_at_trace_including_playback() {
-    let targets = target_levels(LevelFilter::Trace);
-    assert_eq!(targets.len(), 8);
-    assert!(targets
-      .iter()
-      .all(|&(_, level)| level == LevelFilter::Trace));
-    assert!(targets
-      .iter()
-      .any(|&(t, _)| t == "spotatui_librespot_playback"));
+  fn debug_and_trace_raise_only_our_own_crate() {
+    for level in [LevelFilter::Debug, LevelFilter::Trace] {
+      assert_eq!(
+        target_levels(level),
+        vec![(env!("CARGO_CRATE_NAME"), level)]
+      );
+    }
   }
 
   #[test]
@@ -356,7 +312,7 @@ mod tests {
       .take_while(|line| !line.starts_with('['))
       .filter(|line| line.starts_with(|c: char| c.is_ascii_lowercase()))
       .filter_map(|line| line.split_once('=').map(|(name, _)| name.trim()))
-      .filter(|name| !matches!(*name, "default" | "all-sources"))
+      .filter(|name| *name != "default")
       .collect();
     assert!(declared.contains(&"scripting"), "parsed {declared:?}");
 
@@ -413,15 +369,15 @@ mod tests {
 
   #[test]
   fn exit_log_notice_contains_the_log_path() {
-    let notice = exit_log_notice(std::path::Path::new("/tmp/example/spotatuilog123"), true);
-    assert!(notice.contains("/tmp/example/spotatuilog123"));
+    let notice = exit_log_notice(std::path::Path::new("/tmp/example/qballog123"), true);
+    assert!(notice.contains("/tmp/example/qballog123"));
     assert!(!notice.contains("--debug"));
   }
 
   #[test]
   fn exit_log_notice_suggests_debug_when_not_verbose() {
-    let notice = exit_log_notice(std::path::Path::new("/tmp/example/spotatuilog123"), false);
-    assert!(notice.contains("/tmp/example/spotatuilog123"));
+    let notice = exit_log_notice(std::path::Path::new("/tmp/example/qballog123"), false);
+    assert!(notice.contains("/tmp/example/qballog123"));
     assert!(notice.contains("--debug"));
   }
 
@@ -452,7 +408,7 @@ mod tests {
 
   #[test]
   fn read_log_tail_returns_none_for_a_missing_file() {
-    let missing = std::path::Path::new("/nonexistent/path/spotatui-logging-test-missing.log");
+    let missing = std::path::Path::new("/nonexistent/path/qbal-logging-test-missing.log");
     assert!(read_log_tail(missing, 1024, 200).is_none());
   }
 

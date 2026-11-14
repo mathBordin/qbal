@@ -517,7 +517,6 @@ fn is_main_layout_mouse_interactive(active_block: ActiveBlock) -> bool {
       | ActiveBlock::AnnouncementPrompt
       | ActiveBlock::ExitPrompt
       | ActiveBlock::Settings
-      | ActiveBlock::Dialog(_)
       | ActiveBlock::SortMenu
       | ActiveBlock::RecapPrompt
   )
@@ -593,8 +592,7 @@ fn select_clicked_library_item(mouse_row: u16, list_area: Rect, app: &mut App) {
 }
 
 fn select_clicked_playlist(mouse_row: u16, list_area: Rect, app: &mut App) {
-  // The rendered row count, including the leading "+ Add Playlist" row under
-  // Spotify (and the trailing "+ New Playlist" row under YouTube).
+  // The rendered row count of the Playlists panel.
   let item_count = playlist::total_display_count(app);
   if item_count == 0 {
     return;
@@ -1149,9 +1147,9 @@ mod tests {
   #[test]
   fn clicking_a_filtered_row_closes_the_filter_and_selects_the_row_that_was_drawn() {
     // No Enter: the filter input is still open when the click lands.
-    let mut app = filtered_settings_app("sort");
+    let mut app = filtered_settings_app("rate");
     let visible = filtered_setting_indices(&app);
-    assert!(visible.len() > 1, "expected several sort rows");
+    assert!(visible.len() > 1, "expected several rate rows");
 
     // Second drawn row, which is not the second row of `settings_items`.
     let areas = settings_layout_areas(&app).expect("settings layout areas");
@@ -1166,7 +1164,7 @@ mod tests {
 
     assert!(!app.view.settings_filter_editing);
     // Applying is not clearing: the rows stay filtered after the click.
-    assert_eq!(app.view.settings_filter, "sort");
+    assert_eq!(app.view.settings_filter, "rate");
     assert_eq!(app.view.settings_selected_index, visible[1]);
     assert_ne!(visible[1], 1);
   }

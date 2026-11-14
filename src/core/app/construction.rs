@@ -5,18 +5,12 @@ impl Default for App {
     App {
       spectrum_data: None,
       audio_capture_active: false,
-      audio_analysis: AnalysisState::Idle,
-      spotify_track_playing: false,
-      analysis_clock: None,
-      pitch_levels: [0.0; 12],
-      pitch_fall: [0.0; 12],
+      playing_last_tick: false,
       view: ViewState {
         search_hovered_block: SearchResultBlock::SongSearch,
         ..ViewState::default()
       },
-      search_liked_view: Vec::new(),
       source_table_uri: None,
-      track_table_view: TrackTableView::default(),
       stats_period: RecapPeriod::ThirtyDays,
       stats_loading: false,
       stats_data: None,
@@ -25,7 +19,6 @@ impl Default for App {
       recap_prompt: None,
       qobuz_playlists: Vec::new(),
       active_source: Source::default(),
-      artists: vec![],
       user_config: UserConfig::new(),
       strings: &crate::core::i18n::EN,
       system_language: crate::core::i18n::Language::En,
@@ -37,24 +30,14 @@ impl Default for App {
         saved_tracks: ScrollableResultPages::new(),
         saved_albums: ScrollableResultPages::new(),
         saved_shows: ScrollableResultPages::new(),
-        saved_artists: ScrollableResultPages::new(),
-        show_episodes: ScrollableResultPages::new(),
       },
-      liked_song_ids_set: HashSet::new(),
-      followed_artist_ids_set: HashSet::new(),
-      saved_album_ids_set: HashSet::new(),
-      saved_show_ids_set: HashSet::new(),
       navigation_stack: vec![DEFAULT_ROUTE],
       api_error: String::new(),
       api_error_expires_at: None,
-      queue: None,
       native_queue: Vec::new(),
       queue_suspended: None,
       queue_now: None,
       queue_slot_desired_playing: true,
-      playlist_offset: 0,
-      playlist_tracks: None,
-      playlist_track_pages: ScrollableResultPages::new(),
       active_playlist_track_filter: None,
       pending_playlist_track_search: None,
       track_table_epoch: 0,
@@ -62,19 +45,11 @@ impl Default for App {
       song_progress_ms: 0,
       last_tick_at: Instant::now(),
       seek_ms: None,
-      last_api_seek: None,
-      pending_api_seek: None,
       last_source_seek: None,
       pending_source_seek: None,
       track_table: Default::default(),
-      episode_table_context: EpisodeTableContext::Full,
-      selected_show_full: None,
-      user: None,
-      instant_since_last_current_playback_poll: Instant::now(),
       is_loading: false,
       io_tx: None,
-      pending_keybinding_persist: None,
-      keybinding_runtime: KeybindingRuntimeState::default(),
 
       active_announcement: None,
       pending_announcements: Vec::new(),
@@ -87,23 +62,14 @@ impl Default for App {
       // Settings defaults
       settings_items: Vec::new(),
       settings_saved_items: Vec::new(),
-      pending_play_file: None,
       keepawake: Default::default(),
       // Sort menu defaults
       playlist_sort: SortState::new(),
-      album_sort: SortState::new(),
-      artist_sort: SortState::new(),
-      recently_played_sort: SortState::new(),
+      track_table_unsorted: Vec::new(),
       status_message: None,
       status_message_expires_at: None,
       status_message_is_error: false,
-      playlist_track_positions: None,
-      pending_playlist_track_add: None,
-      pending_playlist_track_removal: None,
-      saved_artists_prefetch_in_flight: None,
       all_playlists: Vec::new(),
-      saved_tracks_prefetch_in_flight: HashSet::new(),
-      playlist_tracks_prefetch_in_flight: HashSet::new(),
       state_save_due: None,
       pending_state_save_patch: PersistedRuntimeState::default(),
       state_save_error_reported: false,
@@ -123,17 +89,13 @@ impl Default for App {
       cover_theme_state: crate::core::cover_theme::CoverThemeState::default(),
       #[cfg(feature = "art-decode")]
       theme_transition: None,
-      pending_playlist_sync_remove: None,
       pending_plugin_commands: Vec::new(),
       plugin_data_generations: PluginDataGenerations::default(),
-      display_revisions: DisplayRevisions::default(),
-      queue_view: Default::default(),
       plugin_screens: std::collections::BTreeMap::new(),
       pending_plugin_screen_keys: Vec::new(),
       plugin_playbar_segments: std::collections::BTreeMap::new(),
       plugin_popup: None,
       log_path: crate::core::paths::app_log_path().display().to_string(),
-      active_saved_track_filter: None,
     }
   }
 }
@@ -151,8 +113,8 @@ impl App {
       .language
       .resolve(system_language)
       .strings();
-    // A saved Apple Music scope can outlive the build that offered it. Restore
-    // only a source the current picker can select, keeping both mirrors in sync.
+    // A saved source can outlive the build that offered it (a state file from
+    // the app Qbal forked from). Restore only a source this build can select.
     let sources = Source::picker_sources();
     if !sources.contains(&runtime_state.active_source) {
       runtime_state.active_source = sources[0];

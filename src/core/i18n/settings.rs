@@ -9,13 +9,6 @@ pub use pt_br::PT_BR;
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct SettingsStrings {
-  pub behavior_soloist_path_name: &'static str,
-  pub behavior_soloist_path_description: &'static str,
-  pub soloist_download_button: &'static str,
-  pub soloist_downloading_button: &'static str,
-  pub behavior_soloist_api_key_name: &'static str,
-  pub behavior_soloist_api_key_description: &'static str,
-  pub soloist_get_key_button: &'static str,
   pub behavior_language_name: &'static str,
   pub behavior_language_description: &'static str,
   pub behavior_seek_milliseconds_name: &'static str,
@@ -38,24 +31,18 @@ pub struct SettingsStrings {
   pub behavior_show_loading_indicator_description: &'static str,
   pub behavior_enforce_wide_search_bar_name: &'static str,
   pub behavior_enforce_wide_search_bar_description: &'static str,
-  pub behavior_group_folders_first_name: &'static str,
-  pub behavior_group_folders_first_description: &'static str,
   pub behavior_disable_mouse_inputs_name: &'static str,
   pub behavior_disable_mouse_inputs_description: &'static str,
   pub behavior_set_window_title_name: &'static str,
   pub behavior_set_window_title_description: &'static str,
   pub behavior_enable_discord_rpc_name: &'static str,
   pub behavior_enable_discord_rpc_description: &'static str,
-  pub behavior_stop_after_current_track_name: &'static str,
-  pub behavior_stop_after_current_track_description: &'static str,
   pub behavior_keepawake_enabled_name: &'static str,
   pub behavior_keepawake_enabled_description: &'static str,
   pub behavior_enable_media_keys_name: &'static str,
   pub behavior_enable_media_keys_description: &'static str,
   pub behavior_startup_behavior_name: &'static str,
   pub behavior_startup_behavior_description: &'static str,
-  pub behavior_player_bar_visualizer_name: &'static str,
-  pub behavior_player_bar_visualizer_description: &'static str,
   pub behavior_startup_route_name: &'static str,
   pub behavior_startup_route_description: &'static str,
   pub behavior_default_sort_playlist_tracks_name: &'static str,
@@ -88,22 +75,12 @@ pub struct SettingsStrings {
   pub behavior_cover_art_dither_algorithm_description: &'static str,
   pub behavior_cover_art_dither_pixel_scale_name: &'static str,
   pub behavior_cover_art_dither_pixel_scale_description: &'static str,
-  pub behavior_shuffle_icon_name: &'static str,
-  pub behavior_shuffle_icon_description: &'static str,
-  pub behavior_repeat_track_icon_name: &'static str,
-  pub behavior_repeat_track_icon_description: &'static str,
-  pub behavior_repeat_context_icon_name: &'static str,
-  pub behavior_repeat_context_icon_description: &'static str,
   pub behavior_playing_icon_name: &'static str,
   pub behavior_playing_icon_description: &'static str,
-  pub behavior_paused_icon_name: &'static str,
-  pub behavior_paused_icon_description: &'static str,
   pub behavior_gauge_filled_icon_name: &'static str,
   pub behavior_gauge_filled_icon_description: &'static str,
   pub behavior_gauge_unfilled_icon_name: &'static str,
   pub behavior_gauge_unfilled_icon_description: &'static str,
-  pub behavior_active_source_icon_name: &'static str,
-  pub behavior_active_source_icon_description: &'static str,
   pub behavior_sort_ascending_icon_name: &'static str,
   pub behavior_sort_ascending_icon_description: &'static str,
   pub behavior_sort_descending_icon_name: &'static str,
@@ -223,17 +200,15 @@ pub struct SettingsStrings {
   pub bool_on: &'static str,
   pub bool_off: &'static str,
   pub tabs_title: &'static str,
-  pub effective_key_template: &'static str,
   pub filtered_count_template: &'static str,
+  /// Between a setting's name and its value.
+  pub value_separator: &'static str,
   pub item_count_template: &'static str,
   pub category_title_template: &'static str,
   pub no_matches_template: &'static str,
   pub enhancement_on: &'static str,
   pub enhancement_available: &'static str,
   pub enhancement_off: &'static str,
-  pub ctrl_comma_ok: &'static str,
-  pub ctrl_comma_degraded: &'static str,
-  pub ctrl_comma_unknown: &'static str,
   pub terminal_input_template: &'static str,
   pub filter_controls: &'static str,
   pub bool_controls: &'static str,
@@ -252,15 +227,10 @@ pub struct SettingsStrings {
   pub unsaved_controls: &'static str,
   pub save_failed_template: &'static str,
   pub icon_width_template: &'static str,
-  pub invalid_delay_template: &'static str,
   pub invalid_color_template: &'static str,
   pub reserved_key_template: &'static str,
   pub key_conflict_template: &'static str,
   pub option_auto: &'static str,
-  pub option_soloist_normal: &'static str,
-  pub option_soloist_high: &'static str,
-  pub option_soloist_very_high: &'static str,
-  pub option_soloist_lossless: &'static str,
   pub option_auto_color: &'static str,
   pub option_en: &'static str,
   pub option_pt_br: &'static str,
@@ -269,17 +239,10 @@ pub struct SettingsStrings {
   pub option_play: &'static str,
   pub option_pause: &'static str,
   pub option_home: &'static str,
-  pub option_recently_played: &'static str,
-  pub option_podcasts: &'static str,
-  pub option_discover: &'static str,
-  pub option_artists: &'static str,
-  pub option_album_list: &'static str,
   pub option_stats: &'static str,
   pub option_default: &'static str,
   pub option_name: &'static str,
   pub option_name_desc: &'static str,
-  pub option_date_added: &'static str,
-  pub option_date_added_desc: &'static str,
   pub option_artist: &'static str,
   pub option_artist_desc: &'static str,
   pub option_album: &'static str,
@@ -293,14 +256,7 @@ pub struct SettingsStrings {
   pub option_hidden: &'static str,
   pub option_bottom: &'static str,
   pub option_top: &'static str,
-  pub option_spectrum: &'static str,
-  pub option_waveform: &'static str,
   pub option_custom: &'static str,
-  pub delay_days: &'static str,
-  pub delay_hours: &'static str,
-  pub delay_minutes: &'static str,
-  pub delay_seconds: &'static str,
-  pub delay_number: &'static str,
   pub color_unknown_template: &'static str,
   pub color_empty: &'static str,
   pub color_invalid_digit: &'static str,
@@ -331,14 +287,6 @@ impl SettingsStrings {
   /// Semantic row ids resolve to display copy, never to persisted values.
   pub fn row_text(&self, id: &str) -> Option<(&'static str, &'static str)> {
     Some(match id {
-      "behavior.soloist_path" => (
-        self.behavior_soloist_path_name,
-        self.behavior_soloist_path_description,
-      ),
-      "behavior.soloist_api_key" => (
-        self.behavior_soloist_api_key_name,
-        self.behavior_soloist_api_key_description,
-      ),
       "behavior.language" => (
         self.behavior_language_name,
         self.behavior_language_description,
@@ -383,10 +331,6 @@ impl SettingsStrings {
         self.behavior_enforce_wide_search_bar_name,
         self.behavior_enforce_wide_search_bar_description,
       ),
-      "behavior.group_folders_first" => (
-        self.behavior_group_folders_first_name,
-        self.behavior_group_folders_first_description,
-      ),
       "behavior.disable_mouse_inputs" => (
         self.behavior_disable_mouse_inputs_name,
         self.behavior_disable_mouse_inputs_description,
@@ -399,10 +343,6 @@ impl SettingsStrings {
         self.behavior_enable_discord_rpc_name,
         self.behavior_enable_discord_rpc_description,
       ),
-      "behavior.stop_after_current_track" => (
-        self.behavior_stop_after_current_track_name,
-        self.behavior_stop_after_current_track_description,
-      ),
       "behavior.keepawake_enabled" => (
         self.behavior_keepawake_enabled_name,
         self.behavior_keepawake_enabled_description,
@@ -414,10 +354,6 @@ impl SettingsStrings {
       "behavior.startup_behavior" => (
         self.behavior_startup_behavior_name,
         self.behavior_startup_behavior_description,
-      ),
-      "behavior.player_bar_visualizer" => (
-        self.behavior_player_bar_visualizer_name,
-        self.behavior_player_bar_visualizer_description,
       ),
       "behavior.startup_route" => (
         self.behavior_startup_route_name,
@@ -483,25 +419,9 @@ impl SettingsStrings {
         self.behavior_cover_art_dither_pixel_scale_name,
         self.behavior_cover_art_dither_pixel_scale_description,
       ),
-      "behavior.shuffle_icon" => (
-        self.behavior_shuffle_icon_name,
-        self.behavior_shuffle_icon_description,
-      ),
-      "behavior.repeat_track_icon" => (
-        self.behavior_repeat_track_icon_name,
-        self.behavior_repeat_track_icon_description,
-      ),
-      "behavior.repeat_context_icon" => (
-        self.behavior_repeat_context_icon_name,
-        self.behavior_repeat_context_icon_description,
-      ),
       "behavior.playing_icon" => (
         self.behavior_playing_icon_name,
         self.behavior_playing_icon_description,
-      ),
-      "behavior.paused_icon" => (
-        self.behavior_paused_icon_name,
-        self.behavior_paused_icon_description,
       ),
       "behavior.gauge_filled_icon" => (
         self.behavior_gauge_filled_icon_name,
@@ -510,10 +430,6 @@ impl SettingsStrings {
       "behavior.gauge_unfilled_icon" => (
         self.behavior_gauge_unfilled_icon_name,
         self.behavior_gauge_unfilled_icon_description,
-      ),
-      "behavior.active_source_icon" => (
-        self.behavior_active_source_icon_name,
-        self.behavior_active_source_icon_description,
       ),
       "behavior.sort_ascending_icon" => (
         self.behavior_sort_ascending_icon_name,
@@ -676,10 +592,6 @@ impl SettingsStrings {
   pub fn option_label<'a>(&self, id: &str, raw: &'a str) -> &'a str {
     match (id, raw) {
       ("behavior.language", "auto") => self.option_auto,
-      ("behavior.soloist_audio_quality", "Normal") => self.option_soloist_normal,
-      ("behavior.soloist_audio_quality", "High") => self.option_soloist_high,
-      ("behavior.soloist_audio_quality", "Very high") => self.option_soloist_very_high,
-      ("behavior.soloist_audio_quality", "Lossless") => self.option_soloist_lossless,
       ("behavior.language", "en") => self.option_en,
       ("behavior.language", "pt-BR") => self.option_pt_br,
       ("behavior.language", "fr") => self.option_fr,
@@ -687,26 +599,16 @@ impl SettingsStrings {
       ("behavior.startup_behavior", "Play") => self.option_play,
       ("behavior.startup_behavior", "Pause") => self.option_pause,
       ("behavior.startup_route", "home") => self.option_home,
-      ("behavior.startup_route", "recently_played") => self.option_recently_played,
-      ("behavior.startup_route", "podcasts") => self.option_podcasts,
-      ("behavior.startup_route", "discover") => self.option_discover,
-      ("behavior.startup_route", "artists") => self.option_artists,
-      ("behavior.startup_route", "album_list") => self.option_album_list,
       ("behavior.startup_route", "stats") => self.option_stats,
       ("behavior.sidebar_position", "left") => self.option_left,
       ("behavior.sidebar_position", "right") => self.option_right,
       ("behavior.sidebar_position", "hidden") => self.option_hidden,
       ("behavior.playbar_position", "bottom") => self.option_bottom,
       ("behavior.playbar_position", "top") => self.option_top,
-      ("behavior.player_bar_visualizer", "Off") => self.off,
-      ("behavior.player_bar_visualizer", "Spectrum") => self.option_spectrum,
-      ("behavior.player_bar_visualizer", "Waveform") => self.option_waveform,
       ("theme.preset", "Custom") => self.option_custom,
       ("behavior.default_sort_playlist_tracks", "default") => self.option_default,
       ("behavior.default_sort_playlist_tracks", "name") => self.option_name,
       ("behavior.default_sort_playlist_tracks", "name:desc") => self.option_name_desc,
-      ("behavior.default_sort_playlist_tracks", "date_added") => self.option_date_added,
-      ("behavior.default_sort_playlist_tracks", "date_added:desc") => self.option_date_added_desc,
       ("behavior.default_sort_playlist_tracks", "artist") => self.option_artist,
       ("behavior.default_sort_playlist_tracks", "artist:desc") => self.option_artist_desc,
       ("behavior.default_sort_playlist_tracks", "album") => self.option_album,
@@ -741,13 +643,6 @@ impl SettingsStrings {
     }
   }
 
-  pub fn effective_key(&self, configured: &str, effective: &str) -> String {
-    super::format_template(
-      self.effective_key_template,
-      &[("configured", configured), ("effective", effective)],
-    )
-  }
-
   pub fn filtered_count(&self, visible: usize, total: usize) -> String {
     super::format_template(
       self.filtered_count_template,
@@ -773,10 +668,10 @@ impl SettingsStrings {
     super::format_template(self.no_matches_template, &[("category", category)])
   }
 
-  pub fn terminal_input(&self, enhancement: &str, ctrl_comma: &str) -> String {
+  pub fn terminal_input(&self, enhancement: &str) -> String {
     super::format_template(
       self.terminal_input_template,
-      &[("enhancement", enhancement), ("ctrl_comma", ctrl_comma)],
+      &[("enhancement", enhancement)],
     )
   }
 
@@ -859,11 +754,11 @@ mod tests {
       "Automatique (système)"
     );
     assert_eq!(
-      FR.option_label("behavior.default_sort_playlist_tracks", "date_added:desc"),
-      "date d'ajout (décroissant)"
+      FR.option_label("behavior.default_sort_playlist_tracks", "artist:desc"),
+      FR.option_artist_desc
     );
     assert_eq!(
-      PT_BR.option_label("behavior.streaming_device_name", "default"),
+      PT_BR.option_label("behavior.unknown_setting", "default"),
       "default"
     );
     assert_eq!(

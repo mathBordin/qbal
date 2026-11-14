@@ -1,4 +1,4 @@
-//! A development aid: with `SPOTATUI_DEV_INSPECT=<dir>`, a line `<id>\t<wait_ms>\t<key>...` written to
+//! A development aid: with `QBAL_DEV_INSPECT=<dir>`, a line `<id>\t<wait_ms>\t<key>...` written to
 //! `<dir>/in` types its keys as the terminal would, and the frame drawn after them lands in
 //! `<dir>/frame.json`. Keys use the config names (`j`, `enter`, `ctrl-f`); `text:<chars>` types each char.
 
@@ -15,7 +15,7 @@ use unicode_width::UnicodeWidthStr;
 use super::event::{Event, Key};
 use crate::core::user_config::parse_key_public;
 
-const ENV: &str = "SPOTATUI_DEV_INSPECT";
+const ENV: &str = "QBAL_DEV_INSPECT";
 const POLL: Duration = Duration::from_millis(50);
 
 pub struct Inspector {
@@ -23,7 +23,7 @@ pub struct Inspector {
 }
 
 impl Inspector {
-  /// Starts the inbox watcher when `SPOTATUI_DEV_INSPECT` names a directory.
+  /// Starts the inbox watcher when `QBAL_DEV_INSPECT` names a directory.
   pub fn from_env(tx: Sender<Event>) -> Option<Self> {
     Self::with_dir(std::env::var_os(ENV).map(PathBuf::from), tx)
   }

@@ -24,7 +24,7 @@ pub fn draw(cells: &mut Cells, frame: &Frame, state: &mut State, dt: f32) {
   // Title bar: the player's name and the scrolling-marquee line.
   cells.fill(0, 0, w, 1, TITLE_BAR);
   cells.put(1, 0, "WINAMP", (220, 200, 120), Some(TITLE_BAR), true);
-  let title = view.title.as_deref().unwrap_or("spotatui");
+  let title = view.title.as_deref().unwrap_or("Qbal");
   let length = view
     .duration_ms
     .map(|d| format!(" ({})", clock(u128::from(d))))

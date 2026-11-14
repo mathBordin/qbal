@@ -38,11 +38,6 @@ impl App {
     if self.queue_now_decoded_player().is_some() {
       return true;
     }
-    // A queue slot holding a legacy `spotify:` item owns the slot but nothing
-    // can play it; any remaining `*_playback` below is a suspended context.
-    if self.queue_now_is_spotify() {
-      return false;
-    }
     // A decoded start in flight, or a source whose session died with nothing to
     // replace it, still owns the sink.
     if self.decoded_sink_claim.is_some() {
@@ -90,11 +85,6 @@ impl App {
     if let Some(p) = self.queue_now_decoded_player() {
       return Some(p);
     }
-    // A queue slot holding a legacy `spotify:` item owns the slot but nothing
-    // can play it; any remaining `*_playback` below is a suspended context.
-    if self.queue_now_is_spotify() {
-      return None;
-    }
     if let Some(s) = &self.qobuz_playback {
       return Some(&s.player);
     }
@@ -107,65 +97,10 @@ impl App {
     if let Some(p) = self.queue_now_decoded_player() {
       return Some(p.position().as_millis());
     }
-    // A legacy `spotify:` queue item has no position to report; any remaining
-    // `*_playback` below is a suspended context.
-    if self.queue_now_is_spotify() {
-      return None;
-    }
     if let Some(qobuz) = &self.qobuz_playback {
       return Some(qobuz.player.position().as_millis());
     }
     None
-  }
-
-  /// The delivered Qobuz stream quality, worded like the TUI playbar: `FLAC 24/96`.
-  fn qobuz_quality_label(&self) -> Option<String> {
-    {
-      // A queue slot plays its own stream; `qobuz_playback` is then the suspended context.
-      if self.queue_owns_playback() {
-        return None;
-      }
-      self
-        .qobuz_playback
-        .as_ref()
-        .and_then(|qobuz| qobuz.quality)
-        .map(|quality| quality.label())
-    }
-  }
-
-  /// Bump the Playback and Queue revisions when what a frontend shows of them
-  /// changed; the playback position is not part of it.
-  pub(crate) fn note_display_changes(&mut self) {
-    let snapshot =
-      crate::infra::media_metadata::current_playback_snapshot(self).map(|mut snapshot| {
-        snapshot.progress_ms = 0;
-        snapshot
-      });
-    let _liked = snapshot
-      .as_ref()
-      .and_then(|snapshot| snapshot.item_id.as_ref())
-      .is_some_and(|id| self.liked_song_ids_set.contains(id));
-    let item_uri = snapshot
-      .as_ref()
-      .and_then(|snapshot| snapshot.item_uri.as_deref());
-    let _quality = match item_uri {
-      Some(uri) if uri.starts_with("qobuz:") => self.qobuz_quality_label(),
-      _ => None,
-    };
-
-    if self.queue_view.0 != self.queue
-      || self.queue_view.1 != self.native_queue
-      || self.queue_view.2.as_ref() != self.queue_now_track()
-    {
-      self.queue_view = (
-        self.queue.clone(),
-        self.native_queue.clone(),
-        self.queue_now_track().cloned(),
-      );
-      self.display_revisions.bump(DisplayDomain::Queue);
-    }
-    self.note_search_liked_changes();
-    self.note_track_table_changes();
   }
 }
 

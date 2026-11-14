@@ -33,15 +33,14 @@ impl App {
     info!("playing previous track or restarting current track");
     // The native queue owns playback: a forward-only queue has no "previous",
     // so restart the current queued track. The queue router intercepts the
-    // dispatched event for both decoded and Spotify queue slots.
+    // dispatched event.
     if self.queue_owns_playback() {
       self.song_progress_ms = 0;
       self.dispatch(IoEvent::PreviousTrack);
       return;
     }
-    // A decoded source owns the session: route to its dispatcher, never to the
-    // paused librespot. Preserve the ">= 3s restarts current, else previous"
-    // semantics (radio no-ops both Seek and PreviousTrack).
+    // The Qobuz session owns playback: route to its dispatcher, keeping the
+    // ">= 3s restarts the current track, else previous" semantics.
     if self.active_decoded_source() {
       if self.song_progress_ms >= 3_000 {
         self.dispatch(IoEvent::Seek(0));
@@ -63,8 +62,7 @@ impl App {
       self.dispatch(IoEvent::ForcePreviousTrack);
       return;
     }
-    // A decoded source owns the session: route to its dispatcher, never to the
-    // paused librespot. The source handles or no-ops ForcePreviousTrack.
+    // The Qobuz session owns playback: route to its dispatcher.
     if self.active_decoded_source() {
       self.song_progress_ms = 0;
       self.dispatch(IoEvent::ForcePreviousTrack);
@@ -94,9 +92,7 @@ impl App {
       self.dispatch(IoEvent::AdvanceNativeQueue);
       return;
     }
-    // A decoded source (local/subsonic/radio/youtube) owns the session: route to
-    // its dispatcher, never to the paused librespot. The source handles or
-    // no-ops NextTrack (radio has no queue).
+    // The Qobuz session owns playback: route to its dispatcher.
     if self.active_decoded_source() {
       self.song_progress_ms = 0;
       self.dispatch(IoEvent::NextTrack);
@@ -117,35 +113,7 @@ impl App {
     if uris.is_empty() {
       return;
     }
-    // One Music track at a time: there is no cross-source queue for Apple Music.
-    if uris.iter().all(|_uri| false) {
-      let offset = offset.unwrap_or(0);
-      if let Some(uri) = uris.get(offset) {
-        let _occurrence = uris[..offset].iter().filter(|u| *u == uri).count();
-      }
-      return;
-    }
     self.dispatch(IoEvent::StartPlayback(None, Some(uris), offset));
-  }
-
-  /// Start playback of a Spotify context URI, optionally from a 0-based track
-  /// offset. The context twin of [`Self::start_playback_uris`].
-  #[cfg_attr(not(feature = "scripting"), allow(dead_code))]
-  pub(crate) fn start_playback_context(&mut self, context_uri: String, offset: Option<usize>) {
-    self.dispatch(IoEvent::StartPlayback(Some(context_uri), None, offset));
-  }
-
-  /// Start playback of one track URI as the first track inside a Spotify
-  /// context URI. The third start shape beside the two twins above: the
-  /// network layer deliberately does not trim the uri list when a context is
-  /// present, which is what keeps the selected track first under shuffle.
-  #[cfg_attr(not(feature = "scripting"), allow(dead_code))]
-  pub(crate) fn start_playback_track_in_context(&mut self, context_uri: String, track_uri: String) {
-    self.dispatch(IoEvent::StartPlayback(
-      Some(context_uri),
-      Some(vec![track_uri]),
-      Some(0),
-    ));
   }
 }
 

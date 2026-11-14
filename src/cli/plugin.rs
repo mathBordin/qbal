@@ -1,4 +1,4 @@
-//! `spotatui plugin` subcommand: a thin git-based installer for Lua plugins.
+//! `qbal plugin` subcommand: a thin git-based installer for Lua plugins.
 //!
 //! Plugins are git repositories cloned into the app config directory's
 //! `plugins/<name>/`, where the
@@ -20,7 +20,7 @@ pub fn plugin_subcommand() -> Command {
     .about("Install and manage Lua plugins")
     .long_about(
       "Manage Lua plugins installed from git repositories. Plugins are cloned into \
-the spotatui config directory's plugins/<name>/ and loaded at startup (main.lua, or init.lua). \
+the qbal config directory's plugins/<name>/ and loaded at startup (main.lua, or init.lua). \
 Requires `git` on your PATH.",
     )
     .subcommand_required(true)
@@ -75,7 +75,7 @@ Requires `git` on your PATH.",
       Command::new("new")
         .about("Scaffold a new plugin to start from")
         .long_about(
-          "Create a new directory plugin in the spotatui config directory's plugins/<name>/ with a working \
+          "Create a new directory plugin in the qbal config directory's plugins/<name>/ with a working \
 main.lua and a README.md to edit and publish.",
         )
         .arg(
@@ -97,7 +97,7 @@ main.lua and a README.md to edit and publish.",
 /// Entry point dispatched from `runtime/`. Resolves the config dir and runs the chosen action.
 pub fn handle_plugin_command(matches: &ArgMatches) -> Result<()> {
   let config_dir = crate::core::user_config::default_app_config_dir()
-    .context("could not determine the spotatui config directory (no home directory found)")?;
+    .context("could not determine the qbal config directory (no home directory found)")?;
 
   match matches.subcommand() {
     Some(("add", m)) => {
@@ -156,7 +156,7 @@ fn add_plugin(config_dir: &Path, spec: &str, force: bool) -> Result<()> {
 
   println!("Installed plugin '{}' ({})", spec.name, short_rev(&rev));
   println!(
-    "Restart spotatui to load it. Bind any commands it registers via the `plugin_commands` map \
+    "Restart qbal to load it. Bind any commands it registers via the `plugin_commands` map \
 in config.yml."
   );
   Ok(())
@@ -168,7 +168,7 @@ fn list_plugins(config_dir: &Path) -> Result<()> {
 
   if lock.plugins.is_empty() {
     println!("No plugins installed.");
-    println!("Install one with: spotatui plugin add owner/repo");
+    println!("Install one with: qbal plugin add owner/repo");
   } else {
     println!("Installed plugins:");
     for p in &lock.plugins {
@@ -189,7 +189,7 @@ fn list_plugins(config_dir: &Path) -> Result<()> {
   let mut untracked = untracked_plugins(&plugins_dir, &tracked);
   untracked.sort();
   if !untracked.is_empty() {
-    println!("\nUntracked plugins (not managed by `spotatui plugin`):");
+    println!("\nUntracked plugins (not managed by `qbal plugin`):");
     for name in untracked {
       println!("  {name}");
     }
@@ -251,7 +251,7 @@ fn update_plugins(config_dir: &Path, name: Option<&String>) -> Result<()> {
     let dir = plugins_dir.join(&target.name);
     if !dir.is_dir() {
       println!(
-        "  {}: missing on disk, skipping (reinstall with `spotatui plugin add {}`)",
+        "  {}: missing on disk, skipping (reinstall with `qbal plugin add {}`)",
         target.name, target.repo
       );
       continue;
@@ -323,7 +323,7 @@ fn new_plugin(config_dir: &Path, name: &str, force: bool) -> Result<()> {
   println!(
     "  2. Bind its command in config.yml under `plugin_commands` (e.g. {name}_hello: \"ctrl-h\")"
   );
-  println!("  3. Restart spotatui to load it");
+  println!("  3. Restart qbal to load it");
   println!("  4. To publish: `git init` in the directory and push to a git host");
   Ok(())
 }
@@ -331,20 +331,20 @@ fn new_plugin(config_dir: &Path, name: &str, force: bool) -> Result<()> {
 fn scaffold_main_lua(name: &str) -> String {
   let api_version = crate::core::plugin_api::API_VERSION;
   format!(
-    r#"-- {name}: a spotatui plugin.
+    r#"-- {name}: a qbal plugin.
 -- Suggested key binding (add to config.yml under `plugin_commands`):
 --   {name}_hello: "ctrl-h"
 
-spotatui.require_api({api_version})
+qbal.require_api({api_version})
 
-spotatui.register_command("{name}_hello", function()
-  spotatui.notify("hello from {name}", 3)
+qbal.register_command("{name}_hello", function()
+  qbal.notify("hello from {name}", 3)
 end)
 
 -- Uncomment to react to track changes:
--- spotatui.on("track_change", function(pb)
+-- qbal.on("track_change", function(pb)
 --   if pb and pb.track then
---     spotatui.set_playbar(pb.track.name)
+--     qbal.set_playbar(pb.track.name)
 --   end
 -- end)
 "#
@@ -355,7 +355,7 @@ fn scaffold_readme(name: &str) -> String {
   format!(
     r#"# {name}
 
-A spotatui plugin.
+A qbal plugin.
 
 ## What it does
 
@@ -364,10 +364,10 @@ Registers a `{name}_hello` command that shows a notification. Edit `main.lua` to
 ## Install
 
 ```bash
-spotatui plugin add owner/{name}
+qbal plugin add owner/{name}
 ```
 
-Or copy this directory into the spotatui config directory's `plugins/`.
+Or copy this directory into the qbal config directory's `plugins/`.
 
 ## Key binding
 
@@ -758,8 +758,7 @@ mod tests {
 
   #[test]
   fn load_lock_missing_is_empty() {
-    let path =
-      std::env::temp_dir().join(format!("spotatui_lock_missing_{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("qbal_lock_missing_{}.json", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let lock = load_lock(&path).unwrap();
     assert!(lock.plugins.is_empty());
@@ -767,7 +766,7 @@ mod tests {
 
   #[test]
   fn save_then_load_lock() {
-    let path = std::env::temp_dir().join(format!("spotatui_lock_rt_{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("qbal_lock_rt_{}.json", std::process::id()));
     let mut lock = PluginLock::default();
     lock.upsert(LockedPlugin {
       name: "lyrics".into(),
@@ -791,7 +790,7 @@ mod tests {
 
   #[test]
   fn untracked_lists_loose_files_and_untracked_dirs() {
-    let dir = std::env::temp_dir().join(format!("spotatui_untracked_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("qbal_untracked_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("tracked-plugin")).unwrap();
     std::fs::create_dir_all(dir.join("hand-installed")).unwrap();

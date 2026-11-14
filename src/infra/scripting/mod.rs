@@ -1,7 +1,7 @@
-//! Lua scripting engine (Phase 1).
+//! Lua scripting engine.
 //!
-//! Embeds `mlua` and exposes a curated `spotatui.*` API to user plugins. Lua never sees
-//! `&mut App` or rspotify types: reads come from a cached snapshot of the [`plugin_api`]
+//! Embeds `mlua` and exposes a curated `qbal.*` API to user plugins. Lua never sees
+//! `&mut App`: reads come from a cached snapshot of the [`plugin_api`]
 //! facade, and writes are queued as [`Action`](crate::core::action::Action)s that the
 //! driver drains through `App::apply` while holding `&mut App`. Every Rust->Lua callback
 //! is wrapped in `catch_unwind`; a misbehaving plugin logs an error, surfaces a status

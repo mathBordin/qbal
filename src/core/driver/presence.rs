@@ -9,7 +9,7 @@ use crate::infra::discord_rpc;
 #[cfg(all(feature = "mpris", target_os = "linux"))]
 use crate::infra::mpris;
 
-pub(super) const DEFAULT_WINDOW_TITLE: &str = "spotatui";
+pub(super) const DEFAULT_WINDOW_TITLE: &str = "qbal";
 
 #[derive(Default)]
 pub(super) struct WindowTitleState {
@@ -164,9 +164,9 @@ pub(super) fn update_mpris_state(manager: &mpris::MprisManager, state: &mut Mpri
       state.last_shuffle = Some(snapshot.shuffle);
     }
 
-    // A `None` repeat means the source has no repeat control (native queue,
-    // radio); reset to `None` rather than leaving a stale Track/Playlist that a
-    // prior decoded context pushed.
+    // A `None` repeat means there is no repeat control (the native queue);
+    // reset to `None` rather than leaving a stale Track/Playlist that a prior
+    // playlist pushed.
     let loop_status = match snapshot.repeat {
       Some(crate::core::plugin_api::RepeatState::Track) => mpris::LoopStatusEvent::Track,
       Some(crate::core::plugin_api::RepeatState::Context) => mpris::LoopStatusEvent::Playlist,

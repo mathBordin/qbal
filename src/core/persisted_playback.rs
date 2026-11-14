@@ -1,30 +1,13 @@
-//! Persist the last non-Spotify playback session so it survives restarts.
+//! Persist the last playback session so it survives restarts: which Qobuz
+//! track list was playing, where in it, whether it was paused, and the native
+//! queue.
 //!
-//! The browse-scope [`Source`](crate::core::source::Source) is already persisted
-//! in `state.yml` (see [`RuntimeState::active_source`](crate::core::state::RuntimeState::active_source)).
-//! What this module adds
-//! is the *playback* side: which track/queue was playing, where in it, and
-//! whether it was paused — so that after a restart the app can resume the exact
-//! song on the same source.
-//!
-//! ## Why a side file and not `config.yml`
-//!
-//! A playback session is a machine-written, frequently-updated blob (a queue of
-//! [`TrackInfo`], an index, a live position). Serializing that into the
-//! hand-editable `config.yml` would bury the user's real settings under churning
-//! metadata. So it lives in its own `last_session.yml` under the app state dir,
-//! mirroring the `youtube_playlists.yml` precedent.
-//!
-//! ## Per-source shape
-//!
-//! The sources differ in what they need to reconstruct playback, so this is a
-//! tagged enum rather than one struct that fits none of them:
-//! - **Local** re-reads tags from disk, so only the `file://` URI queue + index
-//!   are needed.
-//! - **Subsonic / YouTube** got their metadata from a remote API / `yt-dlp`; it
-//!   cannot be re-derived offline, so the full [`TrackInfo`] list is stored.
-//! - **Radio** is one infinite stream — no queue, just the station row to
-//!   reconnect to.
+//! A playback session is a machine-written, frequently-updated blob (a list of
+//! [`TrackInfo`], an index, a live position). Serializing it into the
+//! hand-editable `config.yml` would bury the user's real settings under
+//! churning metadata, so it lives in its own `last_session.yml` under the app
+//! state dir. The full [`TrackInfo`] list is stored because Qobuz metadata
+//! cannot be re-derived offline.
 
 use crate::core::plugin_api::TrackInfo;
 use anyhow::{anyhow, Context, Result};
@@ -33,9 +16,9 @@ use std::path::{Path, PathBuf};
 
 const FILE_NAME: &str = "last_session.yml";
 
-/// The full persisted session: the active non-Spotify playback (if any) plus the
-/// native cross-source queue. Wraps [`PersistedPlayback`] so the queue can be
-/// persisted independently of whichever source (if any) owns playback.
+/// The full persisted session: the active playback (if any) plus the native
+/// queue. Wraps [`PersistedPlayback`] so the queue can be persisted
+/// independently of the playback.
 ///
 /// `deny_unknown_fields` is load-bearing: [`load`] parses this wrapper *first*,
 /// and a legacy file is a bare top-level [`PersistedPlayback`] whose `source`
@@ -54,18 +37,17 @@ pub struct PersistedSession {
 
 /// Environment override for the session file location (used by tests, and
 /// available to users who keep their config elsewhere).
-pub const PATH_ENV: &str = "SPOTATUI_LAST_SESSION_PATH";
+pub const PATH_ENV: &str = "QBAL_LAST_SESSION_PATH";
 
-/// A snapshot of the non-Spotify playback session, enough to resume it on the
-/// next launch. One variant per source; the discriminant doubles as the source
-/// marker (see [`PersistedPlayback::source`]).
+/// What to resume on the next launch. The `source` tag is kept so sessions
+/// from other sources, written by the app this one forked from, fail to load
+/// instead of resuming as something else.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "source")]
 pub enum PersistedPlayback {
-  /// Local files: the `file://` URI queue is enough — tags are re-read from
-  /// disk when the queue restarts.
-  Local {
-    queue: Vec<String>,
+  /// Qobuz: full track metadata (from the API) plus the queue position.
+  Qobuz {
+    tracks: Vec<TrackInfo>,
     index: usize,
     position_ms: u64,
     paused: bool,
@@ -82,51 +64,9 @@ pub enum PersistedPlayback {
     #[serde(default)]
     shuffle: Option<crate::infra::queue::ShuffleBackup>,
   },
-  /// Subsonic: full track metadata (from the API) plus the queue position.
-  Subsonic {
-    tracks: Vec<TrackInfo>,
-    index: usize,
-    position_ms: u64,
-    paused: bool,
-    #[serde(default)]
-    repeat: crate::infra::queue::RepeatMode,
-    #[serde(default)]
-    shuffle_on: bool,
-    #[serde(default)]
-    shuffle: Option<crate::infra::queue::ShuffleBackup>,
-  },
-  /// Qobuz: full track metadata (from the API) plus the queue position.
-  Qobuz {
-    tracks: Vec<TrackInfo>,
-    index: usize,
-    position_ms: u64,
-    paused: bool,
-    #[serde(default)]
-    repeat: crate::infra::queue::RepeatMode,
-    #[serde(default)]
-    shuffle_on: bool,
-    #[serde(default)]
-    shuffle: Option<crate::infra::queue::ShuffleBackup>,
-  },
-  /// YouTube: full track metadata (from `yt-dlp`) plus the queue position.
-  YouTube {
-    tracks: Vec<TrackInfo>,
-    index: usize,
-    position_ms: u64,
-    paused: bool,
-    #[serde(default)]
-    repeat: crate::infra::queue::RepeatMode,
-    #[serde(default)]
-    shuffle_on: bool,
-    #[serde(default)]
-    shuffle: Option<crate::infra::queue::ShuffleBackup>,
-  },
-  /// Radio: a single station to reconnect to. A stream has no seekable
-  /// position, so none is stored.
-  Radio { station: TrackInfo, paused: bool },
 }
 
-/// Location of the session file: `$SPOTATUI_LAST_SESSION_PATH` when set, else
+/// Location of the session file: `$QBAL_LAST_SESSION_PATH` when set, else
 /// `<state dir>/last_session.yml`.
 pub fn default_session_path() -> Result<PathBuf> {
   if let Ok(path) = std::env::var(PATH_ENV) {
@@ -134,7 +74,7 @@ pub fn default_session_path() -> Result<PathBuf> {
   }
   crate::core::paths::app_state_dir()
     .map(|dir| dir.join(FILE_NAME))
-    .ok_or_else(|| anyhow!("cannot resolve the spotatui state directory"))
+    .ok_or_else(|| anyhow!("cannot resolve the qbal state directory"))
 }
 
 /// Load the persisted session. A missing file means "no session to resume"
@@ -233,33 +173,13 @@ mod tests {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("last_session.yml");
     let s = session(
-      Some(PersistedPlayback::Local {
-        queue: vec!["file:///a.mp3".to_string(), "file:///b.mp3".to_string()],
+      Some(PersistedPlayback::Qobuz {
+        tracks: vec![track("qobuz:track:1", "A"), track("qobuz:track:2", "B")],
         index: 0,
         position_ms: 0,
         paused: false,
         repeat: RepeatMode::Context,
         shuffle_on: true,
-        shuffle: None,
-      }),
-      vec![],
-    );
-    save(&path, &s).unwrap();
-    assert_eq!(load(&path).unwrap(), Some(s));
-  }
-
-  #[test]
-  fn save_then_load_round_trips_a_youtube_playback() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("last_session.yml");
-    let s = session(
-      Some(PersistedPlayback::YouTube {
-        tracks: vec![track("youtube:aaa", "A"), track("youtube:bbb", "B")],
-        index: 1,
-        position_ms: 42_000,
-        paused: true,
-        repeat: RepeatMode::Track,
-        shuffle_on: false,
         shuffle: None,
       }),
       vec![],
@@ -293,8 +213,8 @@ mod tests {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("last_session.yml");
     let s = session(
-      Some(PersistedPlayback::Subsonic {
-        tracks: vec![track("subsonic:track:1", "Sub")],
+      Some(PersistedPlayback::Qobuz {
+        tracks: vec![track("qobuz:track:1", "Playing")],
         index: 0,
         position_ms: 5_000,
         paused: false,
@@ -303,8 +223,8 @@ mod tests {
         shuffle: None,
       }),
       vec![
-        track("spotify:track:xyz", "Queued A"),
-        track("file:///b.mp3", "Queued B"),
+        track("qobuz:track:2", "Queued A"),
+        track("qobuz:track:3", "Queued B"),
       ],
     );
     save(&path, &s).unwrap();
@@ -316,7 +236,7 @@ mod tests {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("last_session.yml");
     // No active playback source, but the native queue has items to persist.
-    let s = session(None, vec![track("spotify:track:only", "Just Queued")]);
+    let s = session(None, vec![track("qobuz:track:9", "Just Queued")]);
     save(&path, &s).unwrap();
     let loaded = load(&path).unwrap().expect("should load");
     assert!(loaded.playback.is_none());
@@ -330,10 +250,10 @@ mod tests {
     // `source` tag; it must still resume playback (and load an empty queue).
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("last_session.yml");
-    let legacy = PersistedPlayback::YouTube {
+    let legacy = PersistedPlayback::Qobuz {
       tracks: vec![
-        track("youtube:aaa", "Legacy A"),
-        track("youtube:bbb", "Legacy B"),
+        track("qobuz:track:1", "Legacy A"),
+        track("qobuz:track:2", "Legacy B"),
       ],
       index: 1,
       position_ms: 12_345,
@@ -358,8 +278,8 @@ mod tests {
     save(
       &path,
       &session(
-        Some(PersistedPlayback::Local {
-          queue: vec!["file:///music/a.mp3".to_string()],
+        Some(PersistedPlayback::Qobuz {
+          tracks: vec![track("qobuz:track:1", "A")],
           index: 0,
           position_ms: 0,
           paused: false,
@@ -376,6 +296,18 @@ mod tests {
     assert!(!path.exists());
     // Clearing an absent file is a no-op, not an error.
     clear(&path).unwrap();
+  }
+
+  #[test]
+  fn a_session_from_another_source_does_not_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("last_session.yml");
+    std::fs::write(
+      &path,
+      "playback:\n  source: Local\n  queue: [\"file:///a.mp3\"]\n  index: 0\n  position_ms: 0\n  paused: false\nqueue: []\n",
+    )
+    .unwrap();
+    assert!(load(&path).is_err());
   }
 
   #[test]

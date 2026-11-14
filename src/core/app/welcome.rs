@@ -18,15 +18,6 @@ impl App {
     };
     Some((screens.listening_streak(streaks.current_days), note))
   }
-
-  /// Open a Welcome page link in the system browser; any other target is ignored.
-  pub(crate) fn open_changelog_link(&mut self, url: &str) {
-    if !crate::core::changelog::opens_link(url) {
-      log::warn!("ignored a Welcome page link that is not in the changelog");
-      return;
-    }
-    self.open_external_url(url);
-  }
 }
 
 #[cfg(test)]

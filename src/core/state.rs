@@ -2,14 +2,12 @@
 //!
 //! This is the machine-owned counterpart to `config.yml`. It holds values that
 //! change as the app runs, or data the app manages directly, so ordinary config
-//! edits do not churn every time volume, source, pane sizes, announcements, or
-//! radio stations change.
+//! edits do not churn every time volume, source, pane sizes, or announcements
+//! change.
 
 use crate::core::{
-  gui_layout::GuiLayout,
   limits::MAX_PLAYBAR_ROWS,
   pane::{Pane, PaneNode},
-  sort::SidebarPlaylistOrder,
   source::Source,
 };
 use anyhow::{anyhow, Context, Result};
@@ -17,13 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const FILE_NAME: &str = "state.yml";
-
-/// One saved internet-radio station: a display name plus the direct stream URL.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RadioStationConfig {
-  pub name: String,
-  pub url: String,
-}
 
 /// The Qobuz web-player constants, cached by bundle version (public values only).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,21 +40,12 @@ pub struct RuntimeState {
   pub volume_percent: u8,
   pub shuffle_enabled: bool,
   pub active_source: Source,
-  pub playlist_sidebar_order: SidebarPlaylistOrder,
   pub seen_announcement_ids: Vec<String>,
   pub dismissed_announcements: Vec<String>,
   pub sidebar_width_percent: u8,
   pub playbar_height_rows: u16,
   pub library_height_percent: u8,
   pub pane_layout: PaneNode,
-  pub gui_pane_layout: GuiLayout,
-  /// Whether `V` last picked the Spotify pitch view rather than a style.
-  pub pitch_view_chosen: bool,
-  pub radio_stations: Vec<RadioStationConfig>,
-  /// Whether the one-time community-playlist-pin prompt has been shown.
-  pub community_pin_prompt_shown: bool,
-  /// The Spotify Connect device playback goes to by default.
-  pub spotify_device_id: Option<String>,
 }
 
 impl Default for RuntimeState {
@@ -72,18 +54,12 @@ impl Default for RuntimeState {
       volume_percent: 100,
       shuffle_enabled: false,
       active_source: Source::default(),
-      playlist_sidebar_order: SidebarPlaylistOrder::Spotify,
       seen_announcement_ids: Vec::new(),
       dismissed_announcements: Vec::new(),
       sidebar_width_percent: 20,
       playbar_height_rows: 6,
       library_height_percent: 30,
       pane_layout: PaneNode::default(),
-      gui_pane_layout: GuiLayout::default(),
-      pitch_view_chosen: true,
-      radio_stations: Vec::new(),
-      community_pin_prompt_shown: false,
-      spotify_device_id: None,
     }
   }
 }
@@ -98,9 +74,6 @@ impl RuntimeState {
     }
     if let Some(active_source) = state.active_source {
       self.active_source = active_source;
-    }
-    if let Some(playlist_sidebar_order) = state.playlist_sidebar_order {
-      self.playlist_sidebar_order = playlist_sidebar_order;
     }
     if let Some(seen_announcement_ids) = &state.seen_announcement_ids {
       self.seen_announcement_ids = sanitized_ids(seen_announcement_ids);
@@ -121,21 +94,6 @@ impl RuntimeState {
       pane_layout.close(Pane::NowPlaying);
       self.pane_layout = pane_layout;
     }
-    if let Some(gui_pane_layout) = &state.gui_pane_layout {
-      self.gui_pane_layout = gui_pane_layout.sanitized();
-    }
-    if let Some(pitch_view_chosen) = state.pitch_view_chosen {
-      self.pitch_view_chosen = pitch_view_chosen;
-    }
-    if let Some(radio_stations) = &state.radio_stations {
-      self.radio_stations = sanitized_radio_stations(radio_stations);
-    }
-    if let Some(community_pin_prompt_shown) = state.community_pin_prompt_shown {
-      self.community_pin_prompt_shown = community_pin_prompt_shown;
-    }
-    if let Some(device_id) = sanitized_device_id(state.spotify_device_id.as_deref()) {
-      self.spotify_device_id = Some(device_id);
-    }
   }
 
   pub fn to_persisted(&self) -> PersistedRuntimeState {
@@ -143,19 +101,13 @@ impl RuntimeState {
       volume_percent: Some(self.volume_percent.min(100)),
       shuffle_enabled: Some(self.shuffle_enabled),
       active_source: Some(self.active_source),
-      playlist_sidebar_order: Some(self.playlist_sidebar_order),
       seen_announcement_ids: Some(sanitized_ids(&self.seen_announcement_ids)),
       dismissed_announcements: Some(sanitized_ids(&self.dismissed_announcements)),
       sidebar_width_percent: Some(self.sidebar_width_percent.min(100)),
       playbar_height_rows: Some(self.playbar_height_rows.min(MAX_PLAYBAR_ROWS)),
       library_height_percent: Some(self.library_height_percent.min(100)),
       pane_layout: self.pane_layout.sanitized(),
-      gui_pane_layout: Some(self.gui_pane_layout.sanitized()),
-      pitch_view_chosen: Some(self.pitch_view_chosen),
-      radio_stations: Some(sanitized_radio_stations(&self.radio_stations)),
-      community_pin_prompt_shown: Some(self.community_pin_prompt_shown),
       qobuz_bundle_cache: None,
-      spotify_device_id: sanitized_device_id(self.spotify_device_id.as_deref()),
     }
   }
 
@@ -188,11 +140,6 @@ pub struct PersistedRuntimeState {
     deserialize_with = "source_config::deserialize_option"
   )]
   pub active_source: Option<Source>,
-  #[serde(
-    skip_serializing_if = "Option::is_none",
-    deserialize_with = "deserialize_playlist_sidebar_order"
-  )]
-  pub playlist_sidebar_order: Option<SidebarPlaylistOrder>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub seen_announcement_ids: Option<Vec<String>>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,43 +156,14 @@ pub struct PersistedRuntimeState {
     deserialize_with = "deserialize_pane_layout"
   )]
   pub pane_layout: Option<PaneNode>,
-  #[serde(
-    skip_serializing_if = "Option::is_none",
-    deserialize_with = "deserialize_gui_pane_layout"
-  )]
-  pub gui_pane_layout: Option<GuiLayout>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub pitch_view_chosen: Option<bool>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub radio_stations: Option<Vec<RadioStationConfig>>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub community_pin_prompt_shown: Option<bool>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub qobuz_bundle_cache: Option<QobuzBundleCache>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub spotify_device_id: Option<String>,
 }
 
 impl PersistedRuntimeState {
   pub fn volume_percent(volume_percent: u8) -> Self {
     Self {
       volume_percent: Some(volume_percent.min(100)),
-      ..Default::default()
-    }
-  }
-
-  // Written only by the Linux MPRIS shuffle handler.
-  #[cfg_attr(not(all(feature = "mpris", target_os = "linux")), allow(dead_code))]
-  pub fn shuffle_enabled(shuffle_enabled: bool) -> Self {
-    Self {
-      shuffle_enabled: Some(shuffle_enabled),
-      ..Default::default()
-    }
-  }
-
-  pub fn active_source(active_source: Source) -> Self {
-    Self {
-      active_source: Some(active_source),
       ..Default::default()
     }
   }
@@ -289,13 +207,6 @@ impl PersistedRuntimeState {
     }
   }
 
-  pub fn pitch_view_chosen(pitch_view_chosen: bool) -> Self {
-    Self {
-      pitch_view_chosen: Some(pitch_view_chosen),
-      ..Default::default()
-    }
-  }
-
   pub fn qobuz_bundle_cache(qobuz_bundle_cache: QobuzBundleCache) -> Self {
     Self {
       qobuz_bundle_cache: Some(qobuz_bundle_cache),
@@ -311,19 +222,13 @@ impl PersistedRuntimeState {
     self.volume_percent.is_none()
       && self.shuffle_enabled.is_none()
       && self.active_source.is_none()
-      && self.playlist_sidebar_order.is_none()
       && self.seen_announcement_ids.is_none()
       && self.dismissed_announcements.is_none()
       && self.sidebar_width_percent.is_none()
       && self.playbar_height_rows.is_none()
       && self.library_height_percent.is_none()
       && self.pane_layout.is_none()
-      && self.gui_pane_layout.is_none()
-      && self.pitch_view_chosen.is_none()
-      && self.radio_stations.is_none()
-      && self.community_pin_prompt_shown.is_none()
       && self.qobuz_bundle_cache.is_none()
-      && self.spotify_device_id.is_none()
   }
 }
 
@@ -331,7 +236,7 @@ impl PersistedRuntimeState {
 pub fn default_state_path() -> Result<PathBuf> {
   crate::core::paths::app_state_dir()
     .map(|dir| dir.join(FILE_NAME))
-    .ok_or_else(|| anyhow!("cannot resolve the spotatui state directory"))
+    .ok_or_else(|| anyhow!("cannot resolve the qbal state directory"))
 }
 
 /// Outcome of reading `state.yml` off disk, before deciding how to react to a
@@ -456,7 +361,6 @@ fn sanitized_persisted_state(state: &PersistedRuntimeState) -> PersistedRuntimeS
     volume_percent: state.volume_percent.map(|volume| volume.min(100)),
     shuffle_enabled: state.shuffle_enabled,
     active_source: state.active_source,
-    playlist_sidebar_order: state.playlist_sidebar_order,
     seen_announcement_ids: state.seen_announcement_ids.as_deref().map(sanitized_ids),
     dismissed_announcements: state.dismissed_announcements.as_deref().map(sanitized_ids),
     sidebar_width_percent: state.sidebar_width_percent.map(|width| width.min(100)),
@@ -465,18 +369,10 @@ fn sanitized_persisted_state(state: &PersistedRuntimeState) -> PersistedRuntimeS
       .map(|rows| rows.min(MAX_PLAYBAR_ROWS)),
     library_height_percent: state.library_height_percent.map(|height| height.min(100)),
     pane_layout: state.pane_layout.as_ref().and_then(PaneNode::sanitized),
-    gui_pane_layout: state.gui_pane_layout.as_ref().map(GuiLayout::sanitized),
-    pitch_view_chosen: state.pitch_view_chosen,
-    radio_stations: state
-      .radio_stations
-      .as_deref()
-      .map(sanitized_radio_stations),
-    community_pin_prompt_shown: state.community_pin_prompt_shown,
     qobuz_bundle_cache: state
       .qobuz_bundle_cache
       .clone()
       .filter(QobuzBundleCache::is_complete),
-    spotify_device_id: sanitized_device_id(state.spotify_device_id.as_deref()),
   }
 }
 
@@ -489,9 +385,6 @@ fn merge_state_patch(merged: &mut PersistedRuntimeState, patch: &PersistedRuntim
   }
   if let Some(active_source) = patch.active_source {
     merged.active_source = Some(active_source);
-  }
-  if let Some(playlist_sidebar_order) = patch.playlist_sidebar_order {
-    merged.playlist_sidebar_order = Some(playlist_sidebar_order);
   }
   if let Some(seen_announcement_ids) = &patch.seen_announcement_ids {
     merged.seen_announcement_ids = Some(merged_ids(
@@ -517,36 +410,9 @@ fn merge_state_patch(merged: &mut PersistedRuntimeState, patch: &PersistedRuntim
   if let Some(pane_layout) = patch.pane_layout.as_ref().and_then(PaneNode::sanitized) {
     merged.pane_layout = Some(pane_layout);
   }
-  if let Some(gui_pane_layout) = &patch.gui_pane_layout {
-    merged.gui_pane_layout = Some(gui_pane_layout.sanitized());
-  }
-  if let Some(pitch_view_chosen) = patch.pitch_view_chosen {
-    merged.pitch_view_chosen = Some(pitch_view_chosen);
-  }
-  if let Some(radio_stations) = &patch.radio_stations {
-    merged.radio_stations = Some(merged_radio_stations(
-      merged.radio_stations.as_deref().unwrap_or(&[]),
-      radio_stations,
-    ));
-  }
-  if let Some(community_pin_prompt_shown) = patch.community_pin_prompt_shown {
-    merged.community_pin_prompt_shown = Some(community_pin_prompt_shown);
-  }
   if let Some(qobuz_bundle_cache) = &patch.qobuz_bundle_cache {
     merged.qobuz_bundle_cache = Some(qobuz_bundle_cache.clone());
   }
-  if let Some(device_id) = sanitized_device_id(patch.spotify_device_id.as_deref()) {
-    merged.spotify_device_id = Some(device_id);
-  }
-}
-
-fn deserialize_playlist_sidebar_order<'de, D>(
-  deserializer: D,
-) -> Result<Option<SidebarPlaylistOrder>, D::Error>
-where
-  D: serde::Deserializer<'de>,
-{
-  deserialize_lenient(deserializer, "playlist_sidebar_order", Some)
 }
 
 fn deserialize_pane_layout<'de, D>(deserializer: D) -> Result<Option<PaneNode>, D::Error>
@@ -555,15 +421,6 @@ where
 {
   deserialize_lenient(deserializer, "pane_layout", |layout: PaneNode| {
     layout.sanitized()
-  })
-}
-
-fn deserialize_gui_pane_layout<'de, D>(deserializer: D) -> Result<Option<GuiLayout>, D::Error>
-where
-  D: serde::Deserializer<'de>,
-{
-  deserialize_lenient(deserializer, "gui_pane_layout", |layout: GuiLayout| {
-    Some(layout.sanitized())
   })
 }
 
@@ -589,13 +446,6 @@ where
   )
 }
 
-fn sanitized_device_id(device_id: Option<&str>) -> Option<String> {
-  device_id
-    .map(str::trim)
-    .filter(|id| !id.is_empty())
-    .map(str::to_string)
-}
-
 fn sanitized_ids(ids: &[String]) -> Vec<String> {
   ids
     .iter()
@@ -617,50 +467,6 @@ fn merged_ids(existing: &[String], incoming: &[String]) -> Vec<String> {
       Some(id.to_string())
     })
     .collect()
-}
-
-pub(crate) fn sanitized_radio_stations(stations: &[RadioStationConfig]) -> Vec<RadioStationConfig> {
-  let mut seen_urls = std::collections::HashSet::new();
-
-  stations
-    .iter()
-    .filter_map(|station| {
-      let name = station.name.trim();
-      let url = station.url.trim();
-      if name.is_empty() || url.is_empty() {
-        return None;
-      }
-
-      let url = url.to_string();
-      if !seen_urls.insert(url.clone()) {
-        return None;
-      }
-
-      Some(RadioStationConfig {
-        name: name.to_string(),
-        url,
-      })
-    })
-    .collect()
-}
-
-pub(crate) fn merged_radio_stations(
-  existing: &[RadioStationConfig],
-  incoming: &[RadioStationConfig],
-) -> Vec<RadioStationConfig> {
-  let mut stations = sanitized_radio_stations(existing);
-  let mut seen_urls = stations
-    .iter()
-    .map(|station| station.url.clone())
-    .collect::<std::collections::HashSet<_>>();
-
-  for station in sanitized_radio_stations(incoming) {
-    if seen_urls.insert(station.url.clone()) {
-      stations.push(station);
-    }
-  }
-
-  stations
 }
 
 mod source_config {
@@ -753,87 +559,6 @@ mod tests {
     let path = dir.path().join("state.yml");
 
     assert_eq!(load(&path).unwrap(), PersistedRuntimeState::default());
-  }
-
-  #[test]
-  fn missing_or_older_state_defaults_playlist_sidebar_order_to_spotify() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-    let mut runtime = RuntimeState::default();
-
-    assert_eq!(
-      runtime.playlist_sidebar_order,
-      SidebarPlaylistOrder::Spotify
-    );
-    let missing = load(&path).unwrap();
-    assert_eq!(missing.playlist_sidebar_order, None);
-    runtime.apply_persisted(&missing);
-    assert_eq!(
-      runtime.playlist_sidebar_order,
-      SidebarPlaylistOrder::Spotify
-    );
-
-    std::fs::write(&path, "volume_percent: 42\nshuffle_enabled: true\n").unwrap();
-    let older = load(&path).unwrap();
-    assert_eq!(older.playlist_sidebar_order, None);
-    runtime.apply_persisted(&older);
-    assert_eq!(
-      runtime.playlist_sidebar_order,
-      SidebarPlaylistOrder::Spotify
-    );
-    assert_eq!(runtime.volume_percent, 42);
-    assert!(runtime.shuffle_enabled);
-  }
-
-  #[test]
-  fn playlist_sidebar_order_round_trips_all_modes() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    for (order, token) in [
-      (SidebarPlaylistOrder::Spotify, "spotify"),
-      (SidebarPlaylistOrder::RecentlyPlayed, "recently_played"),
-      (SidebarPlaylistOrder::Name, "name"),
-    ] {
-      let runtime = RuntimeState {
-        playlist_sidebar_order: order,
-        ..RuntimeState::default()
-      };
-      save(&path, &runtime.to_persisted()).unwrap();
-
-      let yaml = std::fs::read_to_string(&path).unwrap();
-      assert!(yaml.contains(&format!("playlist_sidebar_order: {token}\n")));
-      let loaded = load(&path).unwrap();
-      assert_eq!(loaded.playlist_sidebar_order, Some(order));
-      let mut restored = RuntimeState::default();
-      restored.apply_persisted(&loaded);
-      assert_eq!(restored, runtime);
-    }
-  }
-
-  #[test]
-  fn unreadable_playlist_sidebar_order_keeps_other_state() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.yml");
-
-    for value in ["future_order", "null", "42", "[spotify]", "{new: mode}"] {
-      std::fs::write(
-        &path,
-        format!("volume_percent: 42\nplaylist_sidebar_order: {value}\n"),
-      )
-      .unwrap();
-
-      let loaded = load(&path).unwrap();
-      assert_eq!(loaded.playlist_sidebar_order, None);
-      assert_eq!(loaded.volume_percent, Some(42));
-      let mut runtime = RuntimeState::default();
-      runtime.apply_persisted(&loaded);
-      assert_eq!(
-        runtime.playlist_sidebar_order,
-        SidebarPlaylistOrder::Spotify
-      );
-      assert_eq!(runtime.volume_percent, 42);
-    }
   }
 
   #[test]
@@ -957,26 +682,5 @@ mod tests {
       .filter_map(Result::ok)
       .any(|entry| entry.file_name().to_string_lossy().contains(".tmp"));
     assert!(!has_temp, "atomic save left a temporary file behind");
-  }
-
-  #[test]
-  fn applying_a_persisted_device_id_trims_it_and_keeps_an_absent_one() {
-    let mut runtime = RuntimeState {
-      spotify_device_id: Some("existing".to_string()),
-      ..RuntimeState::default()
-    };
-
-    runtime.apply_persisted(&PersistedRuntimeState::default());
-    assert_eq!(runtime.spotify_device_id.as_deref(), Some("existing"));
-
-    runtime.apply_persisted(&PersistedRuntimeState {
-      spotify_device_id: Some(" new ".to_string()),
-      ..PersistedRuntimeState::default()
-    });
-    assert_eq!(runtime.spotify_device_id.as_deref(), Some("new"));
-    assert_eq!(
-      runtime.to_persisted().spotify_device_id.as_deref(),
-      Some("new")
-    );
   }
 }

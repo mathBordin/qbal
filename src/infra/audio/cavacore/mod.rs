@@ -4,7 +4,7 @@
 //!
 //! Vendored instead of depended on because upstream is archived and ships
 //! correctness bugs we need fixed. Local changes, kept minimal on purpose
-//! (each patch site is marked `PATCH(spotatui)`):
+//! (each patch site is marked `PATCH(qbal)`):
 //! - Autosens fix: upstream only *raised* `sens` during digital silence; the C
 //!   original raises it while signal is present (`if (!silence)`). Without the
 //!   fix, opening the visualizer mid-song leaves bars at ~2% height forever.
@@ -139,7 +139,7 @@ impl Cava {
       self
         .input_buffer
         .copy_within(..input_buffer_len - input.len(), input.len());
-      // PATCH(spotatui): C writes the new chunk time-reversed (newest sample
+      // PATCH(qbal): C writes the new chunk time-reversed (newest sample
       // at index 0), keeping the whole buffer one continuous time-reversed
       // stream; upstream copied it forward, splicing a discontinuity into the
       // FFT windows at every chunk boundary.
@@ -220,7 +220,7 @@ impl Cava {
       let mut tmp_r = 0.;
 
       // add upp FFT values within bands
-      // PATCH(spotatui): compare in signed space like C. The cutoff bars are
+      // PATCH(qbal): compare in signed space like C. The cutoff bars are
       // -1 sentinels when a range has no bar; upstream compared `n` against
       // them `as usize`, so -1 wrapped to usize::MAX and every bar summed the
       // bass FFT whenever no bass bar existed.
@@ -308,7 +308,7 @@ impl Cava {
         self.sens *= 0.98;
         self.init_sens = false;
       } else {
-        // PATCH(spotatui): upstream had `if is_silent`, inverted against the C
+        // PATCH(qbal): upstream had `if is_silent`, inverted against the C
         // original's `if (!silence)` — sens must rise while signal plays (slow
         // recovery) and duck on overshoot, not rise only during silence.
         let is_silent = input.iter().all(|&v| v == 0.);
@@ -320,7 +320,7 @@ impl Cava {
         }
       }
 
-      // EXTENSION(spotatui): optional autosens gain cap (upstream has none) so
+      // EXTENSION(qbal): optional autosens gain cap (upstream has none) so
       // near-silent input stops short of full-scale bars.
       if self.sens > self.max_sens {
         self.sens = self.max_sens;
@@ -393,7 +393,7 @@ impl CavaBuilder {
 
       cut_off_frequency[n] = self.freq_range.end as f64 * 10f64.powf(bar_distribution_coefficient);
 
-      // PATCH(spotatui): n > 1, not n > 0. The adjustment reads index n - 2,
+      // PATCH(qbal): n > 1, not n > 0. The adjustment reads index n - 2,
       // which at n == 1 is an out-of-bounds read in C and a usize-underflow
       // panic here. Only reachable when bar 0 lands above the 100 Hz bass
       // cutoff, which needs a freq range starting higher than the analyzer's.
@@ -415,7 +415,7 @@ impl CavaBuilder {
       eq[n] /= 2f64.powf(29.);
       eq[n] /= (left.in_bass.len() as f64).log2();
 
-      // PATCH(spotatui): upstream cast relative_cut_off (a 0..1 fraction) to
+      // PATCH(qbal): upstream cast relative_cut_off (a 0..1 fraction) to
       // u32 BEFORE the multiply at all five cutoff sites below, truncating
       // every cutoff to bin 0 and collapsing cava's log-spaced bar mapping
       // into consecutive near-DC bins. C multiplies in float and truncates on

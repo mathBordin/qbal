@@ -271,7 +271,6 @@ pub fn main_layout_has_keys(app: &App) -> bool {
       | ActiveBlock::ExitPrompt
       | ActiveBlock::Settings
       | ActiveBlock::PluginScreen
-      | ActiveBlock::Dialog(_)
       | ActiveBlock::SortMenu
       | ActiveBlock::Input
   )
@@ -568,10 +567,18 @@ pub fn split_input_help_and_settings(app: &App, input_row_area: Rect) -> [Rect; 
   let compact_top_row = input_row_area.width < COMPACT_TOP_ROW_THRESHOLD;
 
   let constraints = if compact_top_row {
+    // Wide enough for the localized title ("Paramètres") plus the borders.
+    let boxed = |title: &str, min: u16| {
+      u16::try_from(unicode_width::UnicodeWidthStr::width(title))
+        .unwrap_or(u16::MAX)
+        .saturating_add(2)
+        .max(min)
+    };
+    let screens = &app.strings().screens;
     [
       Constraint::Min(1),
-      Constraint::Length(COMPACT_HELP_WIDTH),
-      Constraint::Length(COMPACT_SETTINGS_WIDTH),
+      Constraint::Length(boxed(screens.help, COMPACT_HELP_WIDTH)),
+      Constraint::Length(boxed(screens.settings, COMPACT_SETTINGS_WIDTH)),
     ]
   } else if is_wide_layout(app) {
     [
@@ -967,5 +974,16 @@ mod tests {
       Some(NOW_PLAYING_MAX_WIDTH),
       "a huge width does not overflow"
     );
+  }
+
+  #[test]
+  fn the_compact_settings_box_fits_its_localized_title() {
+    use crate::core::i18n::Language;
+    let mut app = App::default();
+    app.user_config.behavior.language = Language::Fr;
+    app.refresh_language();
+    let [_, help, settings] = split_input_help_and_settings(&app, Rect::new(0, 0, 40, 3));
+    assert!(help.width >= COMPACT_HELP_WIDTH);
+    assert_eq!(settings.width, 12, "\"Paramètres\" plus two borders");
   }
 }

@@ -3,7 +3,6 @@ mod announcement_prompt;
 mod common_key_events;
 #[cfg(feature = "cover-art")]
 mod cover_art_view;
-mod dialog;
 mod empty;
 mod error_screen;
 mod filter_input;
@@ -28,28 +27,15 @@ mod stats;
 mod track_table;
 
 use crate::core::action::{Action, NavTarget};
-use crate::core::app::{ActiveBlock, App, InputContext, RouteId, SearchResultBlock};
+use crate::core::app::{ActiveBlock, App, RouteId, SearchResultBlock};
 use crate::core::requirement::{Availability, Capability, Requirement};
 use crate::tui::event::Key;
 
 pub use announcement_prompt::dismiss as dismiss_announcement;
-pub(crate) use dialog::playlist_picker_captures_key;
 pub use input::handler as input_handler;
 pub use mouse::handler as mouse_handler;
 pub use panes::{leave_focused_pane, pane_arrows_apply, show_main_for_new_screen};
 
-#[cfg(target_os = "macos")]
-fn key_matches_open_settings_binding(key: Key, binding: Key) -> bool {
-  key == binding
-    || (binding == Key::Alt(',') && key == Key::Char('≤'))
-    || (binding == Key::Ctrl(',')
-      && (key == Key::Ctrl('l')
-        || key == Key::Ctrl('L')
-        || key == Key::Ctrl('4')
-        || key == Key::Ctrl('<')))
-}
-
-#[cfg(not(target_os = "macos"))]
 fn key_matches_open_settings_binding(key: Key, binding: Key) -> bool {
   key == binding
 }
@@ -93,13 +79,6 @@ pub fn handle_app(key: Key, app: &mut App) {
     return;
   }
 
-  // The add-to-playlist picker's search is an inline input too: typed playlist
-  // names must not trigger global bindings.
-  if dialog::playlist_picker_captures_key(app, key) {
-    handle_block_events(key, app);
-    return;
-  }
-
   // Settings has the same inline modal inputs: an open edit, the unsaved-changes
   // prompt, and the row filter. Each needs the raw key before global bindings
   // claim it, and the search binding is what opens the filter in the first place.
@@ -107,8 +86,7 @@ pub fn handle_app(key: Key, app: &mut App) {
     && (app.view.settings_unsaved_prompt_visible
       || app.view.settings_edit_mode
       || app.view.settings_filter_editing
-      || key == app.user_config.keys.search
-      || (key == settings::BUTTON_KEY && settings::selected_row_has_button(app)))
+      || key == app.user_config.keys.search)
   {
     settings::handler(key, app);
     return;
@@ -121,21 +99,7 @@ pub fn handle_app(key: Key, app: &mut App) {
     return;
   }
 
-  if app.maybe_activate_open_settings_fallback(key) {
-    app.open_settings_screen();
-    if app.pending_keybinding_persist_key().is_some() {
-      app.push_navigation_stack(
-        RouteId::Dialog,
-        ActiveBlock::Dialog(crate::core::app::DialogContext::PersistKeybindingFallback),
-      );
-    }
-    return;
-  }
-
-  let effective_open_settings = app.effective_open_settings_key();
-  if key_matches_open_settings_binding(key, app.user_config.keys.open_settings)
-    || key_matches_open_settings_binding(key, effective_open_settings)
-  {
+  if key_matches_open_settings_binding(key, app.user_config.keys.open_settings) {
     app.apply(Action::Navigate(NavTarget::Settings));
     return;
   }
@@ -292,7 +256,6 @@ pub(super) fn focus_global_search(app: &mut App) {
   if app.get_current_route().id == RouteId::Error {
     app.clear_api_error();
   }
-  app.view.input_context = InputContext::GlobalSearch;
   app.set_current_route_state(Some(ActiveBlock::Input), Some(ActiveBlock::Input));
 }
 
@@ -321,15 +284,10 @@ fn is_input_mode(app: &App) -> bool {
   matches!(
     app.get_current_route().active_block,
     ActiveBlock::Input
-      | ActiveBlock::Dialog(_)
       | ActiveBlock::AnnouncementPrompt
       | ActiveBlock::ExitPrompt
       | ActiveBlock::RecapPrompt
-  ) || {
-    {
-      false
-    }
-  }
+  ) || { false }
 }
 
 // Handle event for the current active block
@@ -379,9 +337,6 @@ fn handle_block_events(key: Key, app: &mut App) {
       #[cfg(feature = "cover-art")]
       cover_art_view::handler(key, app);
     }
-    ActiveBlock::Dialog(_) => {
-      dialog::handler(key, app);
-    }
 
     ActiveBlock::AnnouncementPrompt => {
       announcement_prompt::handler(key, app);
@@ -408,22 +363,6 @@ fn handle_block_events(key: Key, app: &mut App) {
   }
 }
 
-/// Unified Back/Esc handler to clear active track filters before exiting.
-///
-/// Handles playlist filters first (saved tracks are subsumed).
-/// Returns `true` if a filter was cleared.
-pub(crate) fn clear_active_track_filter(app: &mut App) -> bool {
-  if app.is_playlist_track_filter_active() {
-    app.clear_playlist_track_filter();
-    true
-  } else if app.is_saved_track_filter_active() {
-    app.clear_saved_track_filter();
-    true
-  } else {
-    false
-  }
-}
-
 fn handle_escape(app: &mut App) {
   match app.get_current_route().active_block {
     ActiveBlock::SearchResultBlock => {
@@ -431,13 +370,6 @@ fn handle_escape(app: &mut App) {
     }
     ActiveBlock::Error => {
       app.pop_navigation_stack();
-    }
-    ActiveBlock::Dialog(dialog_context) => {
-      if dialog_context == crate::core::app::DialogContext::PersistKeybindingFallback {
-        app.set_status_message(app.strings().status.app.shortcut_session_only, 4);
-      }
-      app.pop_navigation_stack();
-      app.clear_dialog_state();
     }
     ActiveBlock::HelpMenu => {
       if app.view.help_filter_editing || !app.view.help_filter.is_empty() {
@@ -447,9 +379,7 @@ fn handle_escape(app: &mut App) {
       }
     }
     ActiveBlock::TrackTable => {
-      if !clear_active_track_filter(app) {
-        app.set_current_route_state(Some(ActiveBlock::Empty), None);
-      }
+      app.set_current_route_state(Some(ActiveBlock::Empty), None);
     }
     ActiveBlock::Queue => {
       app.pop_navigation_stack();
@@ -532,50 +462,16 @@ mod tests {
   }
 
   #[test]
-  fn ctrl_f_off_a_track_table_leaves_the_input_context_alone() {
+  fn ctrl_f_off_the_input_leaves_the_track_table_focused() {
     let mut app = App::default();
     app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
 
     handle_app(Key::Ctrl('f'), &mut app);
 
-    assert_eq!(app.view.input_context, InputContext::GlobalSearch);
     assert_eq!(
       app.get_current_route().active_block,
       ActiveBlock::TrackTable
     );
-  }
-
-  #[cfg(target_os = "macos")]
-  #[test]
-  fn plain_comma_fallback_opens_settings_and_prompts_to_persist() {
-    let mut app = App::default();
-    app.user_config.keys.open_settings = Key::Ctrl(',');
-    app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::Library));
-
-    handle_app(Key::Char(','), &mut app);
-
-    assert_eq!(
-      app.keybinding_runtime.effective_open_settings,
-      Some(Key::Alt(','))
-    );
-    assert_eq!(
-      app.get_current_route().active_block,
-      ActiveBlock::Dialog(crate::core::app::DialogContext::PersistKeybindingFallback)
-    );
-    assert!(app.status_message().is_some());
-  }
-
-  #[cfg(target_os = "macos")]
-  #[test]
-  fn plain_comma_does_not_override_track_table_sort_menu() {
-    let mut app = App::default();
-    app.user_config.keys.open_settings = Key::Ctrl(',');
-    app.track_table.context = Some(TrackTableContext::QobuzPlaylist);
-    app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
-
-    handle_app(Key::Char(','), &mut app);
-
-    assert_eq!(app.get_current_route().active_block, ActiveBlock::SortMenu);
   }
 
   // --- U5: source-gate tests ---

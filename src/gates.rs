@@ -1,11 +1,11 @@
-//! Ratchet counters for the GUI substrate migration: each counter measures a
-//! form of TUI/core coupling that must reach zero before a second frontend
-//! can share the core (`crate::tui` imports outside `tui/`, direct `App`
+//! Ratchet counters: each measures a form of TUI/core coupling that should
+//! reach zero so the core stays independent of the terminal frontend
+//! (`crate::tui` imports outside `tui/`, direct `App`
 //! field writes in handlers, raw `IoEvent` dispatch from the TUI, mouse
 //! handling that synthesizes keystrokes, wildcard arms in the action tree,
 //! producers outside the TUI that write its `App::view` presentation state,
-//! `App` fields any module can still write, reads of the cached Spotify
-//! playback context that bypass the ownership resolver).
+//! `App` fields any module can still write, reads of a cached playback
+//! context that bypass the ownership resolver).
 //!
 //! `tools/gates.count` holds the measured baselines. The test below pins every
 //! coupling counter to its baseline exactly, so a PR that moves one must also
@@ -125,8 +125,8 @@ fn chain_is_written(source: &str, chain_start: usize) -> bool {
 /// the field do count: both reach into the cached context. A whole-value
 /// assignment rustfmt wrapped onto the next line would count too; none
 /// exists today. String literals are not stripped (no other counter does).
-/// The cached context names the *suspended* Spotify track while a decoded
-/// source or the native queue slot owns the sink, so every reader outside
+/// A cached context names a *suspended* track while the native queue slot
+/// owns the sink, so every reader outside
 /// the ownership resolver (`core/app/playback_routing.rs`), the snapshot
 /// builder (`infra/media_metadata.rs`) and this file is a candidate for
 /// reading the wrong track. No `#[cfg(test)]` cut: production code can follow
@@ -288,7 +288,7 @@ fn ratchet_counters_match_the_checked_in_baselines() {
     + count_occurrences(&["src"], &[], concat!("#[", "tokio::test"));
 
   // Every Rust file outside `src/tui/` is in scope, so a new top-level module
-  // (or a future `src/gui.rs`) cannot re-import the TUI unseen. This file is
+  // cannot re-import the TUI unseen. This file is
   // the one exclusion: it names the needle in its own doc and data, and being
   // test-only it cannot couple anything to `tui/`.
   let mut non_tui_files = Vec::new();

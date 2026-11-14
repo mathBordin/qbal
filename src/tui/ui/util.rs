@@ -114,22 +114,6 @@ pub fn cover_art_status(app: &App) -> &'static str {
   }
 }
 
-/// Join a domain artist list's display names with `", "` for rendering.
-///
-/// Source-agnostic counterpart to [`create_artist_string`] (which takes the
-/// rspotify `SimplifiedArtist`). Use this once a screen's data is domain-typed
-/// ([`crate::core::plugin_api::ArtistRef`], e.g. `AlbumInfo::artists`), so the
-/// renderer needs no rspotify types. Note `TrackInfo::artists` is already
-/// `Vec<String>` and can be `.join(", ")` directly.
-// Wired up by the per-screen migration slices, not yet by the binary.
-pub fn join_artist_names(artists: &[crate::core::plugin_api::ArtistRef]) -> String {
-  artists
-    .iter()
-    .map(|artist| artist.name.as_str())
-    .collect::<Vec<&str>>()
-    .join(", ")
-}
-
 // Frontend-neutral time formatting lives in `core/format.rs`; re-exported so
 // the many draw-fn callers keep their `util::` paths.
 pub use crate::core::format::{display_track_progress, millis_to_minutes};
@@ -170,7 +154,7 @@ pub fn get_percentage_width(width: u16, percentage: f32) -> u16 {
 }
 
 /// The year of a release date (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`).
-/// Spotify reports an unknown date as `0000`, which counts as none.
+/// A `0000` year counts as none.
 pub fn release_year(date: Option<&str>) -> Option<&str> {
   let year = date?.get(..4)?;
   (year.bytes().all(|b| b.is_ascii_digit()) && year != "0000").then_some(year)
@@ -229,23 +213,6 @@ mod tests {
     assert_eq!(truncate_text("abcdef", 4), "abc…");
     assert_eq!(truncate_text("English", 7), "English");
     assert_eq!(super::super::help::padded_help_cell("abc", 5), "abc  ");
-  }
-
-  #[test]
-  fn join_artist_names_test() {
-    use crate::core::plugin_api::ArtistRef;
-    let artists = vec![
-      ArtistRef {
-        id: None,
-        name: "Daft Punk".to_string(),
-      },
-      ArtistRef {
-        id: Some("abc".to_string()),
-        name: "Pharrell".to_string(),
-      },
-    ];
-    assert_eq!(join_artist_names(&artists), "Daft Punk, Pharrell");
-    assert_eq!(join_artist_names(&[]), "");
   }
 
   #[test]

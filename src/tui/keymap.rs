@@ -134,7 +134,7 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
         format!(
           "{} | <{}> | <Ctrl+b>",
           app.user_config.keys.move_left,
-          app.strings().help.arrow_key("Left")
+          app.strings().help.arrow_key(app.strings().help.arrow_left)
         )
       }),
       help.context_general,
@@ -145,7 +145,7 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
         format!(
           "{} | <{}> | <Ctrl+n>",
           app.user_config.keys.move_down,
-          app.strings().help.arrow_key("Down")
+          app.strings().help.arrow_key(app.strings().help.arrow_down)
         )
       }),
       help.context_general,
@@ -156,7 +156,7 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
         format!(
           "{} | <{}>",
           app.user_config.keys.move_up,
-          app.strings().help.arrow_key("Up")
+          app.strings().help.arrow_key(app.strings().help.arrow_up)
         )
       }),
       help.context_general,
@@ -167,10 +167,10 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
         format!(
           "{} | <{}> | <Ctrl+f>",
           app.user_config.keys.move_right,
-          app.strings().help.arrow_key("Right")
+          app.strings().help.arrow_key(app.strings().help.arrow_right)
         )
       }),
-      help.context_general_playlist_search,
+      help.context_general,
     ),
     row(help.list_top, Literal("H"), help.context_general),
     row(help.list_middle, Literal("M"), help.context_general),
@@ -182,12 +182,6 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
       Binding(|k| k.search),
       help.context_settings,
     ),
-    row(
-      help.search_playlist_picker,
-      Binding(|k| k.search),
-      help.context_playlist_picker,
-    )
-    .needs(Requirement::AnyOf(&[])),
     row(
       help.toggle_playback,
       Binding(|k| k.toggle_playback),
@@ -383,12 +377,22 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
     .needs(SEARCH),
     row(
       help.cursor_left,
-      Custom(|app| format!("<{}>", app.strings().help.arrow_key("Left"))),
+      Custom(|app| {
+        format!(
+          "<{}>",
+          app.strings().help.arrow_key(app.strings().help.arrow_left)
+        )
+      }),
       help.context_search_input,
     ),
     row(
       help.cursor_right,
-      Custom(|app| format!("<{}>", app.strings().help.arrow_key("Right"))),
+      Custom(|app| {
+        format!(
+          "<{}>",
+          app.strings().help.arrow_key(app.strings().help.arrow_right)
+        )
+      }),
       help.context_search_input,
     ),
     row(
@@ -461,7 +465,6 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
     row(help.stats_period, Literal("[ / ]"), help.context_stats),
     row(help.sort_open, Literal(","), help.context_sortable_lists),
     // Append new rows here so the pinned English table keeps its indices.
-    row(help.settings_button, Literal("o"), help.context_settings),
   ]
 }
 
@@ -514,7 +517,7 @@ mod tests {
         format!(
           "{} | <{}> | <Ctrl+b>",
           app.user_config.keys.move_left,
-          help.arrow_key("Left")
+          help.arrow_key(help.arrow_left)
         )
       );
       assert_eq!(
@@ -522,7 +525,7 @@ mod tests {
         format!(
           "{} | <{}> | <Ctrl+n>",
           app.user_config.keys.move_down,
-          help.arrow_key("Down")
+          help.arrow_key(help.arrow_down)
         )
       );
       assert_eq!(
@@ -530,7 +533,7 @@ mod tests {
         format!(
           "{} | <{}>",
           app.user_config.keys.move_up,
-          help.arrow_key("Up")
+          help.arrow_key(help.arrow_up)
         )
       );
       assert_eq!(
@@ -538,7 +541,7 @@ mod tests {
         format!(
           "{} | <{}> | <Ctrl+f>",
           app.user_config.keys.move_right,
-          help.arrow_key("Right")
+          help.arrow_key(help.arrow_right)
         )
       );
       assert_eq!(

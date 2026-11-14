@@ -41,13 +41,7 @@ struct AnnouncementRecord {
 }
 
 pub trait UtilsNetwork {
-  async fn get_lyrics(
-    &mut self,
-    track: String,
-    artists: Vec<String>,
-    duration: f64,
-    spotify_id: Option<String>,
-  );
+  async fn get_lyrics(&mut self, track: String, artists: Vec<String>, duration: f64);
   async fn fetch_announcements(&mut self);
 }
 
@@ -83,23 +77,8 @@ fn publish_lyrics(app: &mut App, found: Option<(Vec<(u128, String)>, bool)>) {
     .bump(crate::core::app::PluginDataKind::Lyrics);
 }
 
-/// Spotify's lyrics for a Spotify track; `None` sends the lookup to LRCLIB.
-async fn spotify_lyrics(
-  spotify_id: Option<&str>,
-  duration: f64,
-) -> Option<(Vec<(u128, String)>, bool)> {
-  let _ = (spotify_id, duration);
-  None
-}
-
 impl UtilsNetwork for Network {
-  async fn get_lyrics(
-    &mut self,
-    track: String,
-    artists: Vec<String>,
-    duration: f64,
-    spotify_id: Option<String>,
-  ) {
+  async fn get_lyrics(&mut self, track: String, artists: Vec<String>, duration: f64) {
     // The identity latch and the plugin-facing `lyrics_state_is_current` gate
     // both key on the joined display credit (`primary_artist()`), so build the
     // identity from the same join here.
@@ -115,14 +94,6 @@ impl UtilsNetwork for Network {
       app.set_lyrics(LyricsStatus::Loading, None, false);
     }
 
-    if let Some(found) = spotify_lyrics(spotify_id.as_deref(), duration).await {
-      let mut app = self.app.lock().await;
-      if app.desired_lyrics_identity.as_ref() == Some(&request_identity) {
-        publish_lyrics(&mut app, Some(found));
-      }
-      return;
-    }
-
     let lrc_resp = fetch_lrclib_lyrics(client, &track, &artists, duration).await;
 
     let mut app = self.app.lock().await;
@@ -134,9 +105,9 @@ impl UtilsNetwork for Network {
 
   async fn fetch_announcements(&mut self) {
     const MAX_ANNOUNCEMENT_FEED_BYTES: usize = 256 * 1024;
-    const ANNOUNCEMENTS_ENV_KEY: &str = "SPOTATUI_ANNOUNCEMENTS_URL";
+    const ANNOUNCEMENTS_ENV_KEY: &str = "QBAL_ANNOUNCEMENTS_URL";
     const DEFAULT_ANNOUNCEMENTS_URL: &str =
-      "https://raw.githubusercontent.com/LargeModGames/spotatui/main/announcements.json";
+      "https://raw.githubusercontent.com/mathBordin/ghosbuz/main/announcements.json";
 
     let (announcements_enabled, feed_url) = {
       let app = self.app.lock().await;
@@ -506,7 +477,7 @@ mod tests {
     apply_lyrics_response, artist_query_candidates, parse_synced_lyrics, pick_search_result,
     synthesize_plain_lyrics, LrcResponse,
   };
-  use crate::core::app::{App, DisplayDomain, LyricsStatus};
+  use crate::core::app::{App, LyricsStatus};
 
   #[test]
   fn artist_candidates_single_artist_has_no_fallback() {
@@ -627,9 +598,8 @@ mod tests {
   }
 
   #[test]
-  fn a_synced_lrclib_response_publishes_lyrics_under_a_new_revision() {
+  fn a_synced_lrclib_response_publishes_lyrics() {
     let mut app = App::default();
-    let before = app.display_revisions().get(DisplayDomain::Lyrics);
 
     apply_lyrics_response(
       &mut app,
@@ -637,7 +607,6 @@ mod tests {
       180.0,
     );
 
-    assert!(app.display_revisions().get(DisplayDomain::Lyrics) > before);
     assert_eq!(app.lyrics_status(), LyricsStatus::Found);
     assert_eq!(app.lyrics(), Some(&[(1_000u128, "hi".to_string())][..]));
     assert!(app.lyrics_synced());

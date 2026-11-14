@@ -1,13 +1,9 @@
 // The `cfg_attr(not(feature = "tui"), allow(dead_code))` modules below are
-// the core surface whose only callers today live in `tui/`, so a headless
-// build counts much of them as dead. Allowed per module rather than per item:
-// every tui-enabled CI leg still lints them in full (anything dead in *all*
-// builds still warns there), and the shared action layer is what reclaims
-// this surface for other frontends as the GUI substrate migration proceeds.
-// `action` is allowed dead without `scripting` or without `tui`: until the
-// handler conversion sub-PRs land, the scripting engine, the DJ tools and the
-// TUI are its producers, so a leg missing either counts the un-adopted surface
-// as dead. The `default` and `all-sources` legs still lint it in full.
+// the core surface whose only callers live in `tui/`, so a headless build
+// counts much of them as dead. Allowed per module rather than per item: every
+// tui-enabled CI leg still lints them in full (anything dead in *all* builds
+// still warns there). `action` is allowed dead without `scripting` or without
+// `tui`, its two producers; the `default` leg still lints it in full.
 #[cfg_attr(not(all(feature = "scripting", feature = "tui")), allow(dead_code))]
 pub mod action;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
@@ -25,7 +21,6 @@ pub mod driver;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod format;
 pub mod geometry;
-pub mod gui_layout;
 // Headless builds still serialize the full table, including terminal-only formatters.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod i18n;

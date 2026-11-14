@@ -5,10 +5,12 @@
 
 use crate::core::source::Source;
 use crate::core::state::{PersistedRuntimeState, RuntimeState};
-use crate::core::user_config::BehaviorConfig;
 use anyhow::{anyhow, Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::{fs, path::Path};
+use std::{
+  fs,
+  path::{Path, PathBuf},
+};
 
 const LEGACY_STATE_FILE_RELATIVE_PATHS: [&str; 4] = [
   "last_session.yml",
@@ -16,6 +18,56 @@ const LEGACY_STATE_FILE_RELATIVE_PATHS: [&str; 4] = [
   "history/last_recap_at.txt",
   "history/last_synced_at.txt",
 ];
+
+/// Copy the folders the app used before its rename (`spotatui`) to Qbal's own
+/// on the first launch, so settings, history and the Qobuz login carry over.
+/// A folder is copied only when Qbal's does not exist yet; the old folder is
+/// left in place. Returns the pairs it copied.
+pub(crate) fn migrate_pre_rename_dirs() -> Vec<(PathBuf, PathBuf)> {
+  migrate_pre_rename_dirs_in(crate::core::paths::pre_rename_app_dirs())
+}
+
+fn migrate_pre_rename_dirs_in(pairs: Vec<(PathBuf, PathBuf)>) -> Vec<(PathBuf, PathBuf)> {
+  let mut copied = Vec::new();
+  for (old, new) in pairs {
+    if !old.is_dir() || new.exists() {
+      continue;
+    }
+    // Copy into a sibling first, then rename: an interrupted copy never
+    // leaves a half-filled folder that would block the next attempt.
+    let staging = new.with_extension("migrating");
+    let _ = std::fs::remove_dir_all(&staging);
+    match copy_dir(&old, &staging).and_then(|()| Ok(std::fs::rename(&staging, &new)?)) {
+      Ok(()) => copied.push((old, new)),
+      Err(e) => {
+        log::warn!(
+          "[migrate] could not copy {} to {}: {e}",
+          old.display(),
+          new.display()
+        );
+        let _ = std::fs::remove_dir_all(&staging);
+      }
+    }
+  }
+  copied
+}
+
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+  crate::core::paths::ensure_private_dir(to)?;
+  for entry in std::fs::read_dir(from)? {
+    let entry = entry?;
+    let kind = entry.file_type()?;
+    let target = to.join(entry.file_name());
+    if kind.is_dir() {
+      copy_dir(&entry.path(), &target)?;
+    } else if kind.is_file() {
+      // `fs::copy` keeps the permission bits, so owner-only files stay private.
+      std::fs::copy(entry.path(), &target)?;
+    }
+    // Symlinks are skipped: their targets may sit outside the folder.
+  }
+  Ok(())
+}
 
 /// Move app-managed files that used to live under the XDG config directory into
 /// the XDG state directory.
@@ -29,7 +81,7 @@ pub(crate) fn apply_legacy_state_file_migrations() -> Result<()> {
     return Ok(());
   };
   let state_dir = crate::core::paths::app_state_dir()
-    .ok_or_else(|| anyhow!("cannot resolve the spotatui state directory"))?;
+    .ok_or_else(|| anyhow!("cannot resolve the qbal state directory"))?;
   crate::core::paths::ensure_private_dir(&state_dir)?;
 
   for relative_path in LEGACY_STATE_FILE_RELATIVE_PATHS {
@@ -178,7 +230,7 @@ fn set_private_dir_permissions(path: &Path) -> Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
       .with_context(|| format!("setting private permissions on {}", path.display()))?;
   }
-  // Windows scopes %APPDATA% to the user already; nothing to tighten.
+  // Not a Unix system: there are no mode bits to tighten.
   #[cfg(not(unix))]
   let _ = path;
 
@@ -239,8 +291,8 @@ fn remove_legacy_path_after_migration(legacy_path: &Path, state_path: &Path) {
 /// Seed runtime-state fields that used to live under `behavior` in `config.yml`.
 ///
 /// This reads the raw YAML rather than `BehaviorConfigString` because those
-/// fields were removed from the typed config. Remove this with the radio shim
-/// after the legacy upgrade path no longer needs to be supported.
+/// fields were removed from the typed config. Remove it once the legacy
+/// upgrade path no longer needs to be supported.
 pub(crate) fn apply_legacy_config_runtime_state_migration(
   path: &Path,
   runtime_state: &mut RuntimeState,
@@ -292,83 +344,6 @@ pub(crate) fn apply_legacy_config_runtime_state_migration(
   }
 
   Ok(patch)
-}
-
-/// Seed `config.yml` and `state.yml` from the `client.yml` older releases
-/// wrote: the native-streaming settings and the saved Connect device. A key
-/// the config or state already has wins, a value equal to the default is not
-/// written, and `client.yml` stays on disk so a downgrade still finds it.
-pub(crate) fn apply_legacy_client_config_migration(
-  client_path: &Path,
-  config_path: &Path,
-  _behavior: &mut BehaviorConfig,
-  runtime_state: &mut RuntimeState,
-  persisted_state: &PersistedRuntimeState,
-) -> Result<PersistedRuntimeState> {
-  let mut patch = PersistedRuntimeState::default();
-  let Some(client) = read_config_value(client_path)? else {
-    return Ok(patch);
-  };
-  let Some(client) = client.as_mapping() else {
-    return Ok(patch);
-  };
-
-  if persisted_state.spotify_device_id.is_none() {
-    if let Some(device_id) = client
-      .get(yaml_key("device_id"))
-      .and_then(Value::as_str)
-      .map(str::trim)
-      .filter(|id| !id.is_empty())
-    {
-      runtime_state.spotify_device_id = Some(device_id.to_string());
-      patch.spotify_device_id = Some(device_id.to_string());
-    }
-  }
-
-  let config = read_config_value(config_path)?;
-  let configured = |key: &str| {
-    config
-      .as_ref()
-      .and_then(behavior_mapping)
-      .is_some_and(|behavior| behavior.contains_key(yaml_key(key)))
-  };
-  let mut copied = Mapping::new();
-  let _copy = |key: &str, value: Value| {
-    copied.insert(yaml_key(key), value);
-  };
-  if !configured("enable_streaming") {
-    if let Some(_enabled) = client
-      .get(yaml_key("enable_streaming"))
-      .and_then(Value::as_bool)
-    {}
-  }
-  configured("streaming_device_name");
-  configured("streaming_bitrate");
-  configured("streaming_audio_cache");
-
-  if !copied.is_empty() {
-    write_behavior_keys(config_path, config, copied)?;
-  }
-  Ok(patch)
-}
-
-/// Adds keys under `behavior:` and leaves the rest of the file as it was.
-fn write_behavior_keys(path: &Path, config: Option<Value>, keys: Mapping) -> Result<()> {
-  let mut config = config.unwrap_or_else(|| Value::Mapping(Mapping::new()));
-  let map = config
-    .as_mapping_mut()
-    .ok_or_else(|| anyhow!("{} is not a YAML mapping", path.display()))?;
-  let behavior = map
-    .entry(yaml_key("behavior"))
-    .or_insert_with(|| Value::Mapping(Mapping::new()))
-    .as_mapping_mut()
-    .ok_or_else(|| anyhow!("`behavior` in {} is not a YAML mapping", path.display()))?;
-  behavior.extend(keys);
-  if let Some(dir) = path.parent() {
-    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-  }
-  crate::core::auth::write_private_file_atomic(path, serde_yaml::to_string(&config)?.as_bytes())
-    .with_context(|| format!("writing {}", path.display()))
 }
 
 fn path_exists(path: &Path) -> Result<bool> {
@@ -426,6 +401,50 @@ fn string_sequence(value: &Value) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn pre_rename_folders_are_copied_once_and_the_old_ones_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("spotatui");
+    let new = dir.path().join("qbal");
+    fs::create_dir_all(old.join("history")).unwrap();
+    fs::write(old.join("qobuz_credentials.yml"), "token: x\n").unwrap();
+    fs::write(old.join("history/listens.jsonl"), "{}\n").unwrap();
+
+    let copied = migrate_pre_rename_dirs_in(vec![(old.clone(), new.clone())]);
+
+    assert_eq!(copied, vec![(old.clone(), new.clone())]);
+    assert_eq!(
+      fs::read_to_string(new.join("qobuz_credentials.yml")).unwrap(),
+      "token: x\n"
+    );
+    assert!(new.join("history/listens.jsonl").is_file());
+    assert!(old.join("qobuz_credentials.yml").is_file());
+    assert!(!new.with_extension("migrating").exists());
+  }
+
+  #[test]
+  fn an_existing_qbal_folder_is_never_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("spotatui");
+    let new = dir.path().join("qbal");
+    fs::create_dir_all(&old).unwrap();
+    fs::write(old.join("config.yml"), "old").unwrap();
+    fs::create_dir_all(&new).unwrap();
+    fs::write(new.join("config.yml"), "new").unwrap();
+
+    assert!(migrate_pre_rename_dirs_in(vec![(old, new.clone())]).is_empty());
+    assert_eq!(fs::read_to_string(new.join("config.yml")).unwrap(), "new");
+  }
+
+  #[test]
+  fn nothing_happens_without_a_pre_rename_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = dir.path().join("qbal");
+    let copied = migrate_pre_rename_dirs_in(vec![(dir.path().join("spotatui"), new.clone())]);
+    assert!(copied.is_empty());
+    assert!(!new.exists());
+  }
 
   #[test]
   fn legacy_file_rename_moves_file_when_state_path_is_empty() {
@@ -554,86 +573,5 @@ mod tests {
       & 0o777;
     assert_eq!(top_level_mode, 0o700);
     assert_eq!(subdirectory_mode, 0o700);
-  }
-
-  fn client_migration(
-    client_yml: &str,
-    config_yml: Option<&str>,
-    persisted: &PersistedRuntimeState,
-  ) -> (
-    tempfile::TempDir,
-    Result<PersistedRuntimeState>,
-    BehaviorConfig,
-    RuntimeState,
-  ) {
-    let dir = tempfile::tempdir().unwrap();
-    let client = dir.path().join("client.yml");
-    std::fs::write(&client, client_yml).unwrap();
-    let config = dir.path().join("config.yml");
-    if let Some(config_yml) = config_yml {
-      std::fs::write(&config, config_yml).unwrap();
-    }
-    let mut behavior = crate::core::user_config::UserConfig::new().behavior;
-    let mut runtime = RuntimeState::default();
-    let result = apply_legacy_client_config_migration(
-      &client,
-      &config,
-      &mut behavior,
-      &mut runtime,
-      persisted,
-    );
-    (dir, result, behavior, runtime)
-  }
-
-  #[test]
-  fn default_streaming_settings_write_no_config() {
-    let (dir, result, _, _) = client_migration(
-      "client_id: abc\nport: 8888\nstreaming_device_name: spotatui\nstreaming_bitrate: 320\nstreaming_audio_cache: false\n",
-      None,
-      &PersistedRuntimeState::default(),
-    );
-    result.unwrap();
-    assert!(!dir.path().join("config.yml").exists());
-  }
-
-  #[test]
-  fn the_saved_device_moves_to_the_state() {
-    let (_dir, result, _, runtime) = client_migration(
-      "device_id: \" phone-1 \"\n",
-      None,
-      &PersistedRuntimeState::default(),
-    );
-    assert_eq!(
-      result.unwrap().spotify_device_id.as_deref(),
-      Some("phone-1")
-    );
-    assert_eq!(runtime.spotify_device_id.as_deref(), Some("phone-1"));
-  }
-
-  #[test]
-  fn no_client_yml_is_no_migration() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut behavior = crate::core::user_config::UserConfig::new().behavior;
-    let mut runtime = RuntimeState::default();
-    let patch = apply_legacy_client_config_migration(
-      &dir.path().join("client.yml"),
-      &dir.path().join("config.yml"),
-      &mut behavior,
-      &mut runtime,
-      &PersistedRuntimeState::default(),
-    )
-    .unwrap();
-    assert!(patch.is_empty());
-    assert!(!dir.path().join("config.yml").exists());
-  }
-
-  #[test]
-  fn a_garbled_client_yml_is_an_error() {
-    let (_dir, result, _, _) = client_migration(
-      "device_id: [unclosed\n",
-      None,
-      &PersistedRuntimeState::default(),
-    );
-    assert!(result.is_err());
   }
 }

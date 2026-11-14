@@ -299,21 +299,21 @@ mod tests {
 
   #[test]
   fn uri_playback_request_skips_uri_less_rows_and_remaps_the_offset() {
-    let rows = [Some("spotify:track:one"), None, Some("spotify:track:three")];
+    let rows = [Some("qobuz:track:one"), None, Some("qobuz:track:three")];
 
     let (uris, offset) = uri_playback_request(rows.iter().map(|uri| uri.map(str::to_string)), 2);
 
-    assert_eq!(uris, vec!["spotify:track:one", "spotify:track:three"]);
+    assert_eq!(uris, vec!["qobuz:track:one", "qobuz:track:three"]);
     assert_eq!(offset, Some(1), "the skipped row must not shift the offset");
   }
 
   #[test]
   fn uri_playback_request_leaves_the_offset_unset_for_a_uri_less_selection() {
-    let rows = [Some("spotify:track:one"), None];
+    let rows = [Some("qobuz:track:one"), None];
 
     let (uris, offset) = uri_playback_request(rows.iter().map(|uri| uri.map(str::to_string)), 1);
 
-    assert_eq!(uris, vec!["spotify:track:one"]);
+    assert_eq!(uris, vec!["qobuz:track:one"]);
     assert_eq!(offset, None);
   }
 

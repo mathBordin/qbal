@@ -3,8 +3,7 @@
 //! `run_cli()` is the console entry point: it wires logging, parses the
 //! command line, runs the shared `bootstrap::boot()` sequence (config, state,
 //! auth, `App`), and then either executes one CLI subcommand or launches the
-//! terminal UI. The IoEvent pump every frontend drives lives in `pump`, and
-//! the native-streaming startup every frontend shares lives in `streaming`.
+//! terminal UI. The IoEvent pump lives in `pump`.
 
 mod bootstrap;
 mod cli;
@@ -50,9 +49,9 @@ pub async fn run_cli() -> Result<()> {
   result
 }
 
-/// Opens the log at the level `--debug` or `SPOTATUI_LOG` asks for, then writes the startup header.
+/// Opens the log at the level `--debug` or `QBAL_LOG` asks for, then writes the startup header.
 fn start_logging(debug_flag: bool) -> Result<()> {
-  let env_log_value = std::env::var("SPOTATUI_LOG").ok();
+  let env_log_value = std::env::var("QBAL_LOG").ok();
   let (log_level, log_level_warning) =
     logging::resolve_log_level(debug_flag, env_log_value.as_deref());
   bootstrap::setup_logging(log_level, &logging::target_levels(log_level))?;
@@ -87,19 +86,25 @@ async fn run_cli_inner() -> Result<()> {
   // above (bad flag, `--help`, `--version`) exits before any log file exists.
   start_logging(matches.get_flag("debug"))?;
 
-  info!("spotatui {} starting up", env!("CARGO_PKG_VERSION"));
+  info!("qbal {} starting up", env!("CARGO_PKG_VERSION"));
   bootstrap::init_audio_backend();
   info!("audio backend initialized");
 
   bootstrap::install_panic_hook();
   info!("panic hook configured");
 
-  // Shell completions don't need any spotify work
+  // Shell completions need no network or login
   if let Some(s) = matches.get_one::<String>("completions") {
     let shell =
       completion_shell(s).ok_or_else(|| anyhow!("no completions available for '{}'", s))?;
-    generate(shell, &mut clap_app, "spotatui", &mut io::stdout());
+    generate(shell, &mut clap_app, "qbal", &mut io::stdout());
     return Ok(());
+  }
+
+  // Before anything creates Qbal's own folders (the instance lock below does):
+  // carry the pre-rename `spotatui` folders over on the first launch.
+  for (old, new) in crate::core::migrations::migrate_pre_rename_dirs() {
+    info!("copied {} to {}", old.display(), new.display());
   }
 
   // Held until this function returns, so a second UI launch is refused while
@@ -120,7 +125,7 @@ async fn run_cli_inner() -> Result<()> {
     return Ok(());
   }
 
-  // Plugin management is pure git + filesystem work; it must not require Spotify auth.
+  // Plugin management is pure git + filesystem work; it must not require a login.
   #[cfg(feature = "scripting")]
   if let Some(plugin_matches) = matches.subcommand_matches("plugin") {
     crate::cli::handle_plugin_command(plugin_matches)?;
@@ -132,7 +137,7 @@ async fn run_cli_inner() -> Result<()> {
   #[cfg(not(feature = "tui"))]
   if matches.subcommand_name().is_none() {
     return Err(anyhow!(
-      "this spotatui build has no terminal UI (compiled without the `tui` feature); run a CLI subcommand instead"
+      "this qbal build has no terminal UI (compiled without the `tui` feature); run a CLI subcommand instead"
     ));
   }
 

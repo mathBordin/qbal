@@ -6,19 +6,7 @@ use crate::tui::handlers::common_key_events::{
   down_event, left_event, on_down_press_handler, on_up_press_handler, right_event, up_event,
 };
 use crate::tui::handlers::filter_input::{self, FilterEdit};
-pub(super) use crate::tui::ui::settings::BUTTON_KEY;
 use crate::tui::ui::settings::{filtered_setting_indices, selected_setting_position};
-
-fn selected_row_id(app: &App) -> Option<&str> {
-  app
-    .settings_items
-    .get(app.view.settings_selected_index)
-    .map(|setting| setting.id.as_str())
-}
-
-pub(super) fn selected_row_has_button(app: &App) -> bool {
-  selected_row_id(app).is_some_and(|id| app.setting_button_label(id).is_some())
-}
 
 pub fn handler(key: Key, app: &mut App) {
   if app.view.settings_unsaved_prompt_visible {
@@ -51,12 +39,6 @@ fn handle_navigation(key: Key, app: &mut App) {
 
     // Enter edit mode
     Key::Enter => enter_edit_mode(app),
-
-    BUTTON_KEY => {
-      if let Some(id) = selected_row_id(app).map(str::to_string) {
-        app.apply(Action::PressSettingButton { id });
-      }
-    }
 
     // Save settings
     key if key == app.effective_save_settings_key() => {
@@ -915,11 +897,11 @@ mod tests {
   fn selection_walks_only_the_rows_the_filter_left() {
     let mut app = App::default();
     open_settings(&mut app);
-    type_filter(&mut app, "sort");
+    type_filter(&mut app, "rate");
     handler(Key::Enter, &mut app);
 
     let visible = filtered_setting_indices(&app);
-    assert!(visible.len() > 1, "expected several sort rows");
+    assert!(visible.len() > 1, "expected several rate rows");
     assert_eq!(app.view.settings_selected_index, visible[0]);
 
     handler(Key::Down, &mut app);

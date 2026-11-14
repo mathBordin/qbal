@@ -1,10 +1,8 @@
-// Audio capture and analysis module for real-time visualization
-// This module provides cross-platform audio capture:
-// - Linux: PipeWire native (via pipewire-rs)
-// - Windows/macOS: cpal (WASAPI/CoreAudio)
+// Audio capture and analysis for the visualizer: PipeWire (the `audio-viz`
+// feature) or a cpal monitor device (`audio-viz-cpal`).
 //
-// It also hosts the shared decoded-audio output engine (`LocalPlayer`), used by
-// any source that plays through the local rodio sink (local files, Subsonic, Qobuz).
+// It also hosts the decoded-audio output engine (`LocalPlayer`) Qobuz plays
+// through.
 
 // Shared decode/output engine. Gated on `audio-decode`, which `local-files`,
 // `subsonic` and `qobuz` pull in, so the player is reachable from each source.
@@ -16,8 +14,8 @@ pub use player::Reopen;
 #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
 mod analyzer;
 
-/// The gain for a volume percent: librespot's `VolumeCtrl::Log` mapping over
-/// a 60 dB range (`1000^(p/100 - 1)`), which the native player uses by default.
+/// The gain for a volume percent: a logarithmic mapping over a 60 dB range
+/// (`1000^(p/100 - 1)`).
 /// 0% is silence, 100% is the file level, and 80% is about -12 dB.
 pub fn volume_gain(percent: u8) -> f32 {
   const DB_RATIO: f64 = 1000.0;

@@ -1,10 +1,5 @@
 #![cfg_attr(
-  not(any(
-    feature = "discord-rpc",
-    all(feature = "mpris", target_os = "linux"),
-    all(feature = "macos-media", target_os = "macos"),
-    all(feature = "windows-media", target_os = "windows")
-  )),
+  not(any(feature = "discord-rpc", all(feature = "mpris", target_os = "linux"))),
   allow(dead_code)
 )]
 
@@ -40,8 +35,6 @@ pub struct PlaybackSnapshot {
   pub source: PlaybackSource,
   pub progress_ms: u128,
   pub is_playing: bool,
-  /// True only for internet-radio live streams (no track duration, ICY metadata).
-  pub is_live: bool,
   pub shuffle: bool,
   pub repeat: Option<RepeatState>,
 }
@@ -88,17 +81,16 @@ fn snapshot_track_title(
   .to_owned()
 }
 
-/// Build a [`PlaybackSnapshot`] for whichever non-Spotify decoded source
-/// currently owns playback (at most one `*_playback` is `Some`). Metadata comes
-/// from the source's stored track info; progress and play-state are read live
-/// from its player. Returns `None` when no such source is active.
+/// Build a [`PlaybackSnapshot`] for whatever owns playback: the queue slot or
+/// the Qobuz session. Metadata comes from the stored track info; progress and
+/// play-state are read live from the player. Returns `None` when nothing plays.
 fn source_playback_snapshot(
   app: &App,
   strings: Option<&crate::core::i18n::Strings>,
 ) -> Option<PlaybackSnapshot> {
-  // The native queue slot playing a decoded track wins over every per-source
-  // context: it is what is actually audible, and it drives the playbar / MPRIS /
-  // cover art / lyrics via the shared track-change detector.
+  // The native queue slot wins over the playlist session: it is what is
+  // actually audible, and it drives the playbar / MPRIS / cover art / lyrics
+  // via the shared track-change detector.
   if let Some(crate::infra::queue::QueueNowPlaying::Decoded(d)) = app.queue_now.as_ref() {
     let mut snapshot = source_snapshot(
       snapshot_track_title(&d.track.name, d.track.generated_name, strings),
@@ -111,20 +103,17 @@ fn source_playback_snapshot(
       !d.player.is_paused(),
       app,
     );
-    // The native queue ignores the decoded shuffle/repeat modes (they belong to
-    // the suspended source resumed once the queue drains), so don't advertise
-    // them — mirroring the radio override and the playbar's hidden controls.
+    // The native queue ignores the shuffle/repeat modes (they belong to the
+    // suspended playlist resumed once the queue drains), so don't advertise
+    // them — mirroring the playbar's hidden controls.
     snapshot.shuffle = false;
     snapshot.repeat = None;
     return Some(snapshot);
   }
 
-  // A queued *Spotify* track owns the sink (a decoded one returned above): every
-  // `*_playback` below is then a suspended context, not what is audible, so
-  // reporting one would publish the wrong track *and* its stale shuffle/repeat.
-  // Fall through to the Spotify snapshot, which describes the queued track and
-  // blanks the modes for a queue slot. Mirrors the same filter the runner applies
-  // to its dedicated local-playback path.
+  // The queue owns the sink but its track is not published yet: the playlist
+  // below is suspended, not audible, so reporting it would publish the wrong
+  // track and its stale shuffle/repeat.
   if app.queue_owns_playback() {
     return None;
   }
@@ -148,34 +137,15 @@ fn source_playback_snapshot(
   None
 }
 
-fn is_subsonic(uri: &str) -> bool {
-  crate::core::queue::queue_item_source(uri) == crate::core::queue::QueueItemSource::Subsonic
-}
-
-/// The cover URL to fetch in this process; for Subsonic it carries the login, so it is not in the snapshot.
+/// The cover URL to fetch for the snapshot's track.
 #[cfg(feature = "art-decode")]
-pub fn cover_fetch_url(app: &App, snapshot: &PlaybackSnapshot) -> Option<String> {
-  if snapshot.metadata.image_url.is_some() {
-    return snapshot.metadata.image_url.clone();
-  }
-  let uri = snapshot
-    .item_uri
-    .as_deref()
-    .filter(|uri| is_subsonic(uri))?;
-  if let Some(crate::infra::queue::QueueNowPlaying::Decoded(d)) = app.queue_now.as_ref() {
-    if d.track.uri.as_deref() == Some(uri) {
-      return d.track.image_url.clone();
-    }
-  }
-  None
+pub fn cover_fetch_url(snapshot: &PlaybackSnapshot) -> Option<String> {
+  snapshot.metadata.image_url.clone()
 }
 
-/// Assemble a [`PlaybackSnapshot`] from a decoded source's fields. `image_url`
-/// is a directly-fetchable cover-art URL when the source provides one (Subsonic
-/// getCoverArt, YouTube thumbnail) and `None` otherwise (local files carry
-/// embedded art fetched separately; radio has none). Sources are always treated
-/// as a single track; shuffle/repeat come from the player-global decoded state
-/// (the radio caller overrides them since a live stream has no queue).
+/// Assemble a [`PlaybackSnapshot`] from a track's fields. `image_url` is the
+/// cover URL when Qobuz provides one. Shuffle/repeat come from the
+/// player-global state (the queue-slot caller blanks them).
 #[allow(clippy::too_many_arguments)]
 fn source_snapshot(
   title: String,
@@ -188,17 +158,14 @@ fn source_snapshot(
   is_playing: bool,
   app: &App,
 ) -> PlaybackSnapshot {
-  // The decoded repeat is source-neutral; translate to the Spotify-shaped
-  // `RepeatState` here at the snapshot boundary.
+  // Translate the player's repeat mode to the plugin-facing `RepeatState`
+  // here at the snapshot boundary.
   use crate::infra::queue::RepeatMode;
   let repeat = match app.decoded_repeat {
     RepeatMode::Off => RepeatState::Off,
     RepeatMode::Context => RepeatState::Context,
     RepeatMode::Track => RepeatState::Track,
   };
-  // Discord, MPRIS, Now Playing, the desktop host and the cloud feed publish
-  // this field, and a Subsonic URL carries the login (`u`, `t`, `s`).
-  let image_url = image_url.filter(|_| !item_uri.as_deref().is_some_and(is_subsonic));
   PlaybackSnapshot {
     metadata: PlaybackMetadata {
       title,
@@ -214,7 +181,6 @@ fn source_snapshot(
     source: PlaybackSource::ExternalDevice,
     progress_ms,
     is_playing,
-    is_live: false,
     shuffle: app.decoded_shuffle,
     repeat: Some(repeat),
   }

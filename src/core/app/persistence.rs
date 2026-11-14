@@ -5,14 +5,9 @@ use super::*;
 const STATE_SAVE_DEBOUNCE_MS: u64 = 500;
 
 impl App {
-  /// Snapshot the currently-playing non-Spotify session for persistence, or
-  /// `None` when Spotify (or nothing) owns playback. Reads the live position and
-  /// pause state straight from whichever source's player is active, mirroring
-  /// the source-ownership order the runner tick uses. Spotify playback is not
-  /// persisted here — its resume is handled by `startup_behavior` device logic.
   /// The resume point (`resume_index`, `resume_position_ms`) recorded when the
-  /// active decoded context was suspended under the native queue, or `None` when
-  /// no decoded context is suspended. Only one context is ever active, so this
+  /// playlist was suspended under the native queue, or `None` when nothing is
+  /// suspended. Only one context is ever active, so this
   /// unambiguously describes it.
   fn suspended_resume(&self) -> Option<(Option<usize>, u64)> {
     match self.queue_suspended.as_ref()? {
@@ -62,8 +57,8 @@ impl App {
     None
   }
 
-  /// Snapshot the full session to persist: the active non-Spotify playback (if
-  /// any) plus the native queue. Returns `None` only when there is nothing to
+  /// Snapshot the full session to persist: the active playback (if any) plus
+  /// the native queue. Returns `None` only when there is nothing to
   /// save (no active source *and* an empty queue), so the caller clears the
   /// session file — preserving the existing Some→None clear semantics.
   pub fn current_persisted_session(

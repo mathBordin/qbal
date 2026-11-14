@@ -5,9 +5,10 @@ when working with code in this repository. `CLAUDE.md` imports it: edit this fil
 
 ## Build & Run
 
-This is a Qobuz-only fork: the terminal UI is the only frontend, Spotify and every
-other source (Local/Subsonic/Radio/YouTube/Apple Music/Soloist) are gone, and
-there is no browser GUI, desktop shell, or AI DJ/MCP surface.
+Qbal is a Qobuz-only terminal player for Linux, forked from spotatui. The
+terminal UI is the only frontend; the binary is `qbal`, the crate `qbal`, and the
+Lua global `qbal`. On first launch `core/migrations.rs::migrate_pre_rename_dirs`
+copies the pre-rename `spotatui` config and state folders to the `qbal` ones.
 
 ```bash
 # Full build (audio viz + Lua scripting + OS integrations)
@@ -47,8 +48,8 @@ across a three-leg feature matrix (Linux only):
   `#[cfg(test)]` code are not gated. Run `cargo test` to compile test code. A
   test-only helper whose production caller is compiled out on the headless leg
   needs `#[allow(dead_code)]`.
-- CI runs on Linux only: no job compiles the `#[cfg(target_os = "macos")]` or
-  `#[cfg(target_os = "windows")]` arms.
+- CI runs on Linux only, and the code has no macOS or Windows arms left: do not
+  add any.
 - A pull_request-only `Gates ratchet` job diffs `tools/gates.count` against the
   merge-base (`tools/check_gates_ratchet.sh`): coupling counters may only fall;
   the two adoption counters (`test_attribute_total`,
@@ -73,13 +74,13 @@ check the `N filtered out` count actually says your test ran.
 ## Architecture
 
 One cargo package: a `[lib]` (`src/lib.rs`, private modules, public API =
-`run_cli`) plus one `[[bin]]` shim, `src/bin/spotatui.rs`. Five top-level units
+`run_cli`) plus one `[[bin]]` shim, `src/bin/qbal.rs`. Five top-level units
 under `src/`:
 
 | Unit | Role |
 |------|------|
 | `core/` | Centralized state (`App`), the tick scheduler (`driver/`), the shared action vocabulary (`action/`), config/state persistence, i18n, and the domain types (`plugin_api`, `pagination`, `source`) |
-| `infra/` | Qobuz (`qobuz/`), the decoded-audio sink and visualizer capture (`audio/`), the cross-track queue (`queue/`), the service events no router consumes - lyrics, cover art, announcements, listening stats (`network/`), listening history (`history.rs`), Lua scripting (`scripting/`), OS integrations (Discord RPC, MPRIS, macOS/Windows media) |
+| `infra/` | Qobuz (`qobuz/`), the decoded-audio sink and visualizer capture (`audio/`), the cross-track queue (`queue/`), the service events no router consumes - lyrics, cover art, announcements, listening stats (`network/`), listening history (`history.rs`), Lua scripting (`scripting/`), OS integrations (Discord RPC, MPRIS) |
 | `tui/` | Terminal UI: the event/render loop (`runner.rs`), key plumbing (`event/`), per-block input handlers (`handlers/`), immutable draw fns (`ui/`) |
 | `cli/` | clap subcommands: listening history, plugin management |
 | `runtime/` | `mod.rs::run_cli` (entry point + CLI dispatch), `bootstrap.rs::boot` (config, state, the persisted session, `App` construction), `cli.rs` (clap assembly), `pump.rs::start_tokio` (the IoEvent pump), `startup.rs` (the UI launch: OS media integrations, session restore), `instance.rs` (the single-instance lock a UI launch takes) |
@@ -221,8 +222,7 @@ navigation. Adding a binding means fields on both `KeyBindings` and
 ### Requirements
 
 `core/requirement.rs` says what a row or key needs (`Requirement::{None,
-Capability(_), AnyOf(_)}`) and `App::availability(req)` answers for the active
-source. Three tables carry it: the sidebar (`library_row_requirements()` in
+Capability(_)}`) and `App::availability(req)` answers for the active source. Three tables carry it: the sidebar (`library_row_requirements()` in
 `core/app/library.rs`), the help menu (`help_entries()` in `tui/keymap.rs`) and
 the settings rows (`setting_requirement(id)` in `core/app/settings_schema.rs`).
 
@@ -233,7 +233,6 @@ A value that changes as the app runs goes in state, never config:
 | File | Owner | Contents |
 |------|-------|----------|
 | `config.yml` (config dir) | `core/user_config.rs` | hand-editable settings, keys, theme |
-| `client.yml` (config dir) | `core/migrations.rs` (read only) | written by older releases; migrated on boot |
 | `state.yml` (state dir) | `core/state.rs` | machine-written runtime values |
 | `last_session.yml` (state dir) | `core/persisted_playback.rs` | the Qobuz playback session + native queue |
 | `qobuz_credentials.yml` (config dir) | `infra/qobuz/auth.rs` | the Qobuz login token |
@@ -261,8 +260,7 @@ checks that each translation keeps the English `{placeholder}` names.
 
 ### Feature flags
 
-- `default` = `tui, audio-viz-cpal, macos-media, windows-media, mpris,
-  discord-rpc, scripting`. Not in default: `cover-art` (album art in the
+- `default` = `tui, audio-viz-cpal, mpris, discord-rpc, scripting`. Not in default: `cover-art` (album art in the
   terminal) and `audio-viz` (PipeWire capture, Linux-only).
 - `tui` gates `mod tui` and owns the terminal-only crates (ratatui, crossterm,
   tui-bar-graph, colorgrad).
@@ -290,7 +288,7 @@ reads a file in that directory. Other agents must open it.
 | `core/app/` layout, playback ownership, error reporting | `src/core/app/AGENTS.md` |
 | A new `Action` variant | `src/core/action/AGENTS.md` |
 | A new `IoEvent` | `src/infra/network/AGENTS.md` |
-| `LocalPlayer`, macOS playback, output-device loss | `src/infra/audio/AGENTS.md` |
+| `LocalPlayer`, output-device loss | `src/infra/audio/AGENTS.md` |
 | Decoded repeat/shuffle | `src/infra/queue/AGENTS.md` |
 | Qobuz streaming | `src/infra/qobuz/AGENTS.md` |
 
@@ -303,8 +301,8 @@ reads a file in that directory. Other agents must open it.
   re-fire auto-advance and skip several tracks.
 - Playback state is one `Option` field on `App` (`qobuz_playback`), published
   only on success; position/pause are read live from the player at render time.
-- OS integrations (MPRIS, SMTC, macOS Now Playing, Discord RPC, window title) all
-  read one `PlaybackSnapshot` from `infra/media_metadata.rs`.
+- OS integrations (MPRIS, Discord RPC, window title) all read one
+  `PlaybackSnapshot` from `infra/media_metadata.rs`.
 
 ### Testing conventions
 

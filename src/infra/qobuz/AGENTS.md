@@ -8,5 +8,5 @@
   a superseded stream is dropped, which cancels its download. Request signing
   (`sign.rs`) is pure; `stream/` does the network and file I/O. Both are unit
   tested. The three web-player constants are scraped at runtime (`auth.rs`),
-  cached in `state.yml`, and overridable through `SPOTATUI_QOBUZ_*` env vars;
+  cached in `state.yml`, and overridable through `QBAL_QOBUZ_*` env vars;
   they are never embedded. Failures are status messages, never `handle_error`.

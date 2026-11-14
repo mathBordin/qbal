@@ -43,8 +43,7 @@ fn client() -> anyhow::Result<&'static reqwest::Client> {
 /// by the shared detector and handled off the `App` lock in the network layer.
 #[derive(Clone, Debug)]
 pub enum CoverArtRequest {
-  /// Download and decode an image from a URL (Spotify album art, YouTube
-  /// thumbnail, Subsonic getCoverArt, Qobuz album art).
+  /// Download and decode an image from a URL (Qobuz album art).
   Url(String),
 }
 
@@ -71,8 +70,7 @@ pub enum CoverArtStatus {
   Loading,
   /// Art for the current track is loaded and rendering.
   Loaded,
-  /// The current source has no cover art to show (e.g. internet radio, or a
-  /// local file with no embedded picture).
+  /// The current track has no cover art to show.
   Unavailable,
   /// A fetch/decode was attempted for the current track but failed.
   Failed,

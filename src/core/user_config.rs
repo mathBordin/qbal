@@ -181,54 +181,17 @@ impl VisualizerStyle {
   }
 }
 
-/// What the desktop app draws behind its player bar while this computer plays.
-#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlayerBarVisualizer {
-  Off,
-  #[default]
-  Spectrum,
-  Waveform,
-}
-
-// The settings row exists only where the desktop app captures.
-#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
-impl PlayerBarVisualizer {
-  pub fn name(self) -> &'static str {
-    match self {
-      PlayerBarVisualizer::Off => "Off",
-      PlayerBarVisualizer::Spectrum => "Spectrum",
-      PlayerBarVisualizer::Waveform => "Waveform",
-    }
-  }
-
-  pub fn options() -> &'static [&'static str] {
-    &["Off", "Spectrum", "Waveform"]
-  }
-
-  pub fn from_name(name: &str) -> Self {
-    match name {
-      "Off" => PlayerBarVisualizer::Off,
-      "Waveform" => PlayerBarVisualizer::Waveform,
-      _ => PlayerBarVisualizer::Spectrum,
-    }
-  }
-}
-
-/// Controls the playback state on startup, both for Spotify and for a persisted
-/// non-Spotify session (local/Subsonic/radio/YouTube) that spotatui resumes on
-/// launch.
+/// Controls the playback state of the session Qbal resumes on launch.
 #[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupBehavior {
-  /// Restore the last state: leave Spotify playback as-is, and resume a persisted
-  /// non-Spotify session to the exact play/pause state it had when spotatui last
-  /// closed (a track playing at exit resumes playing). This is the default.
+  /// Resume the session in the play/pause state it had when Qbal last closed
+  /// (a track playing at exit resumes playing). This is the default.
   #[default]
   Continue,
-  /// Always start playing on launch (Spotify, or the restored session).
+  /// Always start playing the restored session on launch.
   Play,
-  /// Always pause on launch (Spotify, or the restored session).
+  /// Always pause the restored session on launch.
   Pause,
 }
 
@@ -541,7 +504,6 @@ pub struct BehaviorConfigString {
   pub banner_gradient: Option<bool>,
   pub show_loading_indicator: Option<bool>,
   pub enforce_wide_search_bar: Option<bool>,
-  pub group_folders_first: Option<bool>,
   pub disable_mouse_inputs: Option<bool>,
   pub enable_discord_rpc: Option<bool>,
   pub discord_rpc_client_id: Option<String>,
@@ -549,15 +511,9 @@ pub struct BehaviorConfigString {
   pub enable_lyrics: Option<bool>,
   pub announcement_feed_url: Option<String>,
   pub enable_monthly_recap_prompt: Option<bool>,
-  pub shuffle_icon: Option<String>,
-  pub repeat_track_icon: Option<String>,
-  pub repeat_context_icon: Option<String>,
   pub playing_icon: Option<String>,
-  pub paused_icon: Option<String>,
   pub set_window_title: Option<bool>,
   pub visualizer_style: Option<VisualizerStyle>,
-  pub player_bar_visualizer: Option<PlayerBarVisualizer>,
-  pub stop_after_current_track: Option<bool>,
   pub startup_behavior: Option<StartupBehavior>,
   #[cfg(feature = "art-decode")]
   pub draw_cover_art: Option<bool>,
@@ -579,7 +535,6 @@ pub struct BehaviorConfigString {
   // --- Phase 2: icons / glyphs / labels (defaults = today's glyphs) ---
   pub gauge_filled_icon: Option<String>,
   pub gauge_unfilled_icon: Option<String>,
-  pub active_source_icon: Option<String>,
   pub sort_ascending_icon: Option<String>,
   pub sort_descending_icon: Option<String>,
   pub list_highlight_icon: Option<String>,
@@ -619,7 +574,6 @@ pub struct BehaviorConfig {
   pub banner_gradient: bool,
   pub show_loading_indicator: bool,
   pub enforce_wide_search_bar: bool,
-  pub group_folders_first: bool,
   pub disable_mouse_inputs: bool,
   pub enable_discord_rpc: bool,
   pub discord_rpc_client_id: Option<String>,
@@ -627,15 +581,9 @@ pub struct BehaviorConfig {
   pub enable_lyrics: bool,
   pub announcement_feed_url: Option<String>,
   pub enable_monthly_recap_prompt: bool,
-  pub shuffle_icon: String,
-  pub repeat_track_icon: String,
-  pub repeat_context_icon: String,
   pub playing_icon: String,
-  pub paused_icon: String,
   pub set_window_title: bool,
   pub visualizer_style: VisualizerStyle,
-  pub player_bar_visualizer: PlayerBarVisualizer,
-  pub stop_after_current_track: bool,
   pub startup_behavior: StartupBehavior,
   #[cfg(feature = "art-decode")]
   pub draw_cover_art: bool,
@@ -654,7 +602,7 @@ pub struct BehaviorConfig {
   #[cfg(feature = "cover-art")]
   pub cover_art_dither_pixel_scale: u8,
   pub keepawake_enabled: bool,
-  /// When false, spotatui ignores OS media-control commands (headphone
+  /// When false, qbal ignores OS media-control commands (headphone
   /// play/pause/skip buttons, media keys, MPRIS/SMTC/Now Playing, playerctl).
   /// It still publishes track metadata to the OS; it just stops reacting.
   pub enable_media_keys: bool,
@@ -664,7 +612,6 @@ pub struct BehaviorConfig {
   // --- Phase 2: icons / glyphs / labels ---
   pub gauge_filled_icon: String,
   pub gauge_unfilled_icon: String,
-  pub active_source_icon: String,
   pub sort_ascending_icon: String,
   pub sort_descending_icon: String,
   pub list_highlight_icon: String,
@@ -697,15 +644,12 @@ impl BehaviorConfig {
 // ===== Phase 4: format templates =====
 
 /// Placeholder keys available to every format template, in index order.
-pub const FORMAT_KEYS: &[&str] = &[
-  "state", "device", "source", "queue", "shuffle", "repeat", "volume", "party",
-];
+pub const FORMAT_KEYS: &[&str] = &["state", "source", "queue", "shuffle", "repeat", "volume"];
 
 /// On-disk format config: all templates optional, defaulting to today's output.
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FormatConfigString {
   pub playbar_status: Option<String>,
-  pub playbar_status_source: Option<String>,
   pub window_title: Option<String>,
 }
 
@@ -713,26 +657,20 @@ pub struct FormatConfigString {
 /// byte-for-byte.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FormatConfig {
-  /// Spotify playbar title: `"{state} ({device} | Shuffle: {shuffle} | Repeat: {repeat} | Volume: {volume}%){party}"`
-  pub playbar_status: Template,
-  /// Local-source playbar title: `"{state} ({source}{queue}{shuffle}{repeat} | Volume: {volume}%)"`.
+  /// Playbar title: `"{state} ({source}{queue}{shuffle}{repeat} | Volume: {volume}%)"`.
   /// The `{shuffle}` / `{repeat}` placeholders carry their own ` | Label: value`
-  /// prefix (like `{artist}` in the window title) and render empty for sources
-  /// without the controls (internet radio, native queue slots), so their labels
-  /// never leak as blank controls.
-  pub playbar_status_source: Template,
+  /// prefix (like `{artist}` in the window title) and render empty while the
+  /// queue slot plays, so their labels never leak as blank controls.
+  pub playbar_status: Template,
   /// Window title: `"{state}: {artist} - {title}"`
   pub window_title: Template,
 }
 
 impl FormatConfig {
-  /// Today's hardcoded Spotify playbar format string.
+  /// The default playbar format string. `{shuffle}` and `{repeat}` include
+  /// their own ` | Label: value` prefix so they can render empty (hiding the
+  /// whole segment) when the controls do not apply.
   pub const DEFAULT_PLAYBAR_STATUS: &'static str =
-    "{state} ({device} | Shuffle: {shuffle} | Repeat: {repeat} | Volume: {volume}%){party}";
-  /// Today's hardcoded local-source playbar format string. `{shuffle}` and
-  /// `{repeat}` include their own ` | Label: value` prefix so they can render
-  /// empty (hiding the whole segment) for sources without those controls.
-  pub const DEFAULT_PLAYBAR_STATUS_SOURCE: &'static str =
     "{state} ({source}{queue}{shuffle}{repeat} | Volume: {volume}%)";
   /// Today's hardcoded window-title format string: `"{title} — {artist}"`.
   /// (The artist segment is composed by the call site and omitted when empty.)
@@ -746,8 +684,6 @@ impl FormatConfig {
     Self {
       playbar_status: Template::parse(Self::DEFAULT_PLAYBAR_STATUS, FORMAT_KEYS)
         .expect("default playbar_status template must parse"),
-      playbar_status_source: Template::parse(Self::DEFAULT_PLAYBAR_STATUS_SOURCE, FORMAT_KEYS)
-        .expect("default playbar_status_source template must parse"),
       window_title: Template::parse(Self::DEFAULT_WINDOW_TITLE, Self::WINDOW_TITLE_KEYS)
         .expect("default window_title template must parse"),
     }
@@ -850,11 +786,6 @@ pub struct ColumnSpec {
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TablesConfigString {
   pub songs: Option<Vec<ColumnSpec>>,
-  pub album_tracks: Option<Vec<ColumnSpec>>,
-  pub albums: Option<Vec<ColumnSpec>>,
-  pub podcasts: Option<Vec<ColumnSpec>>,
-  pub episodes: Option<Vec<ColumnSpec>>,
-  pub recently_played: Option<Vec<ColumnSpec>>,
 }
 
 /// Validated (but not yet render-bound) per-table column lists. Defaults are
@@ -864,11 +795,6 @@ pub struct TablesConfigString {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct TablesConfig {
   pub songs: Vec<ColumnSpec>,
-  pub album_tracks: Vec<ColumnSpec>,
-  pub albums: Vec<ColumnSpec>,
-  pub podcasts: Vec<ColumnSpec>,
-  pub episodes: Vec<ColumnSpec>,
-  pub recently_played: Vec<ColumnSpec>,
 }
 
 #[derive(Clone)]
@@ -891,12 +817,6 @@ pub struct UserConfig {
 
 impl UserConfig {
   pub fn new() -> UserConfig {
-    // Detect platform for platform-specific defaults
-    #[cfg(target_os = "macos")]
-    let is_macos = true;
-    #[cfg(not(target_os = "macos"))]
-    let is_macos = false;
-
     UserConfig {
       theme: Default::default(),
       current_preset: ThemePreset::Default,
@@ -933,13 +853,7 @@ impl UserConfig {
         add_item_to_queue: Key::Char('z'),
         show_queue: Key::Char('Q'),
         remove_from_queue: Key::Char('x'),
-        // On macOS, use Ctrl+, for settings since Alt+, produces ≤ on most keyboard layouts
-        // On other platforms, keep Alt+, for consistency with many apps
-        open_settings: if is_macos {
-          Key::Ctrl(',')
-        } else {
-          Key::Alt(',')
-        },
+        open_settings: Key::Alt(','),
         save_settings: Key::Alt('s'),
         generate_recap: Key::Char('R'),
         detach_pane: Key::Alt('d'),
@@ -969,7 +883,6 @@ impl UserConfig {
         banner_gradient: true,
         show_loading_indicator: true,
         enforce_wide_search_bar: false,
-        group_folders_first: false,
         disable_mouse_inputs: false,
         enable_discord_rpc: true,
         discord_rpc_client_id: None,
@@ -977,15 +890,9 @@ impl UserConfig {
         enable_lyrics: true,
         announcement_feed_url: None,
         enable_monthly_recap_prompt: true,
-        shuffle_icon: "🔀".to_string(),
-        repeat_track_icon: "🔂".to_string(),
-        repeat_context_icon: "🔁".to_string(),
         playing_icon: "▶".to_string(),
-        paused_icon: "⏸".to_string(),
         set_window_title: true,
         visualizer_style: VisualizerStyle::default(),
-        player_bar_visualizer: PlayerBarVisualizer::default(),
-        stop_after_current_track: false,
         startup_behavior: StartupBehavior::Continue,
         #[cfg(feature = "art-decode")]
         draw_cover_art: true,
@@ -1007,7 +914,6 @@ impl UserConfig {
         // --- Phase 2: icons / glyphs / labels (defaults = today's glyphs) ---
         gauge_filled_icon: "⣿".to_string(),
         gauge_unfilled_icon: "⣉".to_string(),
-        active_source_icon: "●".to_string(),
         sort_ascending_icon: "↑".to_string(),
         sort_descending_icon: "↓".to_string(),
         list_highlight_icon: "▶".to_string(),
@@ -1049,9 +955,8 @@ impl UserConfig {
           fs::create_dir(&app_config_dir)?;
         }
 
-        // Restrict the app's own config directory (holds config.yml, which
-        // carries the Subsonic password and party sync_token in cleartext,
-        // plus the Spotify token cache) to owner-only. Never touch
+        // Restrict the app's own config directory (holds config.yml and the
+        // Qobuz login token) to owner-only. Never touch
         // `home_config_dir` (`~/.config`) — that's shared with every other
         // application on the system.
         #[cfg(unix)]
@@ -1301,26 +1206,6 @@ impl UserConfig {
       self.behavior.enforce_wide_search_bar = wide_search_bar;
     }
 
-    if let Some(group_folders_first) = behavior_config.group_folders_first {
-      self.behavior.group_folders_first = group_folders_first;
-    }
-
-    if let Some(paused_icon) = behavior_config.paused_icon {
-      self.behavior.paused_icon = paused_icon;
-    }
-
-    if let Some(shuffle_icon) = behavior_config.shuffle_icon {
-      self.behavior.shuffle_icon = shuffle_icon;
-    }
-
-    if let Some(repeat_track_icon) = behavior_config.repeat_track_icon {
-      self.behavior.repeat_track_icon = repeat_track_icon;
-    }
-
-    if let Some(repeat_context_icon) = behavior_config.repeat_context_icon {
-      self.behavior.repeat_context_icon = repeat_context_icon;
-    }
-
     if let Some(set_window_title) = behavior_config.set_window_title {
       self.behavior.set_window_title = set_window_title;
     }
@@ -1362,10 +1247,6 @@ impl UserConfig {
       self.behavior.visualizer_style = visualizer_style;
     }
 
-    if let Some(stop_after_current_track) = behavior_config.stop_after_current_track {
-      self.behavior.stop_after_current_track = stop_after_current_track;
-    }
-
     if let Some(sidebar_width_percent) = behavior_config.sidebar_width_percent {
       self.behavior.sidebar_width_percent = Some(sidebar_width_percent.min(100));
     }
@@ -1380,10 +1261,6 @@ impl UserConfig {
 
     if let Some(startup_behavior) = behavior_config.startup_behavior {
       self.behavior.startup_behavior = startup_behavior;
-    }
-
-    if let Some(player_bar_visualizer) = behavior_config.player_bar_visualizer {
-      self.behavior.player_bar_visualizer = player_bar_visualizer;
     }
 
     #[cfg(feature = "art-decode")]
@@ -1423,17 +1300,6 @@ impl UserConfig {
     if let Some(enable_media_keys) = behavior_config.enable_media_keys {
       self.behavior.enable_media_keys = enable_media_keys;
     }
-    // Subsonic server config: trim-to-None so blank keys read as unset.
-    let _trim_to_none = |value: Option<String>| -> Option<String> {
-      value.and_then(|v| {
-        let trimmed = v.trim();
-        if trimmed.is_empty() {
-          None
-        } else {
-          Some(trimmed.to_string())
-        }
-      })
-    };
     if let Some(qobuz_quality) = behavior_config.qobuz_quality {
       self.behavior.qobuz_quality = qobuz_quality_or_default(qobuz_quality);
     }
@@ -1477,14 +1343,8 @@ impl UserConfig {
       behavior_config.playing_icon,
       "playing_icon",
     );
-    // active_source_icon, list_highlight_icon render in free space, not a
-    // fixed-width column → accept any non-empty glyph.
-    if let Some(icon) = behavior_config.active_source_icon {
-      let icon = icon.trim().to_string();
-      if !icon.is_empty() {
-        self.behavior.active_source_icon = icon;
-      }
-    }
+    // list_highlight_icon renders in free space, not a fixed-width column →
+    // accept any non-empty glyph.
     if let Some(icon) = behavior_config.list_highlight_icon {
       let icon = icon.trim().to_string();
       if !icon.is_empty() {
@@ -1744,12 +1604,6 @@ impl UserConfig {
         Err(e) => log::warn!("[config] format.playbar_status: {e}; using default"),
       }
     }
-    if let Some(s) = format.playbar_status_source {
-      match Template::parse(s.trim(), FORMAT_KEYS) {
-        Ok(t) => self.format.playbar_status_source = t,
-        Err(e) => log::warn!("[config] format.playbar_status_source: {e}; using default"),
-      }
-    }
     if let Some(s) = format.window_title {
       match Template::parse(s.trim(), FormatConfig::WINDOW_TITLE_KEYS) {
         Ok(t) => self.format.window_title = t,
@@ -1765,21 +1619,13 @@ impl UserConfig {
   pub fn load_tablesconfig(&mut self, tables: TablesConfigString) {
     // Each table is validated against its registry of valid column ids (kept
     // in the rendering layer). Empty specs are dropped (== built-in defaults).
-    let load = |table: &'static str, specs: Option<Vec<ColumnSpec>>| -> Vec<ColumnSpec> {
-      match resolve_table_specs(table, specs) {
-        Ok(specs) => specs,
-        Err(e) => {
-          log::warn!("[config] {e}; using default columns");
-          Vec::new()
-        }
+    self.tables.songs = match resolve_table_specs("songs", tables.songs) {
+      Ok(specs) => specs,
+      Err(e) => {
+        log::warn!("[config] {e}; using default columns");
+        Vec::new()
       }
     };
-    self.tables.songs = load("songs", tables.songs);
-    self.tables.album_tracks = load("album_tracks", tables.album_tracks);
-    self.tables.albums = load("albums", tables.albums);
-    self.tables.podcasts = load("podcasts", tables.podcasts);
-    self.tables.episodes = load("episodes", tables.episodes);
-    self.tables.recently_played = load("recently_played", tables.recently_played);
   }
 
   /// Save the current configuration to the config file
@@ -1801,7 +1647,6 @@ impl UserConfig {
       banner_gradient: Some(self.behavior.banner_gradient),
       show_loading_indicator: Some(self.behavior.show_loading_indicator),
       enforce_wide_search_bar: Some(self.behavior.enforce_wide_search_bar),
-      group_folders_first: Some(self.behavior.group_folders_first),
       disable_mouse_inputs: Some(self.behavior.disable_mouse_inputs),
       enable_discord_rpc: Some(self.behavior.enable_discord_rpc),
       discord_rpc_client_id: self.behavior.discord_rpc_client_id.clone(),
@@ -1809,17 +1654,11 @@ impl UserConfig {
       enable_lyrics: Some(self.behavior.enable_lyrics),
       announcement_feed_url: self.behavior.announcement_feed_url.clone(),
       enable_monthly_recap_prompt: Some(self.behavior.enable_monthly_recap_prompt),
-      shuffle_icon: Some(self.behavior.shuffle_icon.clone()),
-      repeat_track_icon: Some(self.behavior.repeat_track_icon.clone()),
-      repeat_context_icon: Some(self.behavior.repeat_context_icon.clone()),
       playing_icon: Some(self.behavior.playing_icon.clone()),
-      paused_icon: Some(self.behavior.paused_icon.clone()),
       set_window_title: Some(self.behavior.set_window_title),
       visualizer_style: Some(self.behavior.visualizer_style),
       qobuz_quality: Some(self.behavior.qobuz_quality),
-      stop_after_current_track: Some(self.behavior.stop_after_current_track),
       startup_behavior: Some(self.behavior.startup_behavior),
-      player_bar_visualizer: Some(self.behavior.player_bar_visualizer),
       #[cfg(feature = "art-decode")]
       draw_cover_art: Some(self.behavior.draw_cover_art),
       #[cfg(feature = "art-decode")]
@@ -1841,7 +1680,6 @@ impl UserConfig {
       // --- Phase 2/3/6 new fields (persist whatever the user set) ---
       gauge_filled_icon: Some(self.behavior.gauge_filled_icon.clone()),
       gauge_unfilled_icon: Some(self.behavior.gauge_unfilled_icon.clone()),
-      active_source_icon: Some(self.behavior.active_source_icon.clone()),
       sort_ascending_icon: Some(self.behavior.sort_ascending_icon.clone()),
       sort_descending_icon: Some(self.behavior.sort_descending_icon.clone()),
       list_highlight_icon: Some(self.behavior.list_highlight_icon.clone()),
@@ -1971,11 +1809,9 @@ impl UserConfig {
     };
 
     // Serialize to a String/bytes first, then write via a private-file helper
-    // (0o600 on Unix — this file can carry the Subsonic password in
-    // cleartext, so it deserves the same protection as the Spotify token
-    // cache) using a temp-file + atomic rename, so a crash mid-write can't
-    // corrupt the config. Do not log `content_yml`: it may contain plaintext
-    // credentials.
+    // (0o600 on Unix — the file can carry a Discord application id and other
+    // personal settings) using a temp-file + atomic rename, so a crash
+    // mid-write can't corrupt the config. Do not log `content_yml`.
     let mut content = serde_yaml::to_value(&final_config)?;
     if let Some(on_disk) = fs::read_to_string(&paths.config_file_path)
       .ok()
@@ -2009,12 +1845,7 @@ impl UserConfig {
 /// registry; the round-trip test guards the two staying in sync.
 pub fn valid_column_ids(table: &str) -> &'static [&'static str] {
   match table {
-    "songs" | "album_tracks" | "recently_played" => &[
-      "liked", "index", "title", "artist", "album", "length", "year",
-    ],
-    "albums" => &["title", "artist", "date", "liked"],
-    "podcasts" => &["title", "publisher"],
-    "episodes" => &["played", "date", "title", "duration"],
+    "songs" => &["index", "title", "artist", "album", "length", "year"],
     _ => &[],
   }
 }
@@ -2626,19 +2457,17 @@ mod tests {
     assert_eq!(config.behavior.playbar_cover_art_size_percent, 200);
   }
 
-  /// A config written by a build *with* the DJ features must still load in a
-  /// build without them, and vice versa.
+  /// A config with keys Qbal does not have, such as the AI DJ keys the app it
+  /// forked from wrote, must still load.
   ///
-  /// This is a real cross-build hazard, not a hypothetical: a user can save from
-  /// the Settings screen on an `ai-dj` build and then run a slim release binary.
   /// `BehaviorConfigString` has no `deny_unknown_fields`, so serde ignores keys it
   /// does not know — this test is what keeps that true if the derive ever changes.
   #[test]
   fn unknown_behavior_keys_are_ignored_rather_than_fatal() {
     use super::{BehaviorConfigString, UserConfig};
 
-    // Every DJ/MCP key, as an `ai-dj` + `mcp-server` build would write them,
-    // alongside a key that no build has ever had.
+    // The AI DJ and MCP keys the forked app wrote, alongside a key that no
+    // build has ever had.
     let yaml = "
 mcp_enabled: true
 dj_backend: openai_compat
@@ -2731,9 +2560,7 @@ volume_increment: 5
 
     let mut config = UserConfig::new();
     let mut entries = HashMap::new();
-    // Ctrl+K rather than Ctrl+G: with `ai-dj` built in, Ctrl+G is `dj_pick_model`
-    // and `load_plugin_commands` correctly refuses to shadow a named action, so the
-    // old fixture would only have passed in the slim build.
+    // A key no named action uses: `load_plugin_commands` refuses to shadow one.
     entries.insert("toggle_lyrics".to_string(), "ctrl-k".to_string());
     config.load_plugin_commands(entries);
     assert_eq!(
@@ -2867,14 +2694,9 @@ library_height_percent: 101
     assert_eq!(config.behavior.playing_icon, "▶");
     // Every documented table resolves to its example columns (an empty Vec
     // would mean that table's spec was rejected and fell back to defaults).
-    assert_eq!(config.tables.songs.len(), 5);
-    assert_eq!(config.tables.album_tracks.len(), 5);
-    assert_eq!(config.tables.albums.len(), 3);
-    assert_eq!(config.tables.podcasts.len(), 2);
-    assert_eq!(config.tables.episodes.len(), 4);
-    assert_eq!(config.tables.recently_played.len(), 4);
+    assert_eq!(config.tables.songs.len(), 4);
     assert_eq!(
-      config.tables.songs[2].header.as_deref(),
+      config.tables.songs[1].header.as_deref(),
       Some("Band"),
       "header override from the example must survive resolution"
     );
@@ -2916,17 +2738,17 @@ library_height_percent: 101
         id: "bogus".to_string(),
         ..Default::default()
       }]),
-      albums: Some(vec![ColumnSpec {
+    });
+
+    // The bad table degrades to defaults (empty == built-in columns).
+    assert!(config.tables.songs.is_empty());
+    config.load_tablesconfig(TablesConfigString {
+      songs: Some(vec![ColumnSpec {
         id: "title".to_string(),
         ..Default::default()
       }]),
-      ..Default::default()
     });
-
-    // The bad table degrades to defaults (empty == built-in columns); the
-    // valid table is kept.
-    assert!(config.tables.songs.is_empty());
-    assert_eq!(config.tables.albums.len(), 1);
+    assert_eq!(config.tables.songs.len(), 1);
   }
 
   #[test]

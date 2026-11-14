@@ -6,7 +6,6 @@ use super::util::get_percentage_width;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TableColumnSet {
   Songs,
-  Albums,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -81,17 +80,12 @@ fn localized_header<'a>(
 ) -> &'a str {
   match def.id {
     "title" => match table {
-      TableColumnSet::Albums => strings.column_name,
       TableColumnSet::Songs => strings.column_title,
     },
     "artist" => strings.column_artist,
     "album" => strings.column_album,
     "length" => strings.column_length,
     "year" => strings.column_year,
-    "date" if table == TableColumnSet::Albums => strings.column_release_date,
-    "date" => strings.column_date,
-    "duration" => strings.column_duration,
-    "publisher" => strings.column_publisher,
     _ => def.header,
   }
 }
@@ -108,8 +102,7 @@ fn default_specs(table: TableColumnSet) -> Vec<ColumnSpec> {
 
 fn default_column_ids(table: TableColumnSet) -> &'static [&'static str] {
   match table {
-    TableColumnSet::Songs => &["liked", "title", "artist", "album", "length"],
-    TableColumnSet::Albums => &["title", "artist", "date"],
+    TableColumnSet::Songs => &["title", "artist", "album", "length"],
   }
 }
 
@@ -127,12 +120,10 @@ fn column_def(table: TableColumnSet, id: &str) -> Option<ColumnDef> {
 fn column_defs(table: TableColumnSet) -> &'static [ColumnDef] {
   match table {
     TableColumnSet::Songs => &SONG_COLUMNS,
-    TableColumnSet::Albums => &ALBUM_COLUMNS,
   }
 }
 
-const SONG_COLUMNS: [ColumnDef; 7] = [
-  liked_column(),
+const SONG_COLUMNS: [ColumnDef; 6] = [
   index_column(),
   title_column(WidthSpec::Percent(0.3), "Title"),
   artist_column(WidthSpec::Percent(0.3)),
@@ -140,27 +131,6 @@ const SONG_COLUMNS: [ColumnDef; 7] = [
   length_column(WidthSpec::Percent(0.1), "Length"),
   year_column(),
 ];
-
-const ALBUM_COLUMNS: [ColumnDef; 4] = [
-  title_column(WidthSpec::Percent(2.0 / 5.0), "Name"),
-  artist_column(WidthSpec::Percent(2.0 / 5.0)),
-  ColumnDef {
-    id: "date",
-    header: "Release Date",
-    width: WidthSpec::Percent(1.0 / 5.0),
-    column_id: ColumnId::None,
-  },
-  liked_column(),
-];
-
-const fn liked_column() -> ColumnDef {
-  ColumnDef {
-    id: "liked",
-    header: "",
-    width: WidthSpec::Fixed(2),
-    column_id: ColumnId::Liked,
-  }
-}
 
 const fn index_column() -> ColumnDef {
   ColumnDef {
@@ -226,7 +196,7 @@ mod tests {
     let columns = resolve_columns(TableColumnSet::Songs, 100, &[]);
     assert_eq!(
       columns.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
-      ["liked", "title", "artist", "album", "length"]
+      ["title", "artist", "album", "length"]
     );
   }
 
@@ -258,12 +228,12 @@ mod tests {
     assert_eq!(columns[1].column_id, ColumnId::Title);
   }
   #[test]
-  fn chinese_column_defaults_leave_explicit_english_headers_untouched() {
+  fn localized_column_defaults_leave_explicit_english_headers_untouched() {
     use crate::core::i18n::screens::{FR, PT_BR};
     for strings in [&PT_BR, &FR] {
       let columns = resolve_columns_localized(TableColumnSet::Songs, 80, &[], strings);
-      assert_eq!(columns[1].header, strings.column_title);
-      assert_eq!(columns[2].header, strings.column_artist);
+      assert_eq!(columns[0].header, strings.column_title);
+      assert_eq!(columns[1].header, strings.column_artist);
       let configured = [ColumnSpec {
         id: "title".into(),
         header: Some("Title".into()),

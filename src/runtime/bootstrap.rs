@@ -1,13 +1,10 @@
-//! The frontend-neutral bootstrap: logging, the panic hook, the ALSA error
-//! silencer, config/state loading with migrations, Spotify authentication,
-//! and `App` construction. `boot()` is the one entry point; `run_cli()` and
-//! `run_gui()` call it.
+//! The bootstrap: logging, the panic hook, the ALSA error silencer,
+//! config/state loading with migrations, and `App` construction. `boot()` is
+//! the one entry point; `run_cli()` calls it.
 
 use crate::core::app::App;
 use crate::core::limits::MAX_PLAYBAR_ROWS;
-use crate::core::migrations::{
-  apply_legacy_client_config_migration, apply_legacy_config_runtime_state_migration,
-};
+use crate::core::migrations::apply_legacy_config_runtime_state_migration;
 use crate::core::onboarding::Onboarding;
 use crate::core::state::{PersistedRuntimeState, RuntimeState};
 use crate::core::user_config::{
@@ -42,8 +39,8 @@ pub(super) fn setup_logging(
   // The global level never goes above `Info`: dependencies (reqwest, hyper,
   // rustls, h2, ...) are deliberately never pinned individually with
   // `level_for`, so the global default is what keeps them quiet at
-  // `--debug`/`SPOTATUI_LOG=trace` without a pin list that has to be kept in
-  // sync as dependencies change. Below `Info` (e.g. `SPOTATUI_LOG=warn`) the
+  // `--debug`/`QBAL_LOG=trace` without a pin list that has to be kept in
+  // sync as dependencies change. Below `Info` (e.g. `QBAL_LOG=warn`) the
   // requested level applies globally instead, since nothing needs raising.
   let global_level = resolved_level.min(log::LevelFilter::Info);
   let mut dispatch = fern::Dispatch::new()
@@ -67,11 +64,9 @@ pub(super) fn setup_logging(
 
   // Print the location of log for user reference — on stderr, not stdout.
   //
-  // stdout belongs to program output: `spotatui history recap` writes HTML there
-  // and `spotatui mcp` writes JSON-RPC there, where the MCP spec is explicit
-  // that a server "MUST NOT write anything to its stdout that is not a valid MCP
-  // message" (a stray line makes every client fail to start). A diagnostic notice
-  // is exactly what stderr is for, and it stays visible on a terminal either way.
+  // stdout belongs to program output: `qbal history recap` writes HTML there,
+  // and a stray line would corrupt it. A diagnostic notice is exactly what
+  // stderr is for, and it stays visible on a terminal either way.
   eprintln!("Logging to: {}", log_path.display());
 
   Ok(())
@@ -106,8 +101,7 @@ pub(super) fn install_panic_hook() {
 
     #[cfg(feature = "tui")]
     ratatui::restore();
-    let panic_log_path =
-      crate::core::paths::app_state_dir().map(|dir| dir.join("spotatui_panic.log"));
+    let panic_log_path = crate::core::paths::app_state_dir().map(|dir| dir.join("qbal_panic.log"));
 
     if let Some(path) = panic_log_path.as_ref() {
       if let Some(parent) = path.parent() {
@@ -120,7 +114,7 @@ pub(super) fn install_panic_hook() {
         .append(true)
         .open(path)
       {
-        let _ = writeln!(f, "\n==== spotatui panic ====");
+        let _ = writeln!(f, "\n==== qbal panic ====");
         let _ = writeln!(f, "{}", info);
         let _ = writeln!(f, "{:?}", Backtrace::new());
         // Only the tail (at most the last 64 KiB / 200 lines) is read, never
@@ -146,12 +140,6 @@ pub(super) fn install_panic_hook() {
 
     if cfg!(debug_assertions) && std::env::var_os("RUST_BACKTRACE").is_none() {
       eprintln!("{:?}", Backtrace::new());
-    }
-
-    if cfg!(target_os = "windows") && std::env::var_os("SPOTATUI_PAUSE_ON_PANIC").is_some() {
-      eprintln!("Press Enter to close...");
-      let mut s = String::new();
-      let _ = std::io::stdin().read_line(&mut s);
     }
   }));
 }
@@ -210,8 +198,6 @@ pub(super) struct Boot {
   #[cfg_attr(not(feature = "tui"), allow(dead_code))]
   pub(super) restore_queue: Vec<crate::core::plugin_api::TrackInfo>,
   #[cfg_attr(not(feature = "tui"), allow(dead_code))]
-  pub(super) initial_shuffle_enabled: bool,
-  #[cfg_attr(not(feature = "tui"), allow(dead_code))]
   pub(super) initial_startup_behavior: StartupBehavior,
 }
 /// The launch inputs `boot` reads, built from the command line by `cli::boot_options`.
@@ -250,7 +236,6 @@ pub(super) async fn boot(options: BootOptions, onboarding: Arc<dyn Onboarding>) 
   let mut state_path = None;
   let mut should_save_initial_state = false;
   let mut can_save_initial_state = false;
-  let legacy_client_path = crate::core::paths::legacy_client_config_path();
   match crate::core::state::default_state_path() {
     Ok(path) => {
       let state_file_exists = path.exists();
@@ -293,34 +278,11 @@ pub(super) async fn boot(options: BootOptions, onboarding: Arc<dyn Onboarding>) 
     },
     None => PersistedRuntimeState::default(),
   };
-  let legacy_client_fields = match (
-    legacy_client_path.as_deref(),
-    user_config
-      .path_to_config
-      .as_ref()
-      .map(|paths| paths.config_file_path.clone()),
-  ) {
-    (Some(client_path), Some(config_path)) => match apply_legacy_client_config_migration(
-      client_path,
-      &config_path,
-      &mut user_config.behavior,
-      &mut runtime_state,
-      &persisted_state,
-    ) {
-      Ok(fields) => fields,
-      Err(e) => {
-        log::warn!("[state] failed to read the legacy client.yml: {e}");
-        PersistedRuntimeState::default()
-      }
-    },
-    _ => PersistedRuntimeState::default(),
-  };
   let state = if should_save_initial_state {
     runtime_state.to_persisted()
   } else {
     let mut state = default_fields;
     state.merge_patch(&legacy_runtime_fields);
-    state.merge_patch(&legacy_client_fields);
     state
   };
   if can_save_initial_state && !state.is_empty() {
@@ -332,16 +294,12 @@ pub(super) async fn boot(options: BootOptions, onboarding: Arc<dyn Onboarding>) 
   }
   info!("user config loaded successfully");
 
-  let initial_shuffle_enabled = runtime_state.shuffle_enabled;
   let initial_startup_behavior = user_config.behavior.startup_behavior;
 
-  // Load the persisted non-Spotify playback session so the last song can resume
-  // on launch. The file's mere existence means a non-Spotify source was playing
-  // at the last save: the runner clears it whenever playback stops or switches
-  // to Spotify, so a present file is always something worth resuming — even when
-  // the browse source was later switched to Spotify while the song kept playing
-  // (browse-source and playback-source are deliberately decoupled). A session
-  // whose source feature isn't compiled into this build is a no-op on restore.
+  // Load the persisted playback session so the last song can resume on
+  // launch. The file's mere existence means something was playing at the last
+  // save: the driver clears it whenever playback stops, so a present file is
+  // always something worth resuming.
   let restore_session: Option<crate::core::persisted_playback::PersistedSession> =
     match crate::core::persisted_playback::default_session_path()
       .and_then(|path| crate::core::persisted_playback::load(&path))
@@ -352,9 +310,8 @@ pub(super) async fn boot(options: BootOptions, onboarding: Arc<dyn Onboarding>) 
         None
       }
     };
-  // Split the session: the playback (if any) drives the source resume, while the
-  // native queue is restored into app state regardless of whether a source is
-  // resumed (a queue-only session must not suppress Spotify's device transfer).
+  // Split the session: the playback (if any) drives the resume, while the
+  // native queue is restored into app state regardless.
   let (restore_playback, restore_queue): (
     Option<crate::core::persisted_playback::PersistedPlayback>,
     Vec<crate::core::plugin_api::TrackInfo>,
@@ -390,7 +347,6 @@ pub(super) async fn boot(options: BootOptions, onboarding: Arc<dyn Onboarding>) 
     user_config,
     restore_playback,
     restore_queue,
-    initial_shuffle_enabled,
     initial_startup_behavior,
   })
 }

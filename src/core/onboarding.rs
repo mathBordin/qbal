@@ -1,15 +1,8 @@
 //! The first-launch interaction surface.
 //!
-//! Core and infra never talk to the console: every interactive first-run flow
-//! (the source picker, the Spotify pairing code, source credential prompts)
-//! goes through this trait so the
-//! frontend decides how to present it. The terminal frontend's
-//! `ConsoleOnboarding` (`tui/onboarding.rs`) reproduces the historical stdout
-//! byte for byte; a windowed frontend can implement the same surface with
-//! dialogs instead.
-//!
-//! The retry loops, validation, and persistence stay with the callers - this
-//! trait is only the presentation boundary.
+//! Core and infra never talk to the console: anything interactive at start-up
+//! goes through this trait so the frontend decides how to present it. Today
+//! that is only telling the frontend which language was resolved.
 
 use crate::core::i18n::Language;
 

@@ -386,55 +386,38 @@ fn cover_playbar_artist_area(
 fn playbar_supported_controls(app: &App) -> Vec<PlaybarControl> {
   playbar_supported_controls_for(
     app.queue_owns_playback(),
-    non_spotify_source_playback_active(app),
+    qobuz_playback_active(app),
     app.active_queueable_decoded_source(),
   )
 }
 
 /// The pure core of [`playbar_supported_controls`], taking the three facts it
-/// depends on rather than an [`App`]: a real `LocalPlaybackState` needs an
-/// `Arc<LocalPlayer>` holding an open audio device, so the whole support matrix
-/// would otherwise be untestable.
-///
-/// Deliberately blind to `current_playback_context`: [`draw_playbar`] checks the
-/// queue slot and every decoded source *before* it looks at the Spotify context
-/// and returns early, so whenever either owns playback the playbar on screen is
-/// theirs. Gating these controls on a Spotify context that may merely be cached
-/// from an earlier session would offer buttons for a track the user cannot see
-/// or hear.
+/// depends on rather than an [`App`]: a real playback session needs an
+/// `Arc<LocalPlayer>` holding an open audio device, so the support matrix would
+/// otherwise be untestable.
 fn playbar_supported_controls_for(
   queue_owns_playback: bool,
-  non_spotify_active: bool,
+  qobuz_active: bool,
   queueable_decoded: bool,
 ) -> Vec<PlaybarControl> {
   let mut controls = PLAYBAR_CONTROLS.to_vec();
 
-  // The native queue slot owns the sink, so `draw_playbar` renders the *queued*
-  // track over a suspended context with the mode indicators hidden. Transport
-  // still works and stays offered: `App::next_track` advances the queue and
-  // `App::previous_track` restarts the queued track, both via the queue router.
-  // Dropped: Shuffle/Repeat have no queue-slot state to show (`App::shuffle` /
-  // `App::repeat` no-op here), and Like acts on `current_playback_context` —
-  // under a suspended *Spotify* context that is a different track than the one on
-  // screen, so the button would save a song the user is not listening to.
-  // Checked before `non_spotify_active`, which is false in exactly that case (a
-  // suspended Spotify context sets no `*_playback`) and would otherwise hand back
-  // all eight controls.
+  // The queue slot owns the sink, so `draw_playbar` renders the *queued* track
+  // with the mode indicators hidden. Transport still works: `App::next_track`
+  // advances the queue and `App::previous_track` restarts the queued track.
+  // Shuffle/Repeat have no queue-slot state to show, so they are dropped.
   if queue_owns_playback {
     controls.retain(|control| !matches!(control, PlaybarControl::Shuffle | PlaybarControl::Repeat));
     return controls;
   }
 
-  // No decoded source: the Spotify playbar is on screen and drives everything.
-  if !non_spotify_active {
+  // Nothing plays: every control stays drawn, and each reports that nothing
+  // is playing when pressed.
+  if !qobuz_active {
     return controls;
   }
 
-  // Every decoded source routes play/pause and volume to its own player, rather
-  // than the paused librespot (see `App::toggle_playback` / `App::increase_volume`).
-  // Prev/Next/Shuffle/Repeat additionally need a finite track queue to act on,
-  // which internet radio (an endless stream) and the native queue slot don't
-  // have. Liking needs a Spotify item id, which no decoded source has.
+  // Prev/Next/Shuffle/Repeat need a finite track list to act on.
   controls.retain(|control| match control {
     PlaybarControl::PlayPause | PlaybarControl::VolumeDown | PlaybarControl::VolumeUp => true,
     PlaybarControl::Prev
@@ -528,19 +511,16 @@ pub(crate) fn playbar_control_hitboxes(
 fn playbar_controls_available(app: &App) -> bool {
   // The queue slot owns playback, so `draw_playbar` is rendering the queued track
   // and `playbar_supported_controls` offers the controls that drive it. Checked
-  // first because neither fact below need hold: queueing from an idle app
-  // suspends nothing, leaving every `*_playback` `None` and (for a user who never
-  // started Spotify) no context either — which used to draw those controls while
-  // hit-testing returned no boxes, so they were inert.
+  // first because queueing from an idle app leaves `qobuz_playback` `None`.
   if app.queue_owns_playback() {
     return true;
   }
 
-  non_spotify_source_playback_active(app)
+  qobuz_playback_active(app)
 }
 
 /// True when a Qobuz session owns playback.
-fn non_spotify_source_playback_active(app: &App) -> bool {
+fn qobuz_playback_active(app: &App) -> bool {
   app.qobuz_playback.is_some()
 }
 
@@ -631,23 +611,13 @@ pub(crate) fn playbar_progress_line(app: &App, playbar_area: Rect) -> Option<Pla
   })
 }
 
-fn render_playbar_template(app: &App, source: bool, values: &[&str]) -> String {
+fn render_playbar_template(app: &App, values: &[&str]) -> String {
   use crate::core::user_config::{FormatConfig, FORMAT_KEYS};
   static DEFAULTS: std::sync::OnceLock<FormatConfig> = std::sync::OnceLock::new();
   let defaults = DEFAULTS.get_or_init(FormatConfig::default_templates);
-  let (configured, default, localized) = if source {
-    (
-      &app.user_config.format.playbar_status_source,
-      &defaults.playbar_status_source,
-      app.strings().screens.playbar_source_status,
-    )
-  } else {
-    (
-      &app.user_config.format.playbar_status,
-      &defaults.playbar_status,
-      app.strings().screens.playbar_status,
-    )
-  };
+  let configured = &app.user_config.format.playbar_status;
+  let default = &defaults.playbar_status;
+  let localized = app.strings().screens.playbar_status;
   if configured == default {
     let named: Vec<_> = FORMAT_KEYS
       .iter()
@@ -795,9 +765,8 @@ pub(crate) fn draw_cover_art_content(f: &mut Frame<'_>, app: &App, area: Rect) {
 
 #[cfg(feature = "cover-art")]
 fn extract_track_info(app: &App) -> (Option<String>, Option<String>) {
-  // Read from the source-agnostic snapshot so the fullscreen cover view labels
-  // the current track for every source (Spotify, native streaming, local files,
-  // Subsonic, radio, YouTube), not just Spotify.
+  // Read from the playback snapshot so the fullscreen cover view labels the
+  // current track whether a playlist or the queue plays it.
   match crate::infra::media_metadata::current_playback_snapshot(app) {
     Some(snapshot) => (
       Some(snapshot.metadata.title.clone()),
@@ -807,16 +776,13 @@ fn extract_track_info(app: &App) -> (Option<String>, Option<String>) {
   }
 }
 
-/// Display snapshot for an engine playbar (local files, Subsonic, radio, or the
-/// native queue slot).
+/// Display snapshot for the playbar (a Qobuz playlist or the native queue
+/// slot).
 ///
 /// Extracted from the live player so [`render_local_playbar`] is a pure function
 /// of plain values and can be unit-tested with `TestBackend` (no audio device).
-/// Gated to every build that can render one: the decoded sources plus the
-/// native queue slot (`streaming` covers a queued Spotify track), and the
-/// Music app while it owns playback.
 struct LocalPlaybarView {
-  /// Source name shown in the playbar title, e.g. `"Local"` or `"Subsonic"`.
+  /// Source name shown in the playbar title: `"Qobuz"`, or the queue label.
   source_label: &'static str,
   name: String,
   artists: String,
@@ -827,12 +793,8 @@ struct LocalPlaybarView {
   /// 1-based position in the queue and total length, e.g. `(3, 12)` => "3/12".
   /// `None` hides the indicator (e.g. a one-track session).
   queue_position: Option<(usize, usize)>,
-  /// An infinite live stream (internet radio): `duration_ms` is meaningless,
-  /// so the seek bar renders as a full LIVE indicator with elapsed time only.
-  live: bool,
-  /// Whether the decoded shuffle/repeat controls apply here. `true` for a
-  /// queueable source that owns playback (Local/Subsonic/YouTube); `false` for
-  /// internet radio and native queue slots, whose playbar drops the mode
+  /// Whether the shuffle/repeat controls apply here. `true` for a playlist
+  /// session; `false` for the native queue slot, whose playbar drops the mode
   /// segments entirely rather than showing blank `Shuffle:`/`Repeat:` labels.
   show_modes: bool,
   /// The delivered audio format (Qobuz, e.g. `FLAC 24/96`), shown after the artists.
@@ -860,7 +822,6 @@ fn draw_qobuz_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     duration_ms: track.map(|t| t.duration_ms).unwrap_or(0),
     volume_percent: app.runtime_state.volume_percent,
     queue_position: (qobuz.tracks.len() > 1).then(|| (qobuz.index + 1, qobuz.tracks.len())),
-    live: false,
     show_modes: true,
     quality: qobuz.quality.map(|q| q.label()),
   };
@@ -892,12 +853,10 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
     Some((current, total)) => format!(" | {current}/{total}"),
     None => String::new(),
   };
-  // Decoded (Local / Subsonic / YouTube) shuffle + repeat, worded like the
-  // Spotify playbar (Off / Track / All). Each carries its own ` | Label: value`
-  // prefix (values pre-padded to the `{:-3}` / `{:-5}` widths so the default
-  // template reproduces today's output byte-for-byte); contexts without the
-  // controls (radio, native queue slots) render them empty so the whole segment
-  // — label included — disappears instead of leaking a blank control.
+  // Shuffle + repeat (Off / Track / All). Each carries its own ` | Label: value`
+  // prefix (values pre-padded to the `{:-3}` / `{:-5}` widths); the queue slot,
+  // which has no such controls, renders them empty so the whole segment —
+  // label included — disappears instead of leaking a blank control.
   use crate::infra::queue::RepeatMode;
   let (shuffle_text, repeat_text) = if view.show_modes {
     let shuffle = if app.decoded_shuffle {
@@ -923,15 +882,13 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
   } else {
     (String::new(), String::new())
   };
-  // Build the title from the configurable playbar_status_source template.
+  // Build the title from the configurable playbar_status template.
   let title = render_playbar_template(
     app,
-    true,
     &[
       // state — left-aligned to 7 cols (matches `{:-7}`)
       &super::util::pad_to_width(play_title, 7),
-      // device / source / queue
-      "",
+      // source / queue
       view.source_label,
       &queue_label,
       // shuffle / repeat — self-contained ` | Label: value` segments (or empty)
@@ -939,7 +896,6 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
       &repeat_text,
       // volume — left-aligned to 2 (matches `{:-2}`)
       &format!("{:<2}", view.volume_percent),
-      "",
     ],
   );
   let mut title_spans = vec![Span::styled(
@@ -1001,23 +957,9 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
 
   draw_playbar_controls(f, app, playbar_areas.controls_area);
 
-  // A live stream has no duration: never feed the zero into the percentage
-  // math (division by zero); render a full bar with elapsed time instead.
-  let (perc, song_progress_label) = if view.live {
-    (
-      100,
-      app
-        .strings()
-        .screens
-        .live_elapsed(&super::util::millis_to_minutes(view.position_ms)),
-    )
-  } else {
-    let duration_std = std::time::Duration::from_millis(view.duration_ms);
-    (
-      get_track_progress_percentage(view.position_ms, duration_std),
-      display_track_progress(view.position_ms, duration_std),
-    )
-  };
+  let duration_std = std::time::Duration::from_millis(view.duration_ms);
+  let perc = get_track_progress_percentage(view.position_ms, duration_std);
+  let song_progress_label = display_track_progress(view.position_ms, duration_std);
   let modifier = if app.user_config.behavior.enable_text_emphasis {
     Modifier::ITALIC | Modifier::BOLD
   } else {
@@ -1044,8 +986,8 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
   f.render_widget(song_progress, playbar_areas.progress_area);
 
   // Paint the cover art into the slot `playbar_layout_areas` reserved — the
-  // layout only carves out the space; without this the sources' playbar shows
-  // a blank indent where the image belongs (Spotify's path does the same).
+  // layout only carves out the space; without this the playbar shows a blank
+  // indent where the image belongs.
   #[cfg(feature = "cover-art")]
   if let Some(cover_art) = playbar_areas.cover_art {
     crate::tui::cover_art::render(f, cover_art, &app.cover_art, &app.user_config);
@@ -1054,20 +996,10 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
 
 pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // The native queue slot owns playback: render the queued track, not the
-  // suspended context (whose `*_playback` is still `Some`) and not the stale
-  // Spotify context (still cached when a Spotify context was suspended).
-  // Checked first so the playbar always shows what is actually audible.
+  // suspended playlist (whose `qobuz_playback` is still `Some`). Checked first
+  // so the playbar always shows what is actually audible.
   if let Some(crate::infra::queue::QueueNowPlaying::Decoded(d)) = app.queue_now.as_ref() {
-    let source_label = d
-      .track
-      .uri
-      .as_deref()
-      .map(crate::core::queue::queue_item_source)
-      .map(|source| match source {
-        crate::core::queue::QueueItemSource::LocalFile => app.strings().screens.local_source_short,
-        other => crate::core::queue::source_label(other),
-      })
-      .unwrap_or(app.strings().screens.queue);
+    let source_label = app.strings().screens.queue;
     // `advancing` spans the download/decode window (the slot is published
     // before the fetch), so surface it instead of a silent frozen bar.
     let name = if d.advancing {
@@ -1087,7 +1019,6 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       duration_ms: d.track.duration_ms,
       volume_percent: app.runtime_state.volume_percent,
       queue_position: None,
-      live: false,
       // The native queue ignores the decoded shuffle/repeat modes (they belong
       // to the suspended source resumed once the queue drains), so hide them.
       show_modes: false,
@@ -1159,8 +1090,8 @@ mod tests {
   use super::*;
 
   #[test]
-  fn spotify_playback_keeps_every_playbar_control() {
-    // No decoded source owns playback, so the Spotify playbar is on screen.
+  fn idle_playbar_keeps_every_control() {
+    // Nothing owns playback, so every control stays drawn.
     assert_eq!(
       playbar_supported_controls_for(false, false, false),
       PLAYBAR_CONTROLS.to_vec()
@@ -1168,10 +1099,9 @@ mod tests {
   }
 
   #[test]
-  fn radio_only_gets_the_controls_a_live_stream_can_honour() {
-    // Radio reports `queueable_decoded = false`: there is no finite track list to
-    // skip through or shuffle, so offering those buttons would invite a click
-    // that falls through to the wrong player.
+  fn a_session_without_a_track_list_keeps_only_play_and_volume() {
+    // Without a finite track list there is nothing to skip through or shuffle,
+    // so those buttons would invite a click that does nothing.
     let controls = playbar_supported_controls_for(false, true, false);
     assert_eq!(
       controls,
@@ -1184,17 +1114,12 @@ mod tests {
   }
 
   #[test]
-  fn queue_slot_drops_like_and_the_modes_but_keeps_transport() {
-    // Regression: a queued track playing over a suspended *Spotify* context sets
-    // no `*_playback`, so `non_spotify_active` was false and the gate handed back
-    // all eight controls over the queue slot's playbar — whose Like button saves
-    // `current_playback_context`'s item, i.e. the suspended Spotify track rather
-    // than the queued one on screen. Both suspended-context shapes must agree.
-    //
-    // Prev/Next stay: unlike radio, the queue *can* honour them (`next_track`
-    // dispatches AdvanceNativeQueue, `previous_track` restarts the queued track),
-    // so dropping them would hide controls that work.
-    let over_spotify = playbar_supported_controls_for(true, false, false);
+  fn queue_slot_drops_the_modes_but_keeps_transport() {
+    // A queued track played from an idle app and one played over a suspended
+    // playlist must offer the same controls. Prev/Next stay: the queue honours
+    // them (`next_track` advances the queue, `previous_track` restarts the
+    // queued track).
+    let over_idle = playbar_supported_controls_for(true, false, false);
     let over_decoded = playbar_supported_controls_for(true, true, false);
     let expected = vec![
       PlaybarControl::Prev,
@@ -1203,7 +1128,7 @@ mod tests {
       PlaybarControl::VolumeDown,
       PlaybarControl::VolumeUp,
     ];
-    assert_eq!(over_spotify, expected);
+    assert_eq!(over_idle, expected);
     assert_eq!(over_decoded, expected);
   }
 
@@ -1390,7 +1315,6 @@ mod tests {
       duration_ms: 200_000,
       volume_percent: 50,
       queue_position: None,
-      live: false,
       show_modes: true,
       quality: Some("FLAC 16/44.1".to_string()),
     };
@@ -1455,28 +1379,27 @@ mod tests {
     use crate::core::i18n::Language;
     use crate::core::user_config::FORMAT_KEYS;
     let mut app = App::default();
-    let values = ["Playing", "Desk {volume}", "", "", "Off", "Off", "50", ""];
+    let values = ["Playing", "Desk {volume}", "", "", "", "50"];
     assert_eq!(
-      render_playbar_template(&app, false, &values),
-      "Playing (Desk {volume} | Shuffle: Off | Repeat: Off | Volume: 50%)"
+      render_playbar_template(&app, &values),
+      "Playing (Desk {volume} | Volume: 50%)"
     );
     app.user_config.behavior.language = Language::Fr;
     app.refresh_language();
-    let title = render_playbar_template(&app, false, &values);
-    assert!(title.contains("Aléatoire"));
-    assert!(title.contains("Volume : 50 %"));
-    assert!(title.contains("Desk {volume}"));
+    let title = render_playbar_template(&app, &values);
+    assert!(title.contains("Volume : 50 %"), "{title}");
+    assert!(title.contains("Desk {volume}"), "{title}");
     app.user_config.format.playbar_status =
-      crate::core::format::Template::parse("Volume: {volume}% / {device}", FORMAT_KEYS).unwrap();
+      crate::core::format::Template::parse("Volume: {volume}% / {source}", FORMAT_KEYS).unwrap();
     assert_eq!(
-      render_playbar_template(&app, false, &values),
+      render_playbar_template(&app, &values),
       "Volume: 50% / Desk {volume}"
     );
   }
 
   #[test]
   fn default_playbar_strips_controls_like_the_original_template_in_text_width_and_cells() {
-    use crate::core::user_config::FORMAT_KEYS;
+    use crate::core::user_config::{FormatConfig, FORMAT_KEYS};
     use ratatui::{buffer::Buffer, widgets::Widget};
     use unicode_width::UnicodeWidthStr;
     let app = App::default();
@@ -1484,24 +1407,19 @@ mod tests {
       "Playing",
       "Desk\tSpeaker\nX\rY",
       "",
-      "",
-      "Off",
-      "Off",
+      " | Shuffle: Off",
+      " | Repeat: Off  ",
       "50",
-      "",
     ];
-    let baseline = crate::core::format::Template::parse(
-      "{state} ({device} | Shuffle: {shuffle} | Repeat: {repeat} | Volume: {volume}%){party}",
-      FORMAT_KEYS,
-    )
-    .unwrap()
-    .render(&values);
+    let baseline =
+      crate::core::format::Template::parse(FormatConfig::DEFAULT_PLAYBAR_STATUS, FORMAT_KEYS)
+        .unwrap()
+        .render(&values);
     assert_eq!(
       baseline,
-      "Playing (DeskSpeakerXY | Shuffle: Off | Repeat: Off | Volume: 50%)"
+      "Playing (DeskSpeakerXY | Shuffle: Off | Repeat: Off   | Volume: 50%)"
     );
-    assert_eq!(baseline.width(), 66);
-    let current = render_playbar_template(&app, false, &values);
+    let current = render_playbar_template(&app, &values);
     assert_eq!(current, baseline);
     assert_eq!(current.width(), baseline.width());
     let render = |title: &str| {
@@ -1513,10 +1431,5 @@ mod tests {
       buffer
     };
     assert_eq!(render(&current), render(&baseline));
-    let mut party_values = values;
-    party_values[7] = " | Host\tName\nX\rY";
-    let party = render_playbar_template(&app, false, &party_values);
-    assert!(party.ends_with(" | HostNameXY"));
-    assert!(!party.contains(['\n', '\r', '\t']));
   }
 }

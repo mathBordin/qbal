@@ -114,12 +114,6 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     ]));
   }
 
-  let _counter_style = Style::default().fg(app.user_config.theme.hint.into());
-  changelog_lines.push(Line::from(vec![]));
-  changelog_lines.push(Line::from(vec![Span::styled(
-    app.strings().screens.discord_community,
-    Style::default().fg(app.user_config.theme.active.into()),
-  )]));
   changelog_lines.push(Line::from(""));
 
   // The cached changelog lines are pre-wrapped to the area width (one line ==

@@ -30,8 +30,8 @@ pub use self::player::draw_miniplayer;
 pub use self::player::draw_playbar;
 pub use self::plugin_screen::draw_plugin_screen;
 pub use self::popups::{
-  draw_announcement_prompt, draw_dialog, draw_error_screen, draw_exit_prompt, draw_help_menu,
-  draw_plugin_popup, draw_queue, draw_recap_prompt, draw_sort_menu, ensure_help_menu_model,
+  draw_announcement_prompt, draw_error_screen, draw_exit_prompt, draw_help_menu, draw_plugin_popup,
+  draw_queue, draw_recap_prompt, draw_sort_menu, ensure_help_menu_model,
 };
 pub use self::search::{draw_input_and_help_box, draw_search_results};
 pub use self::stats::draw_stats;
@@ -59,7 +59,6 @@ pub fn draw_main_layout(f: &mut Frame<'_>, app: &App) {
   panes::draw_detached_panes(f, app);
 
   // Possibly draw confirm dialog
-  draw_dialog(f, app);
 
   // Possibly draw sort menu
   draw_sort_menu(f, app);
@@ -93,8 +92,7 @@ fn draw_route_content(f: &mut Frame<'_>, app: &App, content_area: Rect) {
     | RouteId::HelpMenu
     | RouteId::Queue
     | RouteId::PluginScreen(_) => {} // These are drawn outside the main routed content area.
-    RouteId::Dialog => {} // This is handled in draw_dialog.
-                          // This is drawn as an overlay via draw_create_playlist_form.
+                                     // This is drawn as an overlay via draw_create_playlist_form.
   };
 }
 

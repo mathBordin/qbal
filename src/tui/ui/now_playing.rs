@@ -4,7 +4,6 @@
 
 use crate::core::app::App;
 use crate::core::format::millis_to_minutes;
-use crate::core::plugin_api::PlayableInfo;
 use crate::infra::media_metadata::{current_playback_snapshot, PlaybackSnapshot};
 use crate::tui::theme::EmphasisExt;
 use ratatui::{
@@ -30,7 +29,6 @@ pub(crate) struct NowPlayingView {
   pub year: Option<String>,
   pub track_number: Option<String>,
   pub length: Option<String>,
-  pub device: Option<String>,
   pub liked: bool,
   pub explicit: bool,
   pub up_next: Vec<String>,
@@ -40,7 +38,7 @@ impl NowPlayingView {
   /// The panel's values for the playing item, or `None` when nothing plays.
   pub(crate) fn from_app(app: &App) -> Option<Self> {
     let snapshot = current_playback_snapshot(app)?;
-    let up_next = queued_after(app, snapshot.item_uri.as_deref());
+    let up_next = queued_after(app);
     Some(Self::build(&snapshot, up_next))
   }
 
@@ -53,9 +51,8 @@ impl NowPlayingView {
       album: metadata.album.clone(),
       year: None,
       track_number: None,
-      length: (!snapshot.is_live && metadata.duration_ms > 0)
+      length: (metadata.duration_ms > 0)
         .then(|| millis_to_minutes(u128::from(metadata.duration_ms))),
-      device: None,
       liked: false,
       explicit: false,
       up_next,
@@ -63,46 +60,14 @@ impl NowPlayingView {
   }
 }
 
-/// The names that play after the playing item, in the order the queue screen
-/// lists them: spotatui's own queue first, then Spotify's.
-fn queued_after(app: &App, playing_uri: Option<&str>) -> Vec<String> {
-  let native = app
+/// The names that play after the playing item, in queue order.
+fn queued_after(app: &App) -> Vec<String> {
+  app
     .native_queue
     .iter()
-    .map(|track| track.display_name(app.strings()).to_owned());
-  native
-    .chain(spotify_queued_after(app, playing_uri))
+    .map(|track| track.display_name(app.strings()).to_owned())
     .take(UP_NEXT_LEN)
     .collect()
-}
-
-/// Spotify's queue from the last fetch. A fetch made for an earlier track says
-/// nothing about this one, so it counts only while its playing item is the one
-/// playing now.
-fn spotify_queued_after(app: &App, playing_uri: Option<&str>) -> Vec<String> {
-  let Some(queue) = app.queue.as_ref() else {
-    return Vec::new();
-  };
-  let fetched_for = queue.currently_playing.as_ref().and_then(playable_uri);
-  if playing_uri.is_none() || fetched_for != playing_uri {
-    return Vec::new();
-  }
-  queue
-    .queue
-    .iter()
-    .take(UP_NEXT_LEN)
-    .map(|item| match item {
-      PlayableInfo::Track(track) => track.name.clone(),
-      PlayableInfo::Episode(episode) => episode.name.clone(),
-    })
-    .collect()
-}
-
-fn playable_uri(item: &PlayableInfo) -> Option<&str> {
-  match item {
-    PlayableInfo::Track(track) => track.uri.as_deref(),
-    PlayableInfo::Episode(episode) => episode.uri.as_deref(),
-  }
 }
 
 pub fn draw_now_playing(f: &mut Frame<'_>, app: &App, area: Rect) {
@@ -246,7 +211,6 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     strings.now_playing_year,
     strings.now_playing_track,
     strings.now_playing_length,
-    strings.now_playing_device,
   ];
   let label_width = labels
     .iter()
@@ -263,7 +227,6 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     (strings.now_playing_year, view.year.clone()),
     (strings.now_playing_track, view.track_number.clone()),
     (strings.now_playing_length, view.length.clone()),
-    (strings.now_playing_device, view.device.clone()),
   ];
   for (label, value) in rows {
     let Some(value) = value else { continue };
@@ -314,13 +277,12 @@ mod tests {
   use super::*;
 
   #[test]
-  fn up_next_lists_spotatuis_queue_before_spotifys() {
-    use crate::core::app::QueueState;
+  fn up_next_lists_the_queue_in_order_up_to_its_length() {
     use crate::core::plugin_api::TrackInfo;
-    let queued_track = |uri: &str, name: &str| TrackInfo {
+    let queued_track = |n: usize| TrackInfo {
       generated_name: None,
-      uri: Some(uri.to_string()),
-      name: name.to_string(),
+      uri: Some(format!("qobuz:track:{n}")),
+      name: format!("Next {n}"),
       artists: vec!["Artist".to_string()],
       album: "Album".to_string(),
       duration_ms: 180_000,
@@ -335,26 +297,11 @@ mod tests {
       release_date: None,
     };
     let mut app = App::default();
-    app.native_queue = vec![queued_track("spotify:track:mine", "Mine")];
-    let spotify = |uri: &str, name: &str| PlayableInfo::Track(queued_track(uri, name));
-    app.queue = Some(QueueState {
-      currently_playing: Some(spotify("spotify:track:now", "Now")),
-      queue: vec![
-        spotify("spotify:track:a", "Next A"),
-        spotify("spotify:track:b", "Next B"),
-        spotify("spotify:track:c", "Next C"),
-      ],
-    });
+    app.native_queue = (1..=UP_NEXT_LEN + 2).map(queued_track).collect();
 
-    assert_eq!(
-      queued_after(&app, Some("spotify:track:now")),
-      vec!["Mine", "Next A", "Next B"]
-    );
-    assert_eq!(
-      queued_after(&app, Some("spotify:track:other")),
-      vec!["Mine"],
-      "a fetch for another track is ignored"
-    );
+    let names = queued_after(&app);
+    assert_eq!(names.len(), UP_NEXT_LEN);
+    assert_eq!(names[0], "Next 1");
   }
 
   #[test]

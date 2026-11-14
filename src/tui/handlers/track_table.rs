@@ -10,16 +10,8 @@ pub fn handler(key: Key, app: &mut App) {
       common_key_events::focus_sidebar(app)
     }
     k if common_key_events::down_event(k, &app.user_config.keys) => {
-      let current_index = app.view.track_table_index;
-      let tracks_len = app.track_table.tracks.len();
-
-      if tracks_len == 0 {
+      if app.track_table.tracks.is_empty() {
         return;
-      }
-
-      // Check if we're at the last track and there are more tracks to load
-      if current_index == tracks_len - 1 {
-        {}
       }
 
       let next_index = common_key_events::on_down_press_handler(
@@ -60,32 +52,14 @@ pub fn handler(key: Key, app: &mut App) {
         return;
       }
       let target = app.view.track_table_index.saturating_add(page_step(app));
-      if target >= len {
-        // Past the loaded rows: stand on the last one and follow into the next page.
-        {}
-      }
       app.view.track_table_index = target.min(len - 1);
     }
     k if k == app.user_config.keys.previous_page => {
       app.view.track_table_index = app.view.track_table_index.saturating_sub(page_step(app));
     }
-    Key::Char('w') => {}
-    Key::Char('x') => {}
-    // `handle_app` routes to `handle_escape` first, so `Esc` handling here unreachable.
-    Key::Char('q') if app.is_playlist_track_filter_active() => {
-      app.clear_playlist_track_filter();
-    }
-    Key::Char('q') if app.is_saved_track_filter_active() => {
-      app.clear_saved_track_filter();
-    }
-    Key::Char('s') => handle_save_track_event(app),
     Key::Char('S') => play_random_song(app),
     k if k == app.user_config.keys.jump_to_end => jump_to_end(app),
     k if k == app.user_config.keys.jump_to_start => jump_to_start(app),
-    //recommended song radio
-    Key::Char('r') => {
-      handle_recommended_tracks(app);
-    }
     _ if key == app.user_config.keys.add_item_to_queue => on_queue(app),
     // Open sort menu
     Key::Char(',') => {
@@ -93,21 +67,6 @@ pub fn handler(key: Key, app: &mut App) {
     }
     _ => {}
   }
-}
-
-fn handle_save_track_event(app: &mut App) {
-  if let Some(track) = app.track_table.tracks.get(app.view.track_table_index) {
-    if let Some(_playable_id) = track.uri.clone() {}
-  };
-}
-
-fn handle_recommended_tracks(app: &mut App) {
-  if let Some(_track) = app
-    .track_table
-    .tracks
-    .get(app.view.track_table_index)
-    .cloned()
-  {};
 }
 
 /// Play a random track from the table's context. Offsets are computed here so
@@ -118,7 +77,6 @@ fn play_random_song(app: &mut App) {
       TrackTableContext::QobuzPlaylist => {
         // Queue the whole playlist and start at a random offset, so
         // Next/Previous and auto-advance keep working within the playlist.
-        // For Music the offset also names which row of a song listed twice.
         let playable_ids: Vec<String> = app
           .track_table
           .tracks
@@ -149,10 +107,9 @@ fn on_enter(app: &mut App) {
   if let Some(context) = &context {
     match context {
       TrackTableContext::QobuzPlaylist => {
-        // Queue the whole folder/playlist (in displayed order) and start at the
+        // Queue the whole playlist (in displayed order) and start at the
         // selected track, so Next/Previous/auto-advance have a queue to move
-        // through. Routed to the local, subsonic or youtube player by URI
-        // scheme (infra::local / infra::subsonic / infra::youtube dispatch).
+        // through.
         let (uris, offset) = common_key_events::uri_playback_request(
           tracks.iter().map(|track| track.uri.clone()),
           *selected_index,
@@ -169,11 +126,7 @@ fn on_enter(app: &mut App) {
 }
 
 fn on_queue(app: &mut App) {
-  // Every context except AlbumSearch holds full `TrackInfo` rows, so the queue
-  // action collapses to one path: clone the selected row and hand it to the
-  // native cross-source queue, which routes by URI scheme (Spotify tracks on an
-  // external device still fall back to the Web-API queue). AlbumSearch rows lack
-  // full track info, so it stays a no-op.
+  // Hand the selected row to the native queue.
   if app.track_table.context.is_none() {
     return;
   }
@@ -195,6 +148,3 @@ fn jump_to_start(app: &mut App) {
 fn page_step(app: &App) -> usize {
   usize::from(app.view.size.height / 2).max(1)
 }
-
-#[cfg(test)]
-mod tests {}

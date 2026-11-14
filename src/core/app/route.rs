@@ -8,20 +8,9 @@ pub(super) const DEFAULT_ROUTE: Route = Route {
 
 #[derive(PartialEq, Debug, Default)]
 pub enum SearchResultBlock {
-  AlbumSearch,
   SongSearch,
-  ArtistSearch,
-  PlaylistSearch,
-  ShowSearch,
   #[default]
   Empty,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum DialogContext {
-  PlaylistSearch,
-  AddTrackToPlaylistPicker,
-  PersistKeybindingFallback,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -40,7 +29,6 @@ pub enum ActiveBlock {
   LyricsView,
   CoverArtView,
   MiniPlayer,
-  Dialog(DialogContext),
 
   AnnouncementPrompt,
   RecapPrompt,
@@ -82,15 +70,6 @@ impl From<ActiveBlock> for SidebarBlock {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[allow(clippy::enum_variant_names)]
-pub enum InputContext {
-  #[default]
-  GlobalSearch,
-  SavedTrackSearch,
-  PlaylistTrackSearch,
-}
-
 #[derive(Clone, PartialEq, Debug)]
 pub enum RouteId {
   Analysis,
@@ -101,7 +80,6 @@ pub enum RouteId {
   Home,
   Search,
   TrackTable,
-  Dialog,
 
   AnnouncementPrompt,
   RecapPrompt,
@@ -155,40 +133,12 @@ pub struct Route {
 }
 
 impl App {
-  /// Switch the active browse source and mirror + persist the choice so the
-  /// selection survives restarts. Browse scope only: never interrupts
-  /// playback (routing goes by URI scheme). Sidebar data loading and any
-  /// view resets stay with the caller.
-  pub fn set_active_source(&mut self, source: Source) {
-    if self.active_source != source {
-      self.display_revisions.bump(DisplayDomain::Source);
-      self.view.playlist_scroll_offset.set(0);
-    }
-    self.active_source = source;
-    self.runtime_state.active_source = source;
-    // The Spotify scope reaches disk when the login succeeds (see
-    // `persist_active_source`), so a cancelled login never forces a browser at
-    // the next boot.
-
-    self.persist_active_source();
-  }
-
   /// Whether the active browse scope and the session can serve a row or key.
   pub(crate) fn availability(&self, requirement: Requirement) -> Availability {
     availability(requirement, self.active_source)
   }
 
-  /// Write the current browse scope to `state.yml`.
-  pub(crate) fn persist_active_source(&mut self) {
-    if let Err(e) = self.save_runtime_state(
-      &crate::core::state::PersistedRuntimeState::active_source(self.runtime_state.active_source),
-    ) {
-      log::warn!("[source] failed to persist active_source: {e}");
-    }
-  }
-
-  /// Fetch the sidebar data a browse source needs; Spotify's playlists arrive
-  /// with the session.
+  /// Fetch the sidebar data a browse source needs.
   pub(crate) fn load_source_sidebar(&mut self, source: Source) {
     let event = match source {
       Source::Qobuz => IoEvent::GetQobuzPlaylists,
@@ -211,7 +161,6 @@ impl App {
         active_block: next_active_block,
         hovered_block: next_active_block,
       });
-      self.display_revisions.bump(DisplayDomain::Route);
     }
   }
 
@@ -221,13 +170,12 @@ impl App {
       None
     } else {
       let popped = self.navigation_stack.pop();
-      self.display_revisions.bump(DisplayDomain::Route);
       // Leaving the error screen dismisses the error. Done here rather than in
       // a key handler so every back path clears it (the escape key, the
       // configurable back key, a script's `Back`), and so a frontend with no
       // back key at all is not the odd one out. Keyed on the frame that was
-      // POPPED, not on the new top: pressing `d` from the error page stacks the
-      // device picker over it, and coming back must still show the message.
+      // POPPED, not on the new top: a screen opened from the error page stacks
+      // over it, and coming back must still show the message.
       if popped
         .as_ref()
         .is_some_and(|route| route.id == RouteId::Error)
@@ -254,13 +202,9 @@ impl App {
   /// Cannot empty the stack: the bottom frame is `DEFAULT_ROUTE` (Home) or a
   /// `RouteId::STARTUP_OPTIONS` route, and `Error` is in neither.
   pub(super) fn drop_error_routes(&mut self) {
-    let before = self.navigation_stack.len();
     self
       .navigation_stack
       .retain(|route| !(route.id == RouteId::Error && route.active_block == ActiveBlock::Error));
-    if self.navigation_stack.len() != before {
-      self.display_revisions.bump(DisplayDomain::Route);
-    }
   }
 
   pub fn navigation_depth(&self) -> usize {
@@ -282,15 +226,11 @@ impl App {
     hovered_block: Option<ActiveBlock>,
   ) {
     let current_route = self.get_current_route_mut();
-    let before = (current_route.active_block, current_route.hovered_block);
     if let Some(active_block) = active_block {
       current_route.active_block = active_block;
     }
     if let Some(hovered_block) = hovered_block {
       current_route.hovered_block = hovered_block;
-    }
-    if (current_route.active_block, current_route.hovered_block) != before {
-      self.display_revisions.bump(DisplayDomain::Route);
     }
   }
 
@@ -311,11 +251,6 @@ impl App {
       RecapPeriod::ThirtyDays
     };
     self.dispatch(IoEvent::GenerateRecap(period));
-  }
-
-  /// A recap of the selected Stats period; a frontend with no Stats route asks for it by name.
-  pub(crate) fn generate_stats_recap(&mut self) {
-    self.dispatch(IoEvent::GenerateRecap(self.stats_period));
   }
 }
 

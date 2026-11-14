@@ -50,7 +50,7 @@ pub fn handler(key: Key, app: &mut App) {
           .and_then(|entry| entry.uri.clone())
       });
       match uri {
-        Some(uri) if false => {
+        Some(uri) if uri.starts_with("qobuz:") => {
           app.apply(Action::PlayUris {
             uris: vec![uri],
             offset: Some(0),

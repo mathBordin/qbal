@@ -1,7 +1,6 @@
 ### Decoded playback (Qobuz)
 
-- All three platforms play through `LocalPlayer` (rodio 0.22 / cpal 0.17,
-  measured on CoreAudio).
+- Playback goes through `LocalPlayer` (rodio 0.22 / cpal 0.17).
 - Losing the output device has **two** shapes and only one is an error. cpal
   reports the device being *removed* (`DeviceNotAvailable`); it cannot report the
   common case - the OS moving its **default output** elsewhere (headphones out,

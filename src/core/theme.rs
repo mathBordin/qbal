@@ -92,7 +92,7 @@ impl Default for Theme {
 /// A [`Theme`] field addressed by name, one variant per struct field.
 ///
 /// This is the single source of truth coupling the runtime theme-override
-/// surface (Lua `spotatui.set_theme`, `Action::SetTheme`) to the struct:
+/// surface (Lua `qbal.set_theme`, `Action::SetTheme`) to the struct:
 /// a new variant without a struct field breaks [`Theme::set`]'s exhaustive
 /// match, and a new `Theme` field breaks the full destructuring at the top
 /// of `set`, so either half added alone is a compile error where the old
@@ -230,7 +230,7 @@ pub enum ThemePreset {
   Default,
   Terminal,
   PookiePink,
-  Spotify,
+  Green,
   Vesper,
   Dracula,
   Nord,
@@ -250,7 +250,7 @@ impl ThemePreset {
       ThemePreset::Default,
       ThemePreset::Terminal,
       ThemePreset::PookiePink,
-      ThemePreset::Spotify,
+      ThemePreset::Green,
       ThemePreset::Vesper,
       ThemePreset::Dracula,
       ThemePreset::Nord,
@@ -270,7 +270,7 @@ impl ThemePreset {
       ThemePreset::Default => "Default (Cyan)",
       ThemePreset::Terminal => "Terminal (ANSI)",
       ThemePreset::PookiePink => "Pookie Pink",
-      ThemePreset::Spotify => "Spotify",
+      ThemePreset::Green => "Green",
       ThemePreset::Vesper => "Vesper",
       ThemePreset::Dracula => "Dracula",
       ThemePreset::Nord => "Nord",
@@ -290,7 +290,8 @@ impl ThemePreset {
       "Default (Cyan)" => ThemePreset::Default,
       "Terminal (ANSI)" => ThemePreset::Terminal,
       "Pookie Pink" => ThemePreset::PookiePink,
-      "Spotify" => ThemePreset::Spotify,
+      // "Spotify" is this preset's name in configs from the app Qbal forked from.
+      "Green" | "Spotify" => ThemePreset::Green,
       "Vesper" => ThemePreset::Vesper,
       "Dracula" => ThemePreset::Dracula,
       "Nord" => ThemePreset::Nord,
@@ -336,7 +337,7 @@ impl ThemePreset {
       ThemePreset::Default => Theme::default(),
       // Deliberately uses named ANSI colors (unlike the RGB rationale in
       // Theme::default) so terminal-palette tools like pywal restyle the UI
-      // live, without restarting spotatui.
+      // live, without restarting qbal.
       ThemePreset::Terminal => Theme {
         analysis_bar: Color::Cyan,
         analysis_bar_text: Color::Reset,
@@ -560,25 +561,25 @@ impl ThemePreset {
         header: Color::Rgb(180, 190, 254),             // Lavender
         highlighted_lyrics: Color::Rgb(180, 190, 254), // Lavender
       },
-      ThemePreset::Spotify => Theme {
-        analysis_bar: Color::Rgb(29, 185, 84), // Spotify Green #1DB954
+      ThemePreset::Green => Theme {
+        analysis_bar: Color::Rgb(29, 185, 84),        // #1DB954
         analysis_bar_text: Color::Rgb(255, 255, 255), // White
-        active: Color::Rgb(29, 185, 84),       // Spotify Green
-        banner: Color::Rgb(29, 185, 84),       // Spotify Green
+        active: Color::Rgb(29, 185, 84),
+        banner: Color::Rgb(29, 185, 84),
         error_border: Color::Rgb(230, 76, 76), // Soft red
         error_text: Color::Rgb(230, 76, 76),
-        hint: Color::Rgb(179, 179, 179),  // Gray hint
-        hovered: Color::Rgb(29, 185, 84), // Spotify Green
+        hint: Color::Rgb(179, 179, 179), // Gray hint
+        hovered: Color::Rgb(29, 185, 84),
         inactive: Color::Rgb(83, 83, 83), // Dark gray
         playbar_background: Color::Reset,
-        playbar_progress: Color::Rgb(29, 185, 84), // Spotify Green
+        playbar_progress: Color::Rgb(29, 185, 84),
         playbar_progress_text: Color::Rgb(255, 255, 255),
         playbar_text: Color::Rgb(179, 179, 179), // Light gray
-        selected: Color::Rgb(29, 185, 84),       // Spotify Green
-        text: Color::Rgb(255, 255, 255),         // White
+        selected: Color::Rgb(29, 185, 84),
+        text: Color::Rgb(255, 255, 255), // White
         background: Color::Reset,
-        header: Color::Rgb(29, 185, 84),             // Spotify Green
-        highlighted_lyrics: Color::Rgb(29, 185, 84), // Spotify Green
+        header: Color::Rgb(29, 185, 84),
+        highlighted_lyrics: Color::Rgb(29, 185, 84),
       },
       ThemePreset::TokyoNight => Theme {
         analysis_bar: Color::Rgb(122, 162, 247), //Darker blue #7aa2f7
@@ -668,8 +669,9 @@ pub fn color_to_string(color: Color) -> String {
   }
 }
 
-/// Concrete RGB values for the colors a terminal resolves itself. A frontend
-/// that has no terminal palette (a GUI) supplies one of these to [`resolve`].
+/// Concrete RGB values for the colors a terminal resolves itself, for code that
+/// needs real colours (the cover-art tint) and supplies one of these to
+/// [`resolve`].
 ///
 /// `Reset` means "the frontend's default"; a caller that needs distinct
 /// foreground and background defaults uses two palettes differing only in

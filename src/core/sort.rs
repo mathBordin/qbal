@@ -1,10 +1,6 @@
-//! Sorting types and utilities for spotatui contexts
-//!
-//! Provides sorting functionality for playlists, albums, artists, etc.
+//! Sorting types and utilities for the track table.
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Fields that can be used for sorting
 ///
@@ -17,8 +13,6 @@ pub enum SortField {
   Default,
   /// Alphabetical by name/title
   Name,
-  /// By date added (for playlists, saved albums)
-  DateAdded,
   /// By artist name (for tracks)
   Artist,
   /// By track/album duration
@@ -27,8 +21,6 @@ pub enum SortField {
   Album,
   /// By release date (for albums)
   ReleaseDate,
-  /// Latest local listen in a playlist context
-  RecentlyPlayed,
 }
 
 impl SortField {
@@ -37,26 +29,22 @@ impl SortField {
     match self {
       SortField::Default => Some('d'),
       SortField::Name => Some('n'),
-      SortField::DateAdded => Some('a'),
       SortField::Artist => Some('r'),
       SortField::Duration => Some('t'),
       SortField::Album => Some('l'),
       SortField::ReleaseDate => Some('y'),
-      SortField::RecentlyPlayed => Some('r'),
     }
   }
 
-  /// Lowercase config-file token, e.g. `"name"`, `"date_added"`.
+  /// Lowercase config-file token, e.g. `"name"`, `"release_date"`.
   pub fn to_config_str(self) -> &'static str {
     match self {
       SortField::Default => "default",
       SortField::Name => "name",
-      SortField::DateAdded => "date_added",
       SortField::Artist => "artist",
       SortField::Duration => "duration",
       SortField::Album => "album",
       SortField::ReleaseDate => "release_date",
-      SortField::RecentlyPlayed => "recently_played",
     }
   }
 
@@ -66,12 +54,10 @@ impl SortField {
     match s.trim() {
       "default" => Some(SortField::Default),
       "name" => Some(SortField::Name),
-      "date_added" => Some(SortField::DateAdded),
       "artist" => Some(SortField::Artist),
       "duration" => Some(SortField::Duration),
       "album" => Some(SortField::Album),
       "release_date" => Some(SortField::ReleaseDate),
-      "recently_played" => Some(SortField::RecentlyPlayed),
       _ => None,
     }
   }
@@ -115,86 +101,25 @@ impl SortOrder {
 /// Context that supports sorting
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum SortContext {
-  /// Spotify playlists in the library sidebar
-  SidebarPlaylists,
   /// Tracks in a playlist
   PlaylistTracks,
-  /// User's saved albums
-  SavedAlbums,
-  /// User's followed artists
-  SavedArtists,
-  /// Recently played tracks
-  RecentlyPlayed,
 }
 
 impl SortContext {
   /// Get the available sort fields for this context
   pub fn available_fields(&self) -> &'static [SortField] {
     match self {
-      SortContext::SidebarPlaylists => &[
-        SortField::Default,
-        SortField::RecentlyPlayed,
-        SortField::Name,
-      ],
       SortContext::PlaylistTracks => &[
         SortField::Default,
         SortField::Name,
-        SortField::DateAdded,
         SortField::Artist,
         SortField::Album,
         SortField::Duration,
         SortField::ReleaseDate,
       ],
-      SortContext::SavedAlbums => &[
-        SortField::Default,
-        SortField::Name,
-        SortField::DateAdded,
-        SortField::Artist,
-        SortField::ReleaseDate,
-      ],
-      SortContext::SavedArtists => &[SortField::Default, SortField::Name],
-      SortContext::RecentlyPlayed => &[
-        SortField::Default,
-        SortField::Name,
-        SortField::Artist,
-        SortField::Album,
-      ],
     }
   }
 }
-
-/// The three orders for Spotify's playlists sidebar. Folder slots stay fixed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SidebarPlaylistOrder {
-  #[default]
-  Spotify,
-  RecentlyPlayed,
-  Name,
-}
-
-impl SidebarPlaylistOrder {
-  pub fn field(self) -> SortField {
-    match self {
-      Self::Spotify => SortField::Default,
-      Self::RecentlyPlayed => SortField::RecentlyPlayed,
-      Self::Name => SortField::Name,
-    }
-  }
-
-  pub fn from_field(field: SortField) -> Option<Self> {
-    match field {
-      SortField::Default => Some(Self::Spotify),
-      SortField::RecentlyPlayed => Some(Self::RecentlyPlayed),
-      SortField::Name => Some(Self::Name),
-      _ => None,
-    }
-  }
-}
-
-/// Latest local listen by playlist context URI; read once off the UI thread and
-/// maintained as the history collector appends records.
-pub type PlaylistLastListens = BTreeMap<String, DateTime<Utc>>;
 
 /// Current sort state
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -257,6 +182,22 @@ impl SortState {
   }
 }
 
+/// Sort track rows by `state`. `Default` leaves them in the order they
+/// arrived; rows without the field (no release date) sort first.
+pub fn sort_tracks(tracks: &mut [crate::core::plugin_api::TrackInfo], state: SortState) {
+  let order = state.order;
+  match state.field {
+    SortField::Default => {}
+    SortField::Name => sort_by_key_with_order(tracks, order, |t| t.name.to_lowercase()),
+    SortField::Artist => sort_by_key_with_order(tracks, order, |t| {
+      t.artists.first().map(|artist| artist.to_lowercase())
+    }),
+    SortField::Album => sort_by_key_with_order(tracks, order, |t| t.album.to_lowercase()),
+    SortField::Duration => sort_by_key_with_order(tracks, order, |t| t.duration_ms),
+    SortField::ReleaseDate => sort_by_key_with_order(tracks, order, |t| t.release_date.clone()),
+  }
+}
+
 /// Sort by a precomputed key — one key per item (O(n) allocations) instead of
 /// one per comparison (O(n log n)) — honoring the sort direction. Stable in
 /// both directions: equal keys keep their prior relative order.
@@ -297,6 +238,64 @@ mod tests {
     assert_eq!(state.order, SortOrder::Ascending);
   }
 
+  fn track(name: &str, artist: &str, duration_ms: u64) -> crate::core::plugin_api::TrackInfo {
+    crate::core::plugin_api::TrackInfo {
+      generated_name: None,
+      uri: None,
+      name: name.to_string(),
+      artists: vec![artist.to_string()],
+      album: String::new(),
+      duration_ms,
+      id: None,
+      album_id: None,
+      artist_refs: Vec::new(),
+      is_playable: true,
+      is_local: false,
+      track_number: 0,
+      explicit: false,
+      image_url: None,
+      release_date: None,
+    }
+  }
+
+  #[test]
+  fn tracks_sort_by_the_chosen_field_and_direction() {
+    let mut tracks = vec![
+      track("b", "Zed", 300),
+      track("A", "yan", 100),
+      track("c", "Xi", 200),
+    ];
+    let names = |tracks: &[crate::core::plugin_api::TrackInfo]| {
+      tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>()
+    };
+    sort_tracks(
+      &mut tracks,
+      SortState {
+        field: SortField::Name,
+        order: SortOrder::Ascending,
+      },
+    );
+    assert_eq!(names(&tracks), ["A", "b", "c"]);
+    sort_tracks(
+      &mut tracks,
+      SortState {
+        field: SortField::Duration,
+        order: SortOrder::Descending,
+      },
+    );
+    assert_eq!(names(&tracks), ["b", "c", "A"]);
+    sort_tracks(
+      &mut tracks,
+      SortState {
+        field: SortField::Artist,
+        order: SortOrder::Ascending,
+      },
+    );
+    assert_eq!(names(&tracks), ["c", "A", "b"]);
+    sort_tracks(&mut tracks, SortState::default());
+    assert_eq!(names(&tracks), ["c", "A", "b"]);
+  }
+
   #[test]
   fn test_sort_order_toggle() {
     assert_eq!(SortOrder::Ascending.toggle(), SortOrder::Descending);
@@ -308,9 +307,5 @@ mod tests {
     let fields = SortContext::PlaylistTracks.available_fields();
     assert!(fields.contains(&SortField::Name));
     assert!(fields.contains(&SortField::Artist));
-
-    let fields = SortContext::SavedArtists.available_fields();
-    assert!(fields.contains(&SortField::Name));
-    assert!(!fields.contains(&SortField::Artist));
   }
 }

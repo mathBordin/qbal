@@ -1,15 +1,10 @@
-//! Capability-based media-source traits — the seam for the multi-source refactor.
+//! Capability-based media-source traits.
 //!
-//! A source is addressed by its URI **scheme** (`spotify:`, `file:`, `subsonic:`),
-//! mirroring Mopidy's proven dispatch model. [`MediaSource`] is the required
-//! minimum every source implements; the remaining traits are optional
-//! capabilities discovered at runtime, so the UI can light up per source (e.g.
-//! a source without [`LibraryProvider`] shows no "liked songs" tab).
-//!
-//! These are definitions only — implementations land in later slices
-//! (`SpotifySource` over the existing `Network`, then `infra/local/` and
-//! `infra/subsonic/`). All methods speak the domain types from
-//! [`crate::core::plugin_api`]; rspotify types never appear here.
+//! A source is addressed by its URI **scheme** (`qobuz:`). [`MediaSource`] is
+//! the required minimum every source implements; the remaining traits are
+//! optional capabilities, so the UI can light up per source. Qobuz
+//! (`infra/qobuz/`) is the one implementation. All methods speak the domain
+//! types from [`crate::core::plugin_api`].
 //!
 //! **Dispatch.** These use native `async fn` in traits (matching the existing
 //! `PlaybackNetwork` convention), which is *not* `dyn`-compatible. The planned
@@ -69,7 +64,7 @@ impl Source {
   }
 
   /// Parse the config-file token back to a `Source`. Every token (including
-  /// the ones older spotatui configs wrote) maps to the only source, Qobuz.
+  /// the ones older qbal configs wrote) maps to the only source, Qobuz.
   pub fn from_config_str(_s: &str) -> Self {
     Source::Qobuz
   }
@@ -98,11 +93,11 @@ impl Source {
 /// The required minimum every media source implements: browse playlists and the
 /// tracks within them.
 pub trait MediaSource {
-  /// Human-readable source name shown in the UI (e.g. `"Spotify"`, `"Navidrome"`).
+  /// Human-readable source name shown in the UI (e.g. `"Qobuz"`).
   fn name(&self) -> &str;
 
-  /// URI scheme this source owns, without the colon (e.g. `"spotify"`, `"file"`,
-  /// `"subsonic"`). Used to route a URI to the source that can handle it.
+  /// URI scheme this source owns, without the colon (e.g. `"qobuz"`). Used to
+  /// route a URI to the source that can handle it.
   fn scheme(&self) -> &str;
 
   /// The user's playlists for this source.

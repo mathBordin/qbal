@@ -37,7 +37,7 @@ use stream::progressive::SegmentStream;
 pub use stream::cmaf::StreamQuality;
 
 /// The active Qobuz playback session; the playbar reads position and pause
-/// live from `player`, like the Subsonic twin.
+/// live from `player`.
 pub struct QobuzPlaybackState {
   pub player: Arc<LocalPlayer>,
   /// Source handle, reused to download each track on Next/advance.
@@ -180,7 +180,7 @@ fn unix_now() -> u64 {
     .unwrap_or(0)
 }
 
-/// Process-wide HTTP client with per-request timeouts (see Subsonic's twin).
+/// Process-wide HTTP client with per-request timeouts.
 pub fn shared_qobuz_client() -> Client {
   static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
   CLIENT.get_or_init(|| qobuz_client(READ_TIMEOUT)).clone()
@@ -773,7 +773,7 @@ impl MediaSource for QobuzSource {
 }
 
 impl Searcher for QobuzSource {
-  /// Tracks only: album and artist rows would route to Spotify-bound events.
+  /// Tracks only: the search screen lists songs.
   async fn search(&self, query: &str) -> Result<SearchResults> {
     let found: types::Search = self
       .get(

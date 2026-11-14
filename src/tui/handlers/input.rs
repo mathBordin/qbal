@@ -1,7 +1,7 @@
 extern crate unicode_width;
 
 use crate::core::action::Action;
-use crate::core::app::{ActiveBlock, App, InputContext, RouteId};
+use crate::core::app::{ActiveBlock, App, RouteId};
 use crate::tui::event::Key;
 use std::convert::TryInto;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -69,15 +69,9 @@ pub fn handler(key: Key, app: &mut App) {
       app.view.input_idx += 1;
       app.view.input_cursor_position += compute_character_width(next_c);
     }
-    Key::Esc => match app.view.input_context {
-      InputContext::PlaylistTrackSearch | InputContext::SavedTrackSearch => {
-        app.view.input_context = InputContext::GlobalSearch;
-        app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-      }
-      InputContext::GlobalSearch => {
-        app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::Library));
-      }
-    },
+    Key::Esc => {
+      app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::Library));
+    }
     Key::Enter => {
       let input_str: String = app.view.input.iter().collect();
 
@@ -103,15 +97,6 @@ pub fn handler(key: Key, app: &mut App) {
 }
 
 fn process_input(app: &mut App, input: String) {
-  if app.view.input_context == InputContext::PlaylistTrackSearch {
-    process_playlist_track_search(app, input);
-    return;
-  }
-  if app.view.input_context == InputContext::SavedTrackSearch {
-    process_saved_track_search(app, input);
-    return;
-  }
-
   // Don't do anything if there is no input
   if input.is_empty() {
     return;
@@ -131,32 +116,6 @@ fn process_input(app: &mut App, input: String) {
     Some(ActiveBlock::SearchResultBlock),
     Some(ActiveBlock::SearchResultBlock),
   );
-}
-
-fn process_playlist_track_search(app: &mut App, input: String) {
-  let query = input.trim().to_string();
-  app.view.input_context = InputContext::GlobalSearch;
-  app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-
-  if query.is_empty() {
-    app.clear_playlist_track_filter();
-  }
-}
-
-fn process_saved_track_search(app: &mut App, input: String) {
-  let query = input.trim().to_string();
-  app.view.input_context = InputContext::GlobalSearch;
-  app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-
-  if query.is_empty() {
-    app.clear_saved_track_filter();
-    return;
-  }
-
-  // A miss leaves the table alone: the cache cannot answer yet.
-  if !app.try_search_saved_tracks_from_cached_pages(&query) {
-    app.set_status_message(app.strings().status.app.liked_loading, 3);
-  }
 }
 
 fn compute_character_width(character: char) -> u16 {
@@ -274,32 +233,6 @@ mod tests {
 
     let current_route = app.get_current_route();
     assert_eq!(current_route.active_block, ActiveBlock::Empty);
-  }
-
-  #[test]
-  fn playlist_search_esc_returns_focus_to_track_table() {
-    let mut app = App::default();
-    app.view.input_context = InputContext::PlaylistTrackSearch;
-
-    handler(Key::Esc, &mut app);
-
-    let current_route = app.get_current_route();
-    assert_eq!(current_route.active_block, ActiveBlock::TrackTable);
-    assert_eq!(current_route.hovered_block, ActiveBlock::TrackTable);
-    assert_eq!(app.view.input_context, InputContext::GlobalSearch);
-  }
-
-  #[test]
-  fn saved_track_search_esc_returns_focus_to_track_table() {
-    let mut app = App::default();
-    app.view.input_context = InputContext::SavedTrackSearch;
-
-    handler(Key::Esc, &mut app);
-
-    let current_route = app.get_current_route();
-    assert_eq!(current_route.active_block, ActiveBlock::TrackTable);
-    assert_eq!(current_route.hovered_block, ActiveBlock::TrackTable);
-    assert_eq!(app.view.input_context, InputContext::GlobalSearch);
   }
 
   #[test]

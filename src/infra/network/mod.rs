@@ -20,10 +20,10 @@ pub enum IoEvent {
   ForcePreviousTrack,
   PausePlayback,
   ChangeVolume(u8),
-  /// Advance the native cross-source queue: play the next queued item, or resume
-  /// the suspended per-source context when the queue drains. Consumed by
+  /// Advance the native queue: play the next queued item, or resume the
+  /// suspended playlist when the queue drains. Consumed by
   /// `infra::queue::dispatch::route_queue_event` (wired first in the pump); it
-  /// never reaches the Spotify network handler.
+  /// never reaches the network handler.
   AdvanceNativeQueue,
   /// Give up the native queue slot without playing anything else: run the same
   /// teardown a drained queue does (stop the slot, resume the suspended
@@ -36,7 +36,7 @@ pub enum IoEvent {
   ReplayCurrentTrack,
   FetchAnnouncements,
   /// Title, artists, duration in seconds, and an optional catalog id.
-  GetLyrics(String, Vec<String>, f64, Option<String>),
+  GetLyrics(String, Vec<String>, f64),
   /// Aggregate local listening history for the Stats screen
   LoadListeningStats(crate::infra::history::RecapPeriod),
   /// Export the shareable HTML recap and open it in the browser
@@ -97,8 +97,8 @@ impl Network {
       IoEvent::FetchAnnouncements => {
         self.fetch_announcements().await;
       }
-      IoEvent::GetLyrics(track, artists, duration, catalog_id) => {
-        self.get_lyrics(track, artists, duration, catalog_id).await;
+      IoEvent::GetLyrics(track, artists, duration) => {
+        self.get_lyrics(track, artists, duration).await;
       }
       #[cfg(feature = "art-decode")]
       IoEvent::FetchCoverArt(request) => {
@@ -117,7 +117,6 @@ impl Network {
 
     let mut app = self.app.lock().await;
     app.is_loading = false;
-    app.note_display_changes();
   }
 
   #[cfg(feature = "art-decode")]
@@ -176,7 +175,7 @@ impl Network {
       let listens = history::load_listens()?;
       let filtered = history::filter_listens_for_period(&listens, period);
       Ok::<_, anyhow::Error>((
-        history::build_stats_data_with(&filtered, &listens, period, strings),
+        history::build_stats_data_with(&filtered, strings),
         history::compute_streaks(&listens),
       ))
     })
@@ -209,7 +208,7 @@ impl Network {
   }
 
   /// Export the shareable HTML recap off the runtime threads and open it in
-  /// the browser; reads only local history, never Spotify.
+  /// the browser; reads only local history.
   async fn generate_recap(&mut self, period: crate::infra::history::RecapPeriod) {
     use crate::infra::history;
 

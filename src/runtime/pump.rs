@@ -3,8 +3,8 @@
 
 use crate::infra::network::{IoEvent, Network};
 
-/// Signalled after the pump runs an event, so a frontend that pushes its
-/// changes (the GUI) does not wait for its next tick to show the result.
+/// Signalled after the pump runs an event, so the frontend can redraw without
+/// waiting for its next tick to show the result.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub(super) fn events_handled() -> &'static tokio::sync::Notify {
   static HANDLED: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
@@ -56,7 +56,6 @@ pub(super) async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, netwo
       // Qobuz content leaves the UI stuck on the loading indicator.
       let mut app = network.app.lock().await;
       app.is_loading = false;
-      app.note_display_changes();
     }
     events_handled().notify_one();
   }

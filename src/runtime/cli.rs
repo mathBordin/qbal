@@ -59,10 +59,10 @@ screens more often and cost more CPU. Animation-heavy views keep their separate 
           .long("debug")
           .global(true)
           .action(clap::ArgAction::SetTrue)
-          .help("Enable verbose debug logging for bug reports (also SPOTATUI_LOG=debug)")
+          .help("Enable verbose debug logging for bug reports (also QBAL_LOG=debug)")
           .long_help(
-            "Enable verbose debug logging (equivalent to SPOTATUI_LOG=debug). At this level the \
-log records identifying details such as playlist ids. SPOTATUI_LOG=trace goes further. Access \
+            "Enable verbose debug logging (equivalent to QBAL_LOG=debug). At this level the \
+log records identifying details such as playlist ids. QBAL_LOG=trace goes further. Access \
 tokens and request headers are never logged, but read through the file before posting it \
 publicly.",
           ),
@@ -90,18 +90,18 @@ mod tests {
     let app = build_clap_app();
     let matches = app
       .clone()
-      .try_get_matches_from(["spotatui", "--debug"])
+      .try_get_matches_from(["qbal", "--debug"])
       .expect("--debug must parse");
     assert!(matches.get_flag("debug"));
 
     let matches = app
-      .try_get_matches_from(["spotatui"])
+      .try_get_matches_from(["qbal"])
       .expect("no args must parse");
     assert!(!matches.get_flag("debug"));
   }
 
   /// `--debug` needs `global(true)` to parse after a subcommand
-  /// (`spotatui history recap --debug`), not just before one. `run_cli`
+  /// (`qbal history recap --debug`), not just before one. `run_cli`
   /// reads it off the root `ArgMatches` (`matches.get_flag("debug")` in
   /// `runtime/mod.rs`), and clap copies a global flag's value back up to
   /// every parent level it was propagated through, so that read keeps working
@@ -109,7 +109,7 @@ mod tests {
   #[test]
   fn debug_flag_parses_after_a_subcommand() {
     let matches = build_clap_app()
-      .try_get_matches_from(["spotatui", "history", "recap", "--debug"])
+      .try_get_matches_from(["qbal", "history", "recap", "--debug"])
       .expect("--debug after a subcommand must parse");
     assert!(matches.get_flag("debug"));
   }
@@ -137,7 +137,7 @@ mod tests {
   fn tick_rate_flag_rejects_invalid_values() {
     for bad in ["fast", "250ms", "1.5", "-5"] {
       let err = build_clap_app()
-        .try_get_matches_from(["spotatui", &format!("--tick-rate={bad}")])
+        .try_get_matches_from(["qbal", &format!("--tick-rate={bad}")])
         .expect_err("invalid tick-rate must be rejected at parse time");
       assert!(
         err.to_string().contains("tick-rate"),
@@ -151,7 +151,7 @@ mod tests {
     // The 1..=999 range check stays in `bootstrap.rs`, shared with `config.yml`
     // loading, so an out-of-range value must still parse here and reach boot.
     let matches = build_clap_app()
-      .try_get_matches_from(["spotatui", "-t", "5000"])
+      .try_get_matches_from(["qbal", "-t", "5000"])
       .expect("out-of-range tick-rate must parse; the range check lives in bootstrap");
     assert_eq!(boot_options(&matches).tick_rate, Some(5000));
   }
@@ -159,7 +159,7 @@ mod tests {
   #[test]
   fn completions_accepts_powershell() {
     let matches = build_clap_app()
-      .try_get_matches_from(["spotatui", "--completions", "powershell"])
+      .try_get_matches_from(["qbal", "--completions", "powershell"])
       .unwrap();
     assert_eq!(
       matches.get_one::<String>("completions").map(String::as_str),
@@ -170,7 +170,7 @@ mod tests {
   #[test]
   fn completions_still_accepts_the_old_power_shell_spelling() {
     let matches = build_clap_app()
-      .try_get_matches_from(["spotatui", "--completions", "power-shell"])
+      .try_get_matches_from(["qbal", "--completions", "power-shell"])
       .unwrap();
     assert_eq!(
       matches.get_one::<String>("completions").map(String::as_str),
@@ -181,7 +181,7 @@ mod tests {
   #[test]
   fn completions_rejects_an_unknown_shell() {
     assert!(build_clap_app()
-      .try_get_matches_from(["spotatui", "--completions", "nushell"])
+      .try_get_matches_from(["qbal", "--completions", "nushell"])
       .is_err());
   }
 }

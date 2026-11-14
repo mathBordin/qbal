@@ -57,13 +57,11 @@ impl<C: Send + 'static> VizCapture<C> {
 
   /// One tick while the visualizer shows; never blocks. Starts `open` on a
   /// background thread if nothing was tried yet this visit, installs its
-  /// result once it arrives, and with `report` keeps offering the failure
-  /// message until the status bar takes it (a live error status drops plain
-  /// messages).
+  /// result once it arrives, and keeps offering the failure message until
+  /// the status bar takes it (a live error status drops plain messages).
   pub(super) fn poll(
     &mut self,
     app: &mut App,
-    report: bool,
     open: impl FnOnce() -> Option<C> + Send + 'static,
   ) -> Option<&C> {
     if matches!(self.slot, Slot::Closed) && !self.opening.load(Ordering::Acquire) {
@@ -94,27 +92,18 @@ impl<C: Send + 'static> VizCapture<C> {
     }
 
     if let Slot::Opening(rx) = &self.slot {
-      // A capture that does not report is tried again by its frontend; its
-      // failures would fill the log.
-      let level = if report {
-        log::Level::Warn
-      } else {
-        log::Level::Debug
-      };
       match rx.try_recv() {
         Ok(Some(capture)) => self.slot = Slot::Open(capture),
         // Logged once, on the transition: the status message points at the
         // log, and the cpal backend returns None without logging anything.
         Ok(None) => {
-          log::log!(
-            level,
+          log::warn!(
             "[audio-viz] the audio capture could not be opened; the visualizer has no audio"
           );
           self.slot = Slot::Failed { reported: false };
         }
         Err(TryRecvError::Disconnected) => {
-          log::log!(
-            level,
+          log::warn!(
             "[audio-viz] the capture thread ended without a result; the visualizer has no audio"
           );
           self.slot = Slot::Failed { reported: false };
@@ -124,14 +113,12 @@ impl<C: Send + 'static> VizCapture<C> {
     }
 
     if let Slot::Failed { reported: false } = self.slot {
-      let shown = !report || {
-        app.set_status_message(
-          app.strings().status.app.capture_unavailable,
-          AUDIO_CAPTURE_UNAVAILABLE_TTL_SECS,
-        );
-        app.status_message() == Some(app.strings().status.app.capture_unavailable)
-          && !app.status_message_is_error()
-      };
+      app.set_status_message(
+        app.strings().status.app.capture_unavailable,
+        AUDIO_CAPTURE_UNAVAILABLE_TTL_SECS,
+      );
+      let shown = app.status_message() == Some(app.strings().status.app.capture_unavailable)
+        && !app.status_message_is_error();
       self.slot = Slot::Failed { reported: shown };
     }
 

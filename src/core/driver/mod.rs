@@ -3,15 +3,14 @@
 //! playback correctly by calling [`Driver::tick`] at its tick rate.
 //!
 //! One tick advances playback state (`App::update_on_tick` plus the debounced
-//! seek/volume/state flushes), syncs OS presence (Discord, MPRIS, window title), detects track changes (lyrics + cover
-//! art), counts plays for the global song counter, auto-advances the native
-//! queue and the decoded sources, persists the non-Spotify session, and feeds
-//! the audio visualizer.
+//! seek/volume/state flushes), syncs OS presence (Discord, MPRIS, window
+//! title), detects track changes (lyrics + cover art), auto-advances the native
+//! queue and the Qobuz session, persists the session, and feeds the audio
+//! visualizer.
 //!
-//! What stays with the frontend, injected through [`TickEnv`] or kept at the
-//! call site: the visualizer bar count (a function of frontend geometry), the
-//! terminal image-protocol probe behind `TickEnv::cover_art_full_image_support`,
-//! and the macOS `NSRunLoop` pump (the frontend owns the main thread).
+//! What stays with the frontend, injected through [`TickEnv`]: the visualizer
+//! bar count (a function of frontend geometry) and the terminal image-protocol
+//! probe behind `TickEnv::cover_art_full_image_support`.
 //!
 //! A frontend that stops ticking is a bug this module makes loud:
 //! `App::playback_position_ms` reports stale once no tick has run for two
@@ -61,28 +60,11 @@ fn track_identity(snapshot: &crate::infra::media_metadata::PlaybackSnapshot) -> 
   )
 }
 
-/// The base62 id that gets Spotify's own lyrics; `None` keeps the LRCLIB lookup.
-fn spotify_lyrics_id(item_uri: Option<&str>) -> Option<String> {
-  let id = item_uri?.strip_prefix("spotify:track:")?;
-  (id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| id.to_string())
-}
-
 /// Fetch a track's lyrics, or publish "not found" at once when the user turned lyrics off.
-fn request_track_lyrics(
-  app: &mut App,
-  title: String,
-  artists: Vec<String>,
-  duration_secs: f64,
-  item_uri: Option<&str>,
-) {
+fn request_track_lyrics(app: &mut App, title: String, artists: Vec<String>, duration_secs: f64) {
   app.desired_lyrics_identity = Some((title.clone(), artists.join(", ")));
   if app.user_config.behavior.enable_lyrics {
-    app.dispatch(IoEvent::GetLyrics(
-      title,
-      artists,
-      duration_secs,
-      spotify_lyrics_id(item_uri),
-    ));
+    app.dispatch(IoEvent::GetLyrics(title, artists, duration_secs));
   } else {
     app.set_lyrics(crate::core::app::LyricsStatus::NotFound, None, false);
     app
@@ -91,21 +73,14 @@ fn request_track_lyrics(
   }
 }
 
-/// Resolve what cover art to fetch for the track described by `snapshot`.
-///
-/// Local files carry embedded artwork read straight from the file (no URL), so
-/// they take a dedicated `LocalFile` request. Every other source that can supply
-/// art (Spotify album art, YouTube thumbnail, Subsonic getCoverArt) surfaces it
-/// through `cover_fetch_url`. `None` means the current track has no art
-/// to show (e.g. internet radio, or a Spotify item without images).
+/// Resolve what cover art to fetch for the track described by `snapshot`;
+/// `None` when it has no art to show.
 #[cfg(feature = "art-decode")]
 fn cover_art_request_for(
-  app: &App,
   snapshot: &crate::infra::media_metadata::PlaybackSnapshot,
 ) -> Option<crate::core::art::CoverArtRequest> {
-  use crate::core::art::CoverArtRequest;
-
-  crate::infra::media_metadata::cover_fetch_url(app, snapshot).map(CoverArtRequest::Url)
+  crate::infra::media_metadata::cover_fetch_url(snapshot)
+    .map(crate::core::art::CoverArtRequest::Url)
 }
 
 /// Per-tick inputs only the frontend can supply.
@@ -113,26 +88,15 @@ pub struct TickEnv {
   /// Wall-clock instant of this tick; injected so the driver's throttling
   /// decisions stay deterministic under test.
   pub now: Instant,
-  /// What the frontend's visualizer reads from the capture, or `None` while
-  /// no visualizer shows (which releases the capture).
+  /// How many of cava's bands the visualizer fits, or `None` while no
+  /// visualizer shows (which releases the capture).
   #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-  pub viz: Option<VizNeed>,
+  pub viz_bars: Option<usize>,
   /// Whether the frontend renders real pixels for cover art (the terminal
   /// image-protocol probe); false in a decode-only build, where art is
   /// fetched solely for the adaptive theme.
   #[cfg(feature = "art-decode")]
   pub cover_art_full_image_support: bool,
-}
-
-#[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VizNeed {
-  /// cava's bands, as many as the frontend's geometry fits, into `App::spectrum_data`.
-  Bars(usize),
-  /// Only the capture: the frontend reads `Driver::recent_audio` or
-  /// `Driver::spectrum` itself and closes a failed capture to try again; no
-  /// status message.
-  Samples,
 }
 
 /// The scheduler's own state: everything that used to live as locals of the
@@ -164,7 +128,7 @@ pub struct Driver {
   last_cover_art_key: Option<String>,
   /// Throttle state for `last_session.yml` (see `plan::session_persist_action`):
   /// `last_session_save` spaces the periodic writes; `session_was_present`
-  /// lets a Some -> None transition (queue ended, switched to Spotify) clear
+  /// lets a Some -> None transition (the queue ended, playback stopped) clear
   /// the file so a stale session is never resurrected.
   last_session_save: Option<Instant>,
   session_was_present: bool,
@@ -245,7 +209,6 @@ impl Driver {
   pub fn tick(&mut self, app: &mut App, elapsed: Duration, env: TickEnv) {
     app.update_on_tick(elapsed);
 
-    app.flush_pending_api_seek();
     app.flush_pending_source_seek();
     app.flush_state_save(false);
 
@@ -265,10 +228,8 @@ impl Driver {
     }
 
     // Shared track-change detector. One place decides "the playing track
-    // changed" off the source-agnostic snapshot, then drives BOTH lyrics
-    // (every source) and cover art (cover-art feature) — so both light up
-    // for Spotify, local files, Subsonic, radio and YouTube through a single
-    // path.
+    // changed" off the playback snapshot, then drives both lyrics and cover
+    // art (cover-art feature).
     let playing = {
       let snapshot = crate::infra::media_metadata::tracking_playback_snapshot(app);
 
@@ -282,10 +243,9 @@ impl Driver {
         match snapshot.as_ref() {
           Some(snapshot) => {
             use crate::infra::media_metadata::PlaybackItemKind;
-            // LRCLIB lookup by title + artist + duration. Source agnostic;
-            // radio (duration 0) simply resolves to "not found". Podcast
-            // episodes have no lyrics, so skip the lookup and show the
-            // not-found message rather than stale lyrics.
+            // LRCLIB lookup by title + artist + duration. A non-track item
+            // has no lyrics, so skip the lookup and show the not-found
+            // message rather than stale lyrics.
             if snapshot.item_kind == PlaybackItemKind::Track {
               let title = snapshot.metadata.title.clone();
               // The identity latch keys on the joined display credit, but the
@@ -297,7 +257,6 @@ impl Driver {
                 title,
                 artists,
                 snapshot.metadata.duration_ms as f64 / 1000.0,
-                snapshot.item_uri.as_deref(),
               );
             } else {
               app.desired_lyrics_identity = None;
@@ -329,15 +288,11 @@ impl Driver {
       plan::playback_transition(&self.last_playback_mark, &mark);
       self.last_playback_mark = mark;
 
-      // Cover art is re-evaluated EVERY tick against the desired image key,
-      // NOT latched to the identity change. With native streaming the
-      // snapshot's `image_url` comes from the polled Spotify context, which
-      // catches up seconds *after* `native_track_info` flips the identity —
-      // an identity-latched fetch would fire once with the previous track's
-      // URL (or none at startup) and never see the real one, leaving the art
-      // stuck or missing until restart. Comparing against
-      // `last_cover_art_key` keeps this a no-op on quiet ticks and fires
-      // exactly once whenever the resolved art actually changes.
+      // Cover art is re-evaluated every tick against the desired image key,
+      // not latched to the identity change, so art that resolves after the
+      // track flips is still fetched. Comparing against `last_cover_art_key`
+      // keeps this a no-op on quiet ticks and fires exactly once whenever the
+      // resolved art actually changes.
       #[cfg(feature = "art-decode")]
       {
         use crate::core::art::CoverArtStatus;
@@ -345,9 +300,7 @@ impl Driver {
           .user_config
           .needs_cover_art(env.cover_art_full_image_support);
         let desired = if enabled {
-          snapshot
-            .as_ref()
-            .and_then(|snapshot| cover_art_request_for(app, snapshot))
+          snapshot.as_ref().and_then(cover_art_request_for)
         } else {
           None
         };
@@ -373,7 +326,7 @@ impl Driver {
           plan::CoverArtAction::Drop { clear, status } => {
             app.desired_cover_art_key = None;
             self.last_cover_art_key = None;
-            // No art to show (radio, art disabled, nothing playing): drop
+            // No art to show (art disabled, nothing playing): drop
             // any stale image once, so the pane shows the placeholder.
             if clear {
               app.clear_cover_art();
@@ -383,14 +336,6 @@ impl Driver {
         }
       }
 
-      let (is_track, item_id) = snapshot.as_ref().map_or((false, None), |snapshot| {
-        (
-          snapshot.item_kind == crate::infra::media_metadata::PlaybackItemKind::Track,
-          snapshot.item_id.as_deref(),
-        )
-      });
-      let track = plan::audio_analysis_track(false, is_track, item_id);
-      app.sync_audio_analysis(track);
       snapshot
         .as_ref()
         .is_some_and(|snapshot| snapshot.is_playing)
@@ -408,8 +353,7 @@ impl Driver {
     // output takes seconds to come back) and restage the track there, at the
     // position it stopped. Whether it stays paused depends on which of the
     // two shapes this was: cpal reporting the device *removed* (headphones
-    // out) pauses, like macOS itself does — nobody wants the music jumping to
-    // the laptop speakers. A default that merely moved (headphones *in*) keeps
+    // out) pauses — nobody wants the music jumping to the laptop speakers. A default that merely moved (headphones *in*) keeps
     // whatever play/pause state the session had. The seek and the pause ride
     // on the session as `resume_at`, applied by the path that stages the
     // track, never as events queued behind it.
@@ -543,9 +487,7 @@ impl Driver {
       }
     }
 
-    // Decoded-source auto-advance, one macro invocation per source (the
-    // blocks are identical except for which `*_playback` session and queue
-    // field they read). Each session reads its progress live from the
+    // Qobuz auto-advance. The session reads its progress live from the
     // player at render time; the only state self-managed here is
     // end-of-track. When the sink drains and no track change is already in
     // flight (`!advancing`), `plan::decoded_advance` picks the move: advance /
@@ -553,9 +495,9 @@ impl Driver {
     //
     // Decide under one borrow, then act after the borrow ends. `advancing`
     // is set *synchronously here* (atomic check-and-set, before
-    // dispatching) because the sink stays empty for the whole decode — or,
-    // for Subsonic/YouTube, multi-second download — window; without it the
-    // next tick would re-dispatch and skip several tracks per advance.
+    // dispatching) because the sink stays empty for the whole download and
+    // decode window; without it the next tick would re-dispatch and skip
+    // several tracks per advance.
     macro_rules! decoded_auto_advance {
       ($app:ident, $playback:ident, $queue:ident) => {
         if !$app.queue_owns_playback() {
@@ -606,10 +548,8 @@ impl Driver {
     // queue order already matches the decoded shuffle state).
     app.reconcile_decoded_shuffle();
 
-    // A decoded non-Spotify source owns the sink while its `*_playback` is
-    // `Some`. Drive `song_progress_ms` from its live player, and do NOT let
-    // the (paused) librespot position below clobber it. Music's position was
-    // set by `update_on_tick`.
+    // The Qobuz session owns the sink while `qobuz_playback` is `Some`: drive
+    // `song_progress_ms` from its live player.
     #[allow(unused_mut)]
     let mut source_owns_playback = false;
     // The native queue slot owns the sink when playing a decoded track; read
@@ -619,18 +559,14 @@ impl Driver {
       source_owns_playback = true;
       app.song_progress_ms = d.player.position().as_millis();
     }
-    #[allow(unused_variables)]
-    let spotify_queue_slot = app.queue_now_is_spotify();
-    if !spotify_queue_slot {
-      if let Some(qobuz) = app.qobuz_playback.as_ref() {
-        source_owns_playback = true;
-        app.song_progress_ms = qobuz.player.position().as_millis();
-      }
+    if let Some(qobuz) = app.qobuz_playback.as_ref() {
+      source_owns_playback = true;
+      app.song_progress_ms = qobuz.player.position().as_millis();
     }
 
-    // Persist the active non-Spotify session so it resumes on next launch.
-    // Throttled to avoid churning the file every tick; a Some -> None
-    // transition (queue ended, or switched to Spotify) clears it instead.
+    // Persist the session so it resumes on next launch. Throttled to avoid
+    // churning the file every tick; a Some -> None transition (the queue
+    // ended, playback stopped) clears it instead.
     let has_session = app.has_persistable_session();
     match plan::session_persist_action(
       has_session,
@@ -670,36 +606,20 @@ impl Driver {
 
     // Only the native position below reads the flag.
     let _ = source_owns_playback;
-    app.note_analysis_clock(playing, env.now);
-    if app.pitch_view_shows() {
-      app.step_pitch_levels(env.now, elapsed);
-    }
+    app.note_playing(playing);
 
-    // The terminal's pitch view draws Spotify's analysis, so its bars need no capture.
     #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-    match env
-      .viz
-      .filter(|need| *need == VizNeed::Samples || !app.pitch_view_shows())
-    {
-      Some(need) => {
+    match env.viz_bars {
+      Some(bars) => {
         // Built at the count we are about to ask for, so the first frame
-        // does not immediately throw the fresh cavacore plan away. Samples
-        // start at the smallest plan; `Driver::spectrum` sizes it later.
-        let desired_bars = match need {
-          VizNeed::Bars(bars) => bars,
-          VizNeed::Samples => 2,
-        };
-        // A frontend that reads samples retries a failed capture by itself, quietly.
-        let report = matches!(need, VizNeed::Bars(_));
-        let capture = self.audio_capture.poll(app, report, move || {
-          audio::AudioCaptureManager::new(desired_bars)
-        });
+        // does not immediately throw the fresh cavacore plan away.
+        let capture = self
+          .audio_capture
+          .poll(app, move || audio::AudioCaptureManager::new(bars));
         match capture {
           Some(capture) => {
-            if let VizNeed::Bars(bars) = need {
-              if let Some(spectrum) = capture.get_spectrum(bars) {
-                app.spectrum_data = Some(spectrum);
-              }
+            if let Some(spectrum) = capture.get_spectrum(bars) {
+              app.spectrum_data = Some(spectrum);
             }
             // Kept outside the spectrum arm: a dead stream must drop the
             // "Capturing audio" status instead of freezing it on.
@@ -715,32 +635,20 @@ impl Driver {
         }
       }
     }
-
-    app.note_display_changes();
   }
 
   /// The one-shot startup dispatch, fired by the frontend right after its
-  /// first frame: initial Spotify fetches, the startup route's data, the
-  /// persisted active source's sidebar data, and `--play-file`.
+  /// first frame: the startup route's data, the source's sidebar data, and
+  /// the announcement feed.
   pub fn dispatch_startup(&mut self, app: &mut App) {
-    // Spotify-only startup fetches: skip them entirely when launched against a
-    // free source with no Spotify session, so the network layer doesn't reject
-    // three events with "connect Spotify" status flashes on every launch.
-
     // startup_route seeds the nav stack directly (App::new), bypassing the
     // handlers that normally fetch a screen's data on navigation — kick
     // off that fetch here or the screen renders empty until re-entered.
     // (Home needs nothing extra.)
     fetch_startup_route(app);
-    // A persisted non-Spotify active source needs its sidebar data loaded
-    // too (all of these are inert no-ops when the feature is off).
+    // The Qobuz sidebar (favorites and playlists) loads at startup.
     app.load_source_sidebar(app.active_source);
     app.dispatch(IoEvent::FetchAnnouncements);
-
-    // `--play-file`: kick off local playback now that dispatch is wired.
-    if let Some(uri) = app.pending_play_file.take() {
-      app.dispatch(IoEvent::StartPlayback(Some(uri), None, None));
-    }
 
     #[cfg(feature = "scripting")]
     if let Some(engine) = self.script_engine.as_mut() {
@@ -786,34 +694,6 @@ impl Driver {
     #[cfg(feature = "discord-rpc")]
     if let Some(ref manager) = self.discord_rpc_manager {
       manager.clear();
-    }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn a_spotify_track_uri_gives_a_lyrics_id() {
-    assert_eq!(
-      spotify_lyrics_id(Some("spotify:track:0DiWol3AO6WpXZgp0goxAV")).as_deref(),
-      Some("0DiWol3AO6WpXZgp0goxAV")
-    );
-  }
-
-  #[test]
-  fn local_files_episodes_and_other_sources_give_no_lyrics_id() {
-    for uri in [
-      Some("spotify:local:Daft+Punk:Discovery:One+More+Time:320"),
-      // What a native Spotify local file reports: the local URI behind the track prefix.
-      Some("spotify:track:spotify:local:Daft+Punk:Discovery:One+More+Time:320"),
-      Some("spotify:episode:4rOoJ6Egrf8K2IrywzwOMk"),
-      Some("file:///music/one-more-time.flac"),
-      Some("youtube:FGBhQbmPwH8"),
-      None,
-    ] {
-      assert_eq!(spotify_lyrics_id(uri), None, "{uri:?}");
     }
   }
 }

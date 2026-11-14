@@ -120,7 +120,6 @@ impl App {
     self.lyrics_status = status;
     self.lyrics = lyrics;
     self.lyrics_synced = synced;
-    self.display_revisions.bump(DisplayDomain::Lyrics);
   }
 
   /// Playback progress adjusted by the user's lyric timing nudge, for

@@ -93,9 +93,9 @@ impl Events {
         let poll_timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(poll_timeout).unwrap() {
           match event::read().unwrap() {
-            // Only process key press events, not release or repeat.
-            // This fixes duplicate key events on Windows where both
-            // Press and Release events are sent for each key press.
+            // Only process key press events, not release or repeat:
+            // terminals with the keyboard enhancement protocol send both
+            // Press and Release events for each key press.
             CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
               let key = Key::from(key);
               // If send fails, the receiver has been dropped (app is closing)

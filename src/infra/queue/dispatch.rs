@@ -5,10 +5,7 @@
 //! transport controls for the queue slot's player, and it relinquishes the queue
 //! slot when the user starts an unrelated playback.
 //!
-//! Compiled unconditionally; the decoded-playback bodies are gated per source
-//! feature. In a slim build the engine reduces to "skip every item with a
-//! `not available in this build` status" — correct, and enough for the pump to
-//! stay one shape across builds.
+//! An item that is not a Qobuz track is skipped with a status message.
 
 use std::sync::Arc;
 
@@ -16,14 +13,11 @@ use tokio::sync::Mutex;
 
 use crate::core::app::App;
 use crate::core::plugin_api::TrackInfo;
-use crate::core::queue::QueueItemSource;
-use crate::core::queue::{queue_item_source, source_available, source_label};
+use crate::core::queue::is_qobuz_uri;
 use crate::core::source::Source;
 use crate::infra::network::IoEvent;
 use crate::infra::queue::QueueEnd;
 
-// The decoded queue slot exists only for the sources that own a finite track
-// list; internet radio enables `audio-decode` but is never queueable.
 use crate::infra::audio::LocalPlayer;
 use std::time::Duration;
 
@@ -101,7 +95,7 @@ async fn route_queue_transport(app: &Arc<Mutex<App>>, event: &IoEvent) -> Option
       Some(true)
     }
     // Skip the queued track: advance to the next queued item (or resume). A
-    // skip while paused plays the next item, like the Spotify slot.
+    // skip while paused plays the next item.
     IoEvent::NextTrack => {
       drop(player);
       app.lock().await.queue_slot_desired_playing = true;
@@ -120,17 +114,15 @@ async fn route_queue_transport(app: &Arc<Mutex<App>>, event: &IoEvent) -> Option
 /// Drop the queue slot (stopping its player) and forget any suspended context,
 /// but keep the queued items. Called when the user starts an unrelated playback.
 async fn clear_queue_playback(app: &Arc<Mutex<App>>) {
-  {
-    let player = {
-      let mut guard = app.lock().await;
-      guard.queue_suspended = None;
-      // The slot's desired play state belongs to the episode that just ended.
-      guard.queue_slot_desired_playing = true;
-      guard.take_queue_now_decoded_player()
-    };
-    if let Some(player) = player {
-      player.stop();
-    }
+  let player = {
+    let mut guard = app.lock().await;
+    guard.queue_suspended = None;
+    // The slot's desired play state belongs to the queue run that just ended.
+    guard.queue_slot_desired_playing = true;
+    guard.take_queue_now_decoded_player()
+  };
+  if let Some(player) = player {
+    player.stop();
   }
 }
 
@@ -179,41 +171,17 @@ async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
     .await;
     return false;
   };
-  let source = queue_item_source(&uri);
-  let strings = crate::infra::app_strings(app).await;
-  let source_name = match source {
-    QueueItemSource::LocalFile => strings.status.infra.queue_local_source,
-    _ => source_label(source),
-  };
-  if !source_available(source) {
-    set_status(
-      app,
-      strings
-        .status
-        .infra
-        .source_playback_unavailable(source_name),
-    )
-    .await;
+  if !is_qobuz_uri(&uri) {
+    let message = crate::infra::app_strings(app)
+      .await
+      .status
+      .infra
+      .queue_not_qobuz
+      .to_string();
+    set_status(app, message).await;
     return false;
   }
-  match source {
-    QueueItemSource::Qobuz => play_queued_qobuz(app, track, &uri).await,
-    // Reached only when a source is `source_available` but its play arm is
-    // cfg'd out — impossible (the check above *is* the cfg gate), but the match
-    // must be exhaustive across builds.
-    #[allow(unreachable_patterns)]
-    _ => {
-      set_status(
-        app,
-        strings
-          .status
-          .infra
-          .source_playback_unavailable(source_name),
-      )
-      .await;
-      false
-    }
-  }
+  play_queued_qobuz(app, track, &uri).await
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +189,7 @@ async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
 // ---------------------------------------------------------------------------
 
 async fn play_queued_qobuz(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str) -> bool {
-  release_librespot(app, Source::Qobuz).await;
+  claim_sink_for(app, Source::Qobuz).await;
   let Some(source) = crate::infra::qobuz::dispatch::build_playback_source(app).await else {
     return false; // build_playback_source surfaced its own status
   };
@@ -230,7 +198,7 @@ async fn play_queued_qobuz(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str) 
   };
   let fetch_id = publish_pending_decoded(app, &player, track).await;
   let quality = app.lock().await.user_config.behavior.qobuz_quality;
-  // Fetch off the IoEvent pump, like Subsonic: a Qobuz track is a long download.
+  // Fetch off the IoEvent pump: a Qobuz track is a long download.
   let app_for_spawn = Arc::clone(app);
   let uri = uri.to_string();
   let name = track.name.clone();
@@ -368,10 +336,8 @@ async fn finish_decoded_fetch(
 /// 2. reuse the suspended decoded context's player (device-handoff-free);
 /// 3. open a fresh device.
 ///
-/// Callers must [`release_librespot`] *before* acquiring, not just on the
-/// fresh-device path: the outgoing queue slot can be a still-playing Spotify
-/// track (mid-track skip / Enter-jump), and on the reuse paths nothing else
-/// silences it — it would keep playing under the whole download window.
+/// Callers must [`claim_sink_for`] *before* acquiring, so the tick sees an
+/// owner for the whole download window.
 async fn acquire_queue_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   if let Some(p) = {
     let guard = app.lock().await;
@@ -411,13 +377,8 @@ async fn acquire_queue_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>>
   }
 }
 
-/// The player of whichever decoded context (local / Subsonic / YouTube) is
-/// currently suspended under the queue, so the queue slot can reuse its output
-/// device. Radio is excluded: it is torn down at suspension (a live stream can't
-/// share the sink), so the queue opens a fresh player and reconnects on resume.
-/// That exclusion is exactly why this is gated on the three queueable sources
-/// rather than `audio-decode` — under radio alone every arm below is cfg'd out
-/// and the function is unreachable.
+/// The player of the playlist suspended under the queue, so the queue slot can
+/// reuse its output device.
 async fn suspended_context_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   let guard = app.lock().await;
   if let Some(s) = guard.qobuz_playback.as_ref() {
@@ -441,22 +402,16 @@ async fn attach_abort_handle(
   abort_handle.abort();
 }
 
-/// Hand the sink to `source` before a decoded queue item takes over: claim it,
-/// drop a Spotify slot that is being skipped mid-play, then pause librespot and
-/// its play intent so no rebuild resumes Spotify under the queued track.
-async fn release_librespot(app: &Arc<Mutex<App>>, source: Source) {
-  let mut guard = app.lock().await;
-  guard.claim_decoded_sink(source);
-  if guard.queue_now_is_spotify() {
-    guard.queue_now = None;
-  }
+/// Hand the sink to `source` before a decoded queue item takes over.
+async fn claim_sink_for(app: &Arc<Mutex<App>>, source: Source) {
+  app.lock().await.claim_decoded_sink(source);
 }
 
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
 
-/// Queue episode over: resume the suspended context, or finish if nothing was
+/// Queue run over: resume the suspended context, or finish if nothing was
 /// suspended. A `DeviceLost` end resumes nothing. The queue slot's player is
 /// stopped only when it is **not** shared with the context being resumed
 /// (`Arc::ptr_eq`).
@@ -466,7 +421,7 @@ async fn resume_or_finish(app: &Arc<Mutex<App>>, end: QueueEnd) {
   let suspended = { app.lock().await.queue_suspended.take() };
   // The slot's desired play state carries into the resume, then resets: a
   // device removal that paused the slot keeps the context paused, and the
-  // next queue episode starts playing.
+  // next queue run starts playing.
   let playing = std::mem::replace(&mut app.lock().await.queue_slot_desired_playing, true);
 
   // Take the queue slot's player so we can decide whether to stop it.
@@ -513,8 +468,7 @@ async fn resume_or_finish(app: &Arc<Mutex<App>>, end: QueueEnd) {
       resume_index,
       resume_position_ms,
     }) => resume_qobuz(app, resume_index, resume_position_ms, queue_player, playing).await,
-    // In slim builds `SuspendedContext` is uninhabited, so every arm above is
-    // cfg'd out and only `None` is reachable.
+    // Nothing was suspended.
     #[allow(unreachable_patterns)]
     _ => {
       if let Some(player) = queue_player {

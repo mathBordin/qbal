@@ -1,6 +1,4 @@
 use crate::core::app::{setting_requirement, App, SettingItem, SettingValue, SettingsCategory};
-use crate::core::user_config::key_to_config_string;
-use crate::tui::event::Key;
 use crate::tui::fuzzy::fuzzy_match;
 use crate::tui::theme::{EmphasisExt, ThemeExt};
 use crate::tui::ui::popups::highlighted_spans;
@@ -38,9 +36,6 @@ pub fn settings_layout(area: Rect) -> [Rect; 3] {
 /// ranges of its name the query covered (empty when the row only survived on
 /// its config id).
 pub type FilteredSetting = (usize, Vec<(usize, usize)>);
-
-/// Presses the selected row's button; global `jump_to_context` keeps the key on other rows.
-pub const BUTTON_KEY: Key = Key::Char('o');
 
 /// Rows that survive the active filter, best match first. With no filter this
 /// is every row in schema order.
@@ -195,20 +190,7 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect, scroll_offset: &
           SettingValue::Number(v) => v.to_string(),
           SettingValue::String(v) => format!("\"{}\"", v),
           SettingValue::Key(v) => {
-            if setting.id == "keys.open_settings" {
-              let effective = app.effective_open_settings_key();
-              let configured = app.user_config.keys.open_settings;
-              if effective != configured {
-                app
-                  .strings()
-                  .settings
-                  .effective_key(v, &effective.to_string())
-              } else {
-                format!("[{}]", v)
-              }
-            } else {
-              format!("[{}]", v)
-            }
+            format!("[{}]", v)
           }
           SettingValue::Color(v) => {
             format!("■ {}", app.strings().settings.option_label(&setting.id, v))
@@ -248,7 +230,10 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect, scroll_offset: &
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD));
 
       let mut spans = highlighted_spans(&setting.name, name_ranges, name_style, match_style);
-      spans.push(Span::styled(": ", name_style));
+      spans.push(Span::styled(
+        app.strings().settings.value_separator,
+        name_style,
+      ));
       spans.push(Span::styled(value_str, value_style));
       if let Some(hint) = app
         .availability(setting_requirement(&setting.id))
@@ -257,20 +242,6 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect, scroll_offset: &
         spans.push(Span::styled(
           format!("  ({hint})"),
           Style::default().fg(app.user_config.theme.inactive.into()),
-        ));
-      }
-      if let Some((label, busy)) = app
-        .setting_button_label(&setting.id)
-        .filter(|_| is_selected)
-      {
-        let text = if busy {
-          format!("  {label}")
-        } else {
-          format!("  [{}] {label}", key_to_config_string(&BUTTON_KEY))
-        };
-        spans.push(Span::styled(
-          text,
-          Style::default().fg(app.user_config.theme.hint.into()),
         ));
       }
 
@@ -359,16 +330,7 @@ fn format_terminal_input_caps(app: &App) -> String {
     app.strings().settings.enhancement_off
   };
 
-  let ctrl_comma = match app.view.terminal_input_caps.ctrl_punct_reliable {
-    crate::core::app::CapabilityState::Yes => app.strings().settings.ctrl_comma_ok,
-    crate::core::app::CapabilityState::No => app.strings().settings.ctrl_comma_degraded,
-    crate::core::app::CapabilityState::Unknown => app.strings().settings.ctrl_comma_unknown,
-  };
-
-  app
-    .strings()
-    .settings
-    .terminal_input(enhancement, ctrl_comma)
+  app.strings().settings.terminal_input(enhancement)
 }
 
 fn draw_settings_help(f: &mut Frame<'_>, app: &App, area: Rect) {
@@ -502,7 +464,7 @@ mod tests {
   const HEIGHT: u16 = 30;
 
   #[test]
-  fn chinese_settings_render_localized_choices_without_changing_the_raw_value() {
+  fn localized_settings_render_choices_without_changing_the_raw_value() {
     let mut app = App::default();
     app.user_config.behavior.language = crate::core::i18n::Language::PtBr;
     app.refresh_language();

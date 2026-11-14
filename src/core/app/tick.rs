@@ -35,7 +35,6 @@ impl App {
       let current = transition.current();
       if self.user_config.theme != current {
         self.user_config.theme = current;
-        self.display_revisions.bump(DisplayDomain::Theme);
       }
       if transition.is_complete() {
         self.theme_transition = None;

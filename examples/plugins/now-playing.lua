@@ -3,9 +3,9 @@
 -- per-axis size hints.
 --
 -- Install (single file; see PLUGINS.md for config path rules):
---   cp now-playing.lua "${XDG_CONFIG_HOME:-$HOME/.config}/spotatui/plugins/"
+--   cp now-playing.lua "${XDG_CONFIG_HOME:-$HOME/.config}/qbal/plugins/"
 --
--- Suggested binding, in config.yml in the spotatui app config directory:
+-- Suggested binding, in config.yml in the qbal app config directory:
 --   plugin_commands:
 --     now_playing: "ctrl-n"
 --
@@ -15,7 +15,7 @@
 -- graphics protocol (Kitty, iTerm2, Sixel). Without one the widget draws a
 -- status line in its place and the rest of the screen still works.
 
-spotatui.require_api(6)
+qbal.require_api(6)
 
 local SCREEN = "now_playing"
 
@@ -27,7 +27,7 @@ local lyrics_status = "not_started"
 local lyrics_track = nil -- uri the loaded lyrics belong to
 
 local function track_uri()
-  local pb = spotatui.playback()
+  local pb = qbal.playback()
   return pb and pb.track and pb.track.uri or nil
 end
 
@@ -70,13 +70,13 @@ local function lyric_lines(progress_ms)
 end
 
 local function render()
-  local pb = spotatui.playback()
+  local pb = qbal.playback()
   local title = "Nothing playing"
   if pb and pb.track then
     title = pb.track.name .. " - " .. table.concat(pb.track.artists, ", ")
   end
 
-  spotatui.set_screen(SCREEN, {
+  qbal.set_screen(SCREEN, {
     -- scroll = false keeps the header pinned; PageUp/PageDown move the lyrics.
     { type = "paragraph", height = 2, scroll = false, lines = {
       { text = title, bold = true },
@@ -99,7 +99,7 @@ local function load_lyrics()
   lyrics_track = uri
   render()
 
-  spotatui.get_lyrics(function(data, err)
+  qbal.get_lyrics(function(data, err)
     -- The track may have changed while the fetch was in flight.
     if err or not data or track_uri() ~= lyrics_track then
       lyrics_status = "not_found"
@@ -112,7 +112,7 @@ local function load_lyrics()
   end)
 end
 
-spotatui.register_screen(SCREEN, {
+qbal.register_screen(SCREEN, {
   title = "Now Playing",
   on_key = function()
     -- Esc and the back key are handled globally; nothing else to do here.
@@ -123,18 +123,18 @@ spotatui.register_screen(SCREEN, {
 })
 
 -- Advance the highlighted lyric line while the screen is open.
-spotatui.set_interval(1000, function()
-  if spotatui.current_route() == "plugin:" .. SCREEN then
+qbal.set_interval(1000, function()
+  if qbal.current_route() == "plugin:" .. SCREEN then
     render()
   end
 end)
 
-spotatui.on("track_change", function()
-  if spotatui.current_route() == "plugin:" .. SCREEN then
+qbal.on("track_change", function()
+  if qbal.current_route() == "plugin:" .. SCREEN then
     load_lyrics()
   end
 end)
 
-spotatui.register_command("now_playing", function()
-  spotatui.show_screen(SCREEN)
+qbal.register_command("now_playing", function()
+  qbal.show_screen(SCREEN)
 end)

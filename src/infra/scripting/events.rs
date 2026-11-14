@@ -20,7 +20,7 @@ pub enum ScriptEvent {
 }
 
 impl ScriptEvent {
-  /// Lua-facing event name accepted by `spotatui.on`.
+  /// Lua-facing event name accepted by `qbal.on`.
   pub(super) fn lua_name(&self) -> &'static str {
     match self {
       ScriptEvent::Start => "start",
@@ -67,37 +67,18 @@ pub(super) const VALID_EVENT_NAMES: &[&str] = &[
   "route_change",
 ];
 
-/// Seek heuristic thresholds (Connect polling can legitimately jump a few seconds forward).
+/// Seek heuristic thresholds (a late tick can legitimately jump a few seconds forward).
 pub(super) const SEEK_BACKWARD_MS: i64 = 1500;
 pub(super) const SEEK_FORWARD_MS: i64 = 6500;
 
 /// Collect the queue item uris from `App` (currently-playing first, then upcoming).
 pub(super) fn queue_uris(app: &App) -> Vec<String> {
-  use crate::core::plugin_api::PlayableInfo;
-
-  let Some(queue) = app.queue.as_ref() else {
-    return Vec::new();
-  };
-
-  let item_uri = |item: &PlayableInfo| -> Option<String> {
-    match item {
-      PlayableInfo::Track(t) => t.uri.clone(),
-      PlayableInfo::Episode(e) => e.uri.clone(),
-    }
-  };
-
-  let mut uris = Vec::new();
-  if let Some(current) = queue.currently_playing.as_ref() {
-    if let Some(u) = item_uri(current) {
-      uris.push(u);
-    }
-  }
-  for item in &queue.queue {
-    if let Some(u) = item_uri(item) {
-      uris.push(u);
-    }
-  }
-  uris
+  app
+    .queue_now_track()
+    .into_iter()
+    .chain(&app.native_queue)
+    .filter_map(|track| track.uri.clone())
+    .collect()
 }
 
 /// Pure diff of two snapshots into the set of events to emit. Order is fixed and testable.

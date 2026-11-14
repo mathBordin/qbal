@@ -57,7 +57,7 @@ impl CavaBuilder {
     self
   }
 
-  /// EXTENSION(spotatui): cap the autosens gain so near-silent input cannot be
+  /// EXTENSION(qbal): cap the autosens gain so near-silent input cannot be
   /// amplified all the way to full-scale bars. Upstream and C cava have no
   /// such cap (the default, infinity, keeps their behavior).
   pub fn max_sens(mut self, max_sens: f64) -> Self {

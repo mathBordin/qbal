@@ -62,8 +62,8 @@ fn track_change_handler_queues_notify() {
     .load_source(
       "test",
       r#"
-        spotatui.on("track_change", function(pb)
-          spotatui.notify("now: " .. pb.track.name, 5)
+        qbal.on("track_change", function(pb)
+          qbal.notify("now: " .. pb.track.name, 5)
         end)
       "#,
     )
@@ -89,9 +89,9 @@ fn empty_playback_fields_reach_lua_as_nil() {
     .load_source(
       "test",
       r#"
-        local pb = spotatui.playback()
-        local t = spotatui.current_track()
-        spotatui.notify(tostring(pb.device == nil) .. ":" .. tostring(pb.track.release_date == nil) .. ":" .. tostring(t.id == nil), 1)
+        local pb = qbal.playback()
+        local t = qbal.current_track()
+        qbal.notify(tostring(pb.device == nil) .. ":" .. tostring(pb.track.release_date == nil) .. ":" .. tostring(t.id == nil), 1)
       "#,
     )
     .unwrap();
@@ -109,8 +109,8 @@ fn empty_fields_in_an_event_playback_reach_lua_as_nil() {
     .load_source(
       "test",
       r#"
-        spotatui.on("track_change", function(pb)
-          spotatui.notify(tostring(pb.device == nil), 1)
+        qbal.on("track_change", function(pb)
+          qbal.notify(tostring(pb.device == nil), 1)
         end)
       "#,
     )
@@ -132,8 +132,8 @@ fn erroring_handler_is_disabled_after_one_strike() {
     .load_source(
       "bad",
       r#"
-        spotatui.on("start", function() error("boom") end)
-        spotatui.on("start", function() spotatui.notify("healthy", 1) end)
+        qbal.on("start", function() error("boom") end)
+        qbal.on("start", function() qbal.notify("healthy", 1) end)
       "#,
     )
     .unwrap();
@@ -162,7 +162,7 @@ fn erroring_handler_is_disabled_after_one_strike() {
 #[test]
 fn unknown_event_name_is_an_error() {
   let mut engine = ScriptEngine::new().unwrap();
-  let result = engine.load_source("test", r#"spotatui.on("bogus_event", function() end)"#);
+  let result = engine.load_source("test", r#"qbal.on("bogus_event", function() end)"#);
   assert!(result.is_err());
 }
 
@@ -173,11 +173,9 @@ fn require_api_at_or_below_current_succeeds() {
   use crate::core::plugin_api::API_VERSION;
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("test", &format!("spotatui.require_api({API_VERSION})"))
+    .load_source("test", &format!("qbal.require_api({API_VERSION})"))
     .unwrap();
-  engine
-    .load_source("test2", "spotatui.require_api(1)")
-    .unwrap();
+  engine.load_source("test2", "qbal.require_api(1)").unwrap();
 }
 
 #[test]
@@ -186,22 +184,20 @@ fn require_api_above_current_fails_with_clear_message() {
   let mut engine = ScriptEngine::new().unwrap();
   let too_high = API_VERSION + 1;
   let err = engine
-    .load_source("test", &format!("spotatui.require_api({too_high})"))
+    .load_source("test", &format!("qbal.require_api({too_high})"))
     .unwrap_err()
     .to_string();
   assert!(err.contains(&too_high.to_string()), "message: {err}");
   assert!(err.contains(&API_VERSION.to_string()), "message: {err}");
 
   // The engine is not poisoned: a later, compatible plugin still loads.
-  engine.load_source("ok", "spotatui.require_api(1)").unwrap();
+  engine.load_source("ok", "qbal.require_api(1)").unwrap();
 }
 
 #[test]
 fn require_api_rejects_non_positive_version() {
   let mut engine = ScriptEngine::new().unwrap();
-  assert!(engine
-    .load_source("test", "spotatui.require_api(0)")
-    .is_err());
+  assert!(engine.load_source("test", "qbal.require_api(0)").is_err());
 }
 
 // --- action functions queue the right effect ---
@@ -214,30 +210,30 @@ fn run_action(src: &str) -> Action {
 
 #[test]
 fn action_play_queues_play() {
-  assert!(matches!(run_action("spotatui.play()"), Action::Play));
+  assert!(matches!(run_action("qbal.play()"), Action::Play));
 }
 
 #[test]
 fn action_pause_queues_pause() {
-  assert!(matches!(run_action("spotatui.pause()"), Action::Pause));
+  assert!(matches!(run_action("qbal.pause()"), Action::Pause));
 }
 
 #[test]
 fn action_next_queues_next() {
-  assert!(matches!(run_action("spotatui.next()"), Action::NextTrack));
+  assert!(matches!(run_action("qbal.next()"), Action::NextTrack));
 }
 
 #[test]
 fn action_previous_queues_previous() {
   assert!(matches!(
-    run_action("spotatui.previous()"),
+    run_action("qbal.previous()"),
     Action::PreviousTrack
   ));
 }
 
 #[test]
 fn action_seek_queues_seek() {
-  match run_action("spotatui.seek(12345)") {
+  match run_action("qbal.seek(12345)") {
     Action::SeekTo(ms) => assert_eq!(ms, 12345),
     other => panic!("unexpected effect: {:?}", std::mem::discriminant(&other)),
   }
@@ -245,11 +241,11 @@ fn action_seek_queues_seek() {
 
 #[test]
 fn action_set_volume_clamps_above_100() {
-  match run_action("spotatui.set_volume(250)") {
+  match run_action("qbal.set_volume(250)") {
     Action::SetVolume(v) => assert_eq!(v, 100),
     other => panic!("unexpected effect: {:?}", std::mem::discriminant(&other)),
   }
-  match run_action("spotatui.set_volume(-10)") {
+  match run_action("qbal.set_volume(-10)") {
     Action::SetVolume(v) => assert_eq!(v, 0),
     other => panic!("unexpected effect: {:?}", std::mem::discriminant(&other)),
   }
@@ -257,11 +253,11 @@ fn action_set_volume_clamps_above_100() {
 
 #[test]
 fn action_shuffle_queues_set_shuffle() {
-  match run_action("spotatui.shuffle(true)") {
+  match run_action("qbal.shuffle(true)") {
     Action::SetShuffle(on) => assert!(on),
     other => panic!("unexpected effect: {:?}", std::mem::discriminant(&other)),
   }
-  match run_action("spotatui.shuffle(false)") {
+  match run_action("qbal.shuffle(false)") {
     Action::SetShuffle(on) => assert!(!on),
     other => panic!("unexpected effect: {:?}", std::mem::discriminant(&other)),
   }
@@ -269,7 +265,7 @@ fn action_shuffle_queues_set_shuffle() {
 
 #[test]
 fn action_notify_default_ttl_is_4() {
-  match run_action(r#"spotatui.notify("hi")"#) {
+  match run_action(r#"qbal.notify("hi")"#) {
     Action::Notify(m, ttl) => {
       assert_eq!(m, "hi");
       assert_eq!(ttl, 4);
@@ -308,10 +304,10 @@ mod http_tests {
       .load_source(
         "json",
         r#"
-          local decoded = spotatui.json_decode('{"name":"Song","nested":{"ok":true},"items":[1,2]}')
-          local encoded = spotatui.json_encode(decoded)
-          local again = spotatui.json_decode(encoded)
-          spotatui.notify(again.name .. ":" .. tostring(again.nested.ok) .. ":" .. tostring(again.items[2]), 1)
+          local decoded = qbal.json_decode('{"name":"Song","nested":{"ok":true},"items":[1,2]}')
+          local encoded = qbal.json_encode(decoded)
+          local again = qbal.json_decode(encoded)
+          qbal.notify(again.name .. ":" .. tostring(again.nested.ok) .. ":" .. tostring(again.items[2]), 1)
         "#,
       )
       .unwrap();
@@ -330,9 +326,9 @@ mod http_tests {
         "json",
         r#"
           local ok = pcall(function()
-            spotatui.json_decode("{")
+            qbal.json_decode("{")
           end)
-          spotatui.notify(tostring(ok), 1)
+          qbal.notify(tostring(ok), 1)
         "#,
       )
       .unwrap();
@@ -351,9 +347,9 @@ mod http_tests {
         "json",
         r#"
           local ok = pcall(function()
-            spotatui.json_encode(function() end)
+            qbal.json_encode(function() end)
           end)
-          spotatui.notify(tostring(ok), 1)
+          qbal.notify(tostring(ok), 1)
         "#,
       )
       .unwrap();
@@ -371,9 +367,9 @@ mod http_tests {
       .load_source(
         "json",
         r#"
-          local NULL = spotatui.json_decode("null")
-          local decoded = spotatui.json_decode('{"x":null}')
-          spotatui.notify(tostring(decoded.x == nil) .. ":" .. tostring(decoded.x == NULL), 1)
+          local NULL = qbal.json_decode("null")
+          local decoded = qbal.json_decode('{"x":null}')
+          qbal.notify(tostring(decoded.x == nil) .. ":" .. tostring(decoded.x == NULL), 1)
         "#,
       )
       .unwrap();
@@ -389,11 +385,11 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
+            qbal.http_get("{url}", function(resp, err)
               if err then
-                spotatui.notify(err, 1)
+                qbal.notify(err, 1)
               else
-                spotatui.notify(resp.body, 1)
+                qbal.notify(resp.body, 1)
               end
             end)
           "#
@@ -432,11 +428,11 @@ mod http_tests {
     let mut engine = ScriptEngine::new().unwrap();
     let source = format!(
       r#"
-        spotatui.http_get("http://{addr}/lyrics", function(resp, err)
+        qbal.http_get("http://{addr}/lyrics", function(resp, err)
           if err then
-            spotatui.notify(err, 1)
+            qbal.notify(err, 1)
           else
-            spotatui.notify(tostring(resp.status) .. ":" .. resp.body, 1)
+            qbal.notify(tostring(resp.status) .. ":" .. resp.body, 1)
           end
         end)
       "#
@@ -463,11 +459,11 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_post("{url}", "body", nil, function(resp, err)
+            qbal.http_post("{url}", "body", nil, function(resp, err)
               if err then
-                spotatui.notify(err, 1)
+                qbal.notify(err, 1)
               else
-                spotatui.notify(tostring(resp.status) .. ":" .. resp.body, 1)
+                qbal.notify(tostring(resp.status) .. ":" .. resp.body, 1)
               end
             end)
           "#
@@ -489,11 +485,11 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
+            qbal.http_get("{url}", function(resp, err)
               if err then
-                spotatui.notify(err, 1)
+                qbal.notify(err, 1)
               else
-                spotatui.notify(resp.body, 1)
+                qbal.notify(resp.body, 1)
               end
             end)
           "#
@@ -515,8 +511,8 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
-              spotatui.notify(resp.body, 1)
+            qbal.http_get("{url}", function(resp, err)
+              qbal.notify(resp.body, 1)
             end)
           "#
       );
@@ -540,11 +536,11 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}a", function(resp, err)
-              spotatui.notify("a:" .. resp.body, 1)
+            qbal.http_get("{url}a", function(resp, err)
+              qbal.notify("a:" .. resp.body, 1)
             end)
-            spotatui.http_get("{url}b", function(resp, err)
-              spotatui.notify("b:" .. resp.body, 1)
+            qbal.http_get("{url}b", function(resp, err)
+              qbal.notify("b:" .. resp.body, 1)
             end)
           "#
       );
@@ -571,8 +567,8 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
-              spotatui.set_playbar(resp.body)
+            qbal.http_get("{url}", function(resp, err)
+              qbal.set_playbar(resp.body)
             end)
           "#
       );
@@ -596,7 +592,7 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
+            qbal.http_get("{url}", function(resp, err)
               error("callback boom")
             end)
           "#
@@ -617,7 +613,7 @@ mod http_tests {
       assert!(engine.shared.current_plugin.borrow().is_empty());
 
       engine
-        .load_source("healthy", r#"spotatui.notify("still alive", 1)"#)
+        .load_source("healthy", r#"qbal.notify("still alive", 1)"#)
         .unwrap();
       match one(engine) {
         Action::Notify(msg, 1) => assert_eq!(msg, "still alive"),
@@ -631,7 +627,7 @@ mod http_tests {
     let mut engine = ScriptEngine::new().unwrap();
     let result = engine.load_source(
       "fetcher",
-      r#"spotatui.http_get("ftp://example.com", function() end)"#,
+      r#"qbal.http_get("ftp://example.com", function() end)"#,
     );
     assert!(result.is_err());
     assert!(result
@@ -645,7 +641,7 @@ mod http_tests {
     let mut engine = ScriptEngine::new().unwrap();
     let result = engine.load_source(
       "fetcher",
-      r#"spotatui.http_get("https://example.com", function() end)"#,
+      r#"qbal.http_get("https://example.com", function() end)"#,
     );
     assert!(result.is_err());
     assert!(result
@@ -659,8 +655,8 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
-              spotatui.notify(tostring(resp.ok), 1)
+            qbal.http_get("{url}", function(resp, err)
+              qbal.notify(tostring(resp.ok), 1)
             end)
           "#
       );
@@ -681,8 +677,8 @@ mod http_tests {
     with_runtime_engine(|engine, url| {
       let source = format!(
         r#"
-            spotatui.http_get("{url}", function(resp, err)
-              spotatui.notify(tostring(resp.ok) .. ":" .. tostring(err == nil), 1)
+            qbal.http_get("{url}", function(resp, err)
+              qbal.notify(tostring(resp.ok) .. ":" .. tostring(err == nil), 1)
             end)
           "#
       );
@@ -712,7 +708,7 @@ fn register_command_happy_path() {
   engine
     .load_source(
       "myplugin",
-      r#"spotatui.register_command("hello", function() spotatui.notify("hi", 1) end)"#,
+      r#"qbal.register_command("hello", function() qbal.notify("hi", 1) end)"#,
     )
     .unwrap();
   assert!(drain(&engine).is_empty());
@@ -721,7 +717,7 @@ fn register_command_happy_path() {
 #[test]
 fn register_command_empty_name_is_error() {
   let mut engine = ScriptEngine::new().unwrap();
-  let result = engine.load_source("test", r#"spotatui.register_command("", function() end)"#);
+  let result = engine.load_source("test", r#"qbal.register_command("", function() end)"#);
   assert!(result.is_err());
 }
 
@@ -730,7 +726,7 @@ fn register_command_whitespace_name_is_error() {
   let mut engine = ScriptEngine::new().unwrap();
   let result = engine.load_source(
     "test",
-    r#"spotatui.register_command("bad name", function() end)"#,
+    r#"qbal.register_command("bad name", function() end)"#,
   );
   assert!(result.is_err());
 }
@@ -739,9 +735,9 @@ fn register_command_whitespace_name_is_error() {
 fn register_command_duplicate_is_error() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("a", r#"spotatui.register_command("cmd", function() end)"#)
+    .load_source("a", r#"qbal.register_command("cmd", function() end)"#)
     .unwrap();
-  let result = engine.load_source("b", r#"spotatui.register_command("cmd", function() end)"#);
+  let result = engine.load_source("b", r#"qbal.register_command("cmd", function() end)"#);
   assert!(result.is_err());
 }
 
@@ -756,7 +752,7 @@ mod command_tests {}
 fn set_playbar_queues_segment_with_current_plugin() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("myplugin", r#"spotatui.set_playbar("hello world")"#)
+    .load_source("myplugin", r#"qbal.set_playbar("hello world")"#)
     .unwrap();
   match one(&engine) {
     Action::SetPlaybarSegment { plugin, text } => {
@@ -771,7 +767,7 @@ fn set_playbar_queues_segment_with_current_plugin() {
 fn set_playbar_nil_queues_clear() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("myplugin", r#"spotatui.set_playbar(nil)"#)
+    .load_source("myplugin", r#"qbal.set_playbar(nil)"#)
     .unwrap();
   match one(&engine) {
     Action::SetPlaybarSegment { plugin, text } => {
@@ -791,7 +787,7 @@ mod playbar_effect_tests {}
 fn popup_plain_string_lines_work() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("test", r#"spotatui.popup("My Title", "single line")"#)
+    .load_source("test", r#"qbal.popup("My Title", "single line")"#)
     .unwrap();
   match one(&engine) {
     Action::ShowPopup(p) => {
@@ -810,7 +806,7 @@ fn popup_plain_string_lines_work() {
 fn popup_array_of_strings() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source("test", r#"spotatui.popup("T", {"line 1", "line 2"})"#)
+    .load_source("test", r#"qbal.popup("T", {"line 1", "line 2"})"#)
     .unwrap();
   match one(&engine) {
     Action::ShowPopup(p) => {
@@ -828,7 +824,7 @@ fn popup_styled_table_lines() {
   engine
     .load_source(
       "test",
-      r#"spotatui.popup("T", {{ text = "bold red", fg = "Red", bold = true, italic = false }})"#,
+      r#"qbal.popup("T", {{ text = "bold red", fg = "Red", bold = true, italic = false }})"#,
     )
     .unwrap();
   match one(&engine) {
@@ -848,7 +844,7 @@ fn popup_bad_color_raises() {
   let mut engine = ScriptEngine::new().unwrap();
   let result = engine.load_source(
     "test",
-    r#"spotatui.popup("T", {{ text = "hi", fg = "NotAColor" }})"#,
+    r#"qbal.popup("T", {{ text = "hi", fg = "NotAColor" }})"#,
   );
   assert!(result.is_err(), "unknown named colors should raise");
   assert!(
@@ -860,14 +856,14 @@ fn popup_bad_color_raises() {
 #[test]
 fn popup_missing_text_field_raises() {
   let mut engine = ScriptEngine::new().unwrap();
-  let result = engine.load_source("test", r#"spotatui.popup("T", {{ bold = true }})"#);
+  let result = engine.load_source("test", r#"qbal.popup("T", {{ bold = true }})"#);
   assert!(result.is_err(), "missing 'text' field should be an error");
 }
 
 #[test]
 fn popup_non_table_non_string_line_raises() {
   let mut engine = ScriptEngine::new().unwrap();
-  let result = engine.load_source("test", r#"spotatui.popup("T", {42})"#);
+  let result = engine.load_source("test", r#"qbal.popup("T", {42})"#);
   assert!(result.is_err(), "integer line should be an error");
 }
 
@@ -880,10 +876,7 @@ mod popup_effect_tests {}
 fn set_theme_valid_field_queues_effect() {
   let mut engine = ScriptEngine::new().unwrap();
   engine
-    .load_source(
-      "test",
-      r#"spotatui.set_theme({ playbar_text = "Magenta" })"#,
-    )
+    .load_source("test", r#"qbal.set_theme({ playbar_text = "Magenta" })"#)
     .unwrap();
   match one(&engine) {
     Action::SetTheme(pairs) => {
@@ -898,7 +891,7 @@ fn set_theme_valid_field_queues_effect() {
 #[test]
 fn set_theme_unknown_field_raises() {
   let mut engine = ScriptEngine::new().unwrap();
-  let result = engine.load_source("test", r#"spotatui.set_theme({ not_a_field = "Red" })"#);
+  let result = engine.load_source("test", r#"qbal.set_theme({ not_a_field = "Red" })"#);
   assert!(result.is_err(), "unknown theme field should raise");
 }
 
@@ -906,7 +899,7 @@ fn set_theme_unknown_field_raises() {
 fn set_theme_bad_color_raises() {
   let mut engine = ScriptEngine::new().unwrap();
   for color in ["NotAColor", "999, 999, 999", "1, 2, 3, 4"] {
-    let source = format!(r#"spotatui.set_theme({{ playbar_text = "{color}" }})"#);
+    let source = format!(r#"qbal.set_theme({{ playbar_text = "{color}" }})"#);
     let result = engine.load_source("test", &source);
     assert!(result.is_err(), "invalid color {color:?} should raise");
     assert!(
@@ -970,7 +963,7 @@ fn diff_seek_forward_beyond_threshold() {
 
 #[test]
 fn diff_small_forward_jump_is_not_seek() {
-  // 3s forward jump is within Connect polling tolerance.
+  // A 3s forward jump is within the polling tolerance.
   let old = Some(playback(Some(track("uri:1", "A")), true, 1_000));
   let new = Some(playback(Some(track("uri:1", "A")), true, 4_000));
   let q = Some(vec![]);
@@ -1012,7 +1005,7 @@ mod action_tests {
       ("track", RepeatSetting::Track),
       ("context", RepeatSetting::Context),
     ] {
-      match run_action(&format!(r#"spotatui.set_repeat("{mode}")"#)) {
+      match run_action(&format!(r#"qbal.set_repeat("{mode}")"#)) {
         Action::SetRepeat(setting) => assert_eq!(setting, expected),
         _ => panic!("expected SetRepeat for mode '{mode}'"),
       }
@@ -1023,21 +1016,21 @@ mod action_tests {
   fn set_repeat_invalid_mode_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
-      .load_source("test", r#"spotatui.set_repeat("all")"#)
+      .load_source("test", r#"qbal.set_repeat("all")"#)
       .is_err());
   }
 
   #[test]
   fn cycle_repeat_queues_cycle_effect() {
     assert!(matches!(
-      run_action("spotatui.cycle_repeat()"),
+      run_action("qbal.cycle_repeat()"),
       Action::CycleRepeat
     ));
   }
 
   #[test]
   fn play_uri_track_uses_uri_list() {
-    match run_action(r#"spotatui.play_uri("qobuz:track:abc123")"#) {
+    match run_action(r#"qbal.play_uri("qobuz:track:abc123")"#) {
       Action::PlayUris { uris, offset: None } => {
         assert_eq!(uris, vec!["qobuz:track:abc123".to_string()]);
       }
@@ -1049,48 +1042,41 @@ mod action_tests {
   fn play_uri_garbage_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
-      .load_source("test", r#"spotatui.play_uri("not-a-uri")"#)
+      .load_source("test", r#"qbal.play_uri("not-a-uri")"#)
       .is_err());
   }
 
   #[test]
-  fn play_context_rejects_track_uri() {
+  fn search_with_a_blank_query_raises() {
     let mut engine = ScriptEngine::new().unwrap();
-    assert!(engine
-      .load_source("test", r#"spotatui.play_context("spotify:track:t1")"#)
-      .is_err());
+    assert!(engine.load_source("test", r#"qbal.search("  ")"#).is_err());
   }
 
   #[test]
-  fn create_playlist_empty_name_raises() {
+  fn search_with_a_query_is_accepted() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
-      .load_source("test", r#"spotatui.create_playlist("  ")"#)
-      .is_err());
+      .load_source("test", r#"qbal.search(" joni ")"#)
+      .is_ok());
   }
 
   #[test]
-  fn empty_string_argument_raises() {
+  fn play_uri_with_an_empty_string_raises() {
     let mut engine = ScriptEngine::new().unwrap();
-    assert!(engine
-      .load_source("test", r#"spotatui.add_to_queue("")"#)
-      .is_err());
+    assert!(engine.load_source("test", r#"qbal.play_uri("")"#).is_err());
   }
 }
 
-// --- async data reads (spotatui.get_*) ---
+// --- async data reads (qbal.get_*) ---
 
 #[cfg(test)]
 mod data_read_tests {
   use super::*;
 
   #[test]
-  fn get_search_results_empty_query_raises() {
+  fn navigating_to_a_removed_screen_raises() {
     let mut engine = ScriptEngine::new().unwrap();
-    let result = engine.load_source(
-      "searcher",
-      r#"spotatui.get_search_results("", function() end)"#,
-    );
+    let result = engine.load_source("navigator", r#"qbal.navigate("devices")"#);
     assert!(result.is_err());
   }
 }
@@ -1108,7 +1094,7 @@ mod timer_tests {
     engine
       .load_source(
         "timer",
-        r#"spotatui.set_timeout(100, function() spotatui.notify("fired", 1) end)"#,
+        r#"qbal.set_timeout(100, function() qbal.notify("fired", 1) end)"#,
       )
       .unwrap();
 
@@ -1133,7 +1119,7 @@ mod timer_tests {
     engine
       .load_source(
         "timer",
-        r#"spotatui.set_interval(100, function() spotatui.notify("tick", 1) end)"#,
+        r#"qbal.set_interval(100, function() qbal.notify("tick", 1) end)"#,
       )
       .unwrap();
 
@@ -1157,8 +1143,8 @@ mod timer_tests {
       .load_source(
         "timer",
         r#"
-          local h = spotatui.set_timeout(100, function() spotatui.notify("nope", 1) end)
-          spotatui.cancel_timer(h)
+          local h = qbal.set_timeout(100, function() qbal.notify("nope", 1) end)
+          qbal.cancel_timer(h)
         "#,
       )
       .unwrap();
@@ -1175,7 +1161,7 @@ mod timer_tests {
     engine
       .load_source(
         "bad_timer",
-        r#"spotatui.set_interval(100, function() error("interval boom") end)"#,
+        r#"qbal.set_interval(100, function() error("interval boom") end)"#,
       )
       .unwrap();
 
@@ -1202,8 +1188,8 @@ mod timer_tests {
       .load_source(
         "timer",
         r#"
-          spotatui.on("start", function()
-            spotatui.set_timeout(50, function() spotatui.notify("deferred", 1) end)
+          qbal.on("start", function()
+            qbal.set_timeout(50, function() qbal.notify("deferred", 1) end)
           end)
         "#,
       )
@@ -1228,8 +1214,8 @@ mod timer_tests {
       .load_source(
         "timer",
         r#"
-          spotatui.set_timeout(10, function()
-            spotatui.set_timeout(10, function() spotatui.notify("nested", 1) end)
+          qbal.set_timeout(10, function()
+            qbal.set_timeout(10, function() qbal.notify("nested", 1) end)
           end)
         "#,
       )
@@ -1253,10 +1239,10 @@ mod timer_tests {
   fn negative_ms_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
-      .load_source("timer", r#"spotatui.set_timeout(-5, function() end)"#)
+      .load_source("timer", r#"qbal.set_timeout(-5, function() end)"#)
       .is_err());
     assert!(engine
-      .load_source("timer", r#"spotatui.set_interval(0, function() end)"#)
+      .load_source("timer", r#"qbal.set_interval(0, function() end)"#)
       .is_err());
   }
 }
@@ -1273,7 +1259,7 @@ fn plugin_id_strips_lua_suffix_and_sanitizes() {
   assert_eq!(plugin_id("под.lua"), "___");
 }
 
-// --- directory plugin loading (spotatui plugin add) ---
+// --- directory plugin loading (qbal plugin add) ---
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1283,7 +1269,7 @@ static TMP_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Fresh, unique temp directory to act as a config dir.
 fn temp_config_dir() -> PathBuf {
   let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-  let dir = std::env::temp_dir().join(format!("spotatui_lua_load_{}_{}", std::process::id(), n));
+  let dir = std::env::temp_dir().join(format!("qbal_lua_load_{}_{}", std::process::id(), n));
   let _ = std::fs::remove_dir_all(&dir);
   std::fs::create_dir_all(&dir).unwrap();
   dir
@@ -1307,7 +1293,7 @@ fn dir_plugin_main_lua_is_loaded() {
   let cfg = temp_config_dir();
   write_file(
     &cfg.join("plugins").join("foo").join("main.lua"),
-    r#"spotatui.notify("loaded foo", 1)"#,
+    r#"qbal.notify("loaded foo", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1323,7 +1309,7 @@ fn dir_plugin_init_lua_is_used_as_fallback() {
   let cfg = temp_config_dir();
   write_file(
     &cfg.join("plugins").join("bar").join("init.lua"),
-    r#"spotatui.notify("loaded bar", 1)"#,
+    r#"qbal.notify("loaded bar", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1341,7 +1327,7 @@ fn dir_plugin_without_entry_point_is_skipped() {
   std::fs::create_dir_all(cfg.join("plugins").join("empty")).unwrap();
   write_file(
     &cfg.join("plugins").join(".hidden").join("main.lua"),
-    r#"spotatui.notify("should not load", 1)"#,
+    r#"qbal.notify("should not load", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1364,7 +1350,7 @@ fn dir_plugin_can_require_sibling_module() {
     &plugin.join("main.lua"),
     r#"
       local helper = require("helper")
-      spotatui.notify(helper.msg, 1)
+      qbal.notify(helper.msg, 1)
     "#,
   );
 
@@ -1382,11 +1368,11 @@ fn single_file_and_directory_plugins_both_load() {
   let cfg = temp_config_dir();
   write_file(
     &cfg.join("plugins").join("flat.lua"),
-    r#"spotatui.notify("flat", 1)"#,
+    r#"qbal.notify("flat", 1)"#,
   );
   write_file(
     &cfg.join("plugins").join("nested").join("main.lua"),
-    r#"spotatui.notify("nested", 1)"#,
+    r#"qbal.notify("nested", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1403,7 +1389,7 @@ fn directory_named_with_lua_extension_loads_once_without_error() {
   let cfg = temp_config_dir();
   write_file(
     &cfg.join("plugins").join("weird.lua").join("main.lua"),
-    r#"spotatui.notify("weird ok", 1)"#,
+    r#"qbal.notify("weird ok", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1422,11 +1408,11 @@ fn directory_named_with_lua_extension_loads_once_without_error() {
 
 #[test]
 fn hidden_single_file_plugin_is_skipped() {
-  // Hidden files (e.g. macOS `._foo.lua` cruft) must be ignored, matching the directory branch.
+  // Hidden files (e.g. `._foo.lua` cruft copied from a Mac) must be ignored, matching the directory branch.
   let cfg = temp_config_dir();
   write_file(
     &cfg.join("plugins").join(".secret.lua"),
-    r#"spotatui.notify("should not load", 1)"#,
+    r#"qbal.notify("should not load", 1)"#,
   );
 
   let mut engine = ScriptEngine::new().unwrap();
@@ -1458,9 +1444,9 @@ mod storage_tests {
       .load_source(
         "a.lua",
         r#"
-          spotatui.storage_set("count", 42)
-          spotatui.storage_set("nested", { x = 1, tags = {"a", "b"} })
-          spotatui.notify(spotatui.storage_get("count") .. ":" .. spotatui.storage_get("nested").tags[2], 1)
+          qbal.storage_set("count", 42)
+          qbal.storage_set("nested", { x = 1, tags = {"a", "b"} })
+          qbal.notify(qbal.storage_get("count") .. ":" .. qbal.storage_get("nested").tags[2], 1)
         "#,
       )
       .unwrap();
@@ -1477,7 +1463,7 @@ mod storage_tests {
     {
       let mut engine = engine_with_dir(&cfg);
       engine
-        .load_source("a.lua", r#"spotatui.storage_set("song", "Nightcall")"#)
+        .load_source("a.lua", r#"qbal.storage_set("song", "Nightcall")"#)
         .unwrap();
       engine.flush_storage(true);
     }
@@ -1490,7 +1476,7 @@ mod storage_tests {
     engine
       .load_source(
         "a.lua",
-        r#"spotatui.notify(spotatui.storage_get("song") or "missing", 1)"#,
+        r#"qbal.notify(qbal.storage_get("song") or "missing", 1)"#,
       )
       .unwrap();
     match one(&engine) {
@@ -1508,9 +1494,9 @@ mod storage_tests {
       .load_source(
         "a.lua",
         r#"
-          spotatui.storage_set("gone", "soon")
-          spotatui.storage_set("gone", nil)
-          spotatui.notify(tostring(spotatui.storage_get("gone")) .. ":" .. #spotatui.storage_keys(), 1)
+          qbal.storage_set("gone", "soon")
+          qbal.storage_set("gone", nil)
+          qbal.notify(tostring(qbal.storage_get("gone")) .. ":" .. #qbal.storage_keys(), 1)
         "#,
       )
       .unwrap();
@@ -1529,11 +1515,11 @@ mod storage_tests {
       .load_source(
         "a.lua",
         r#"
-          spotatui.storage_set("one", 1)
-          spotatui.storage_set("two", 2)
-          spotatui.storage_remove("one")
-          local keys = spotatui.storage_keys()
-          spotatui.notify(#keys .. ":" .. keys[1], 1)
+          qbal.storage_set("one", 1)
+          qbal.storage_set("two", 2)
+          qbal.storage_remove("one")
+          local keys = qbal.storage_keys()
+          qbal.notify(#keys .. ":" .. keys[1], 1)
         "#,
       )
       .unwrap();
@@ -1548,7 +1534,7 @@ mod storage_tests {
   fn storage_set_function_value_raises() {
     let cfg = temp_config_dir();
     let mut engine = engine_with_dir(&cfg);
-    let result = engine.load_source("a.lua", r#"spotatui.storage_set("f", function() end)"#);
+    let result = engine.load_source("a.lua", r#"qbal.storage_set("f", function() end)"#);
     assert!(result.is_err(), "functions must not be storable");
     std::fs::remove_dir_all(&cfg).unwrap();
   }
@@ -1559,10 +1545,10 @@ mod storage_tests {
     {
       let mut engine = engine_with_dir(&cfg);
       engine
-        .load_source("a.lua", r#"spotatui.storage_set("who", "plugin a")"#)
+        .load_source("a.lua", r#"qbal.storage_set("who", "plugin a")"#)
         .unwrap();
       engine
-        .load_source("b", r#"spotatui.storage_set("who", "plugin b")"#)
+        .load_source("b", r#"qbal.storage_set("who", "plugin b")"#)
         .unwrap();
       engine.flush_storage(true);
     }
@@ -1572,7 +1558,7 @@ mod storage_tests {
 
     let mut engine = engine_with_dir(&cfg);
     engine
-      .load_source("b", r#"spotatui.notify(spotatui.storage_get("who"), 1)"#)
+      .load_source("b", r#"qbal.notify(qbal.storage_get("who"), 1)"#)
       .unwrap();
     match one(&engine) {
       Action::Notify(msg, 1) => assert_eq!(msg, "plugin b"),
@@ -1590,7 +1576,7 @@ mod storage_tests {
     engine
       .load_source(
         "a.lua",
-        r#"spotatui.notify(tostring(spotatui.storage_get("anything")), 1)"#,
+        r#"qbal.notify(tostring(qbal.storage_get("anything")), 1)"#,
       )
       .unwrap();
     match one(&engine) {
@@ -1606,7 +1592,7 @@ mod storage_tests {
     // a chunk with an empty plugin name.
     let cfg = temp_config_dir();
     let mut engine = engine_with_dir(&cfg);
-    let result = engine.load_source("", r#"spotatui.storage_get("x")"#);
+    let result = engine.load_source("", r#"qbal.storage_get("x")"#);
     assert!(result.is_err());
     std::fs::remove_dir_all(&cfg).unwrap();
   }
@@ -1693,7 +1679,7 @@ mod state_event_tests {
   fn navigate_unknown_target_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine
-      .load_source("nav", r#"spotatui.navigate("narnia")"#)
+      .load_source("nav", r#"qbal.navigate("narnia")"#)
       .is_err());
   }
 }
@@ -1706,13 +1692,13 @@ mod screen_tests {
   use crate::core::app::{ActiveBlock, RouteId};
 
   const STATS_SCREEN: &str = r#"
-    spotatui.register_screen("stats", {
+    qbal.register_screen("stats", {
       title = "Stats",
       on_key = function(key)
-        spotatui.notify("key: " .. key, 1)
+        qbal.notify("key: " .. key, 1)
       end,
-      on_open = function() spotatui.notify("opened", 1) end,
-      on_close = function() spotatui.notify("closed", 1) end,
+      on_open = function() qbal.notify("opened", 1) end,
+      on_close = function() qbal.notify("closed", 1) end,
     })
   "#;
 
@@ -1723,13 +1709,13 @@ mod screen_tests {
     assert!(engine
       .load_source(
         "stats.lua",
-        r#"spotatui.set_screen("stats", {{ type = "table" }})"#
+        r#"qbal.set_screen("stats", {{ type = "table" }})"#
       )
       .is_err());
     assert!(engine
       .load_source(
         "stats.lua",
-        r#"spotatui.set_screen("stats", {{ type = "list", items = {"x"}, selected = 0 }})"#
+        r#"qbal.set_screen("stats", {{ type = "list", items = {"x"}, selected = 0 }})"#
       )
       .is_err());
   }
@@ -1741,7 +1727,7 @@ mod screen_tests {
     engine
       .load_source(
         "stats.lua",
-        &format!(r#"spotatui.set_screen("stats", {widgets})"#),
+        &format!(r#"qbal.set_screen("stats", {widgets})"#),
       )
       .expect_err("expected set_screen to fail")
       .to_string()
@@ -1795,12 +1781,12 @@ mod screen_tests {
 
     // Not registered at all.
     assert!(engine
-      .load_source("stats.lua", r#"spotatui.set_screen("nope", {})"#)
+      .load_source("stats.lua", r#"qbal.set_screen("nope", {})"#)
       .is_err());
 
     // Registered, but owned by another plugin.
     let err = engine
-      .load_source("intruder.lua", r#"spotatui.show_screen("stats")"#)
+      .load_source("intruder.lua", r#"qbal.show_screen("stats")"#)
       .unwrap_err()
       .to_string();
     assert!(err.contains("belongs to plugin"), "got: {err}");
@@ -1813,7 +1799,7 @@ mod screen_tests {
     assert!(engine
       .load_source(
         "other.lua",
-        r#"spotatui.register_screen("stats", { on_key = function() end })"#
+        r#"qbal.register_screen("stats", { on_key = function() end })"#
       )
       .is_err());
   }
@@ -1824,7 +1810,7 @@ mod screen_tests {
     assert!(engine
       .load_source(
         "stats.lua",
-        r#"spotatui.register_screen("stats", { title = "T" })"#
+        r#"qbal.register_screen("stats", { title = "T" })"#
       )
       .is_err());
   }

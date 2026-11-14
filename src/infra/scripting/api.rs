@@ -16,7 +16,7 @@ use super::shared::{
   DATA_CALLBACKS_KEY, HANDLERS_KEY, HTTP_CALLBACKS_KEY, SCREENS_KEY, TIMER_CALLBACKS_KEY,
 };
 
-/// Build the `spotatui` global table and its functions.
+/// Build the `qbal` global table and its functions.
 pub(super) fn install_api(
   lua: &Lua,
   shared: &Rc<ScriptShared>,
@@ -28,18 +28,18 @@ pub(super) fn install_api(
 
   tbl.set("api_version", plugin_api::API_VERSION)?;
 
-  // spotatui.require_api(n): assert this build is new enough for the plugin.
+  // qbal.require_api(n): assert this build is new enough for the plugin.
   {
     let require_api = lua.create_function(move |_, n: i64| {
       if n < 1 {
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.require_api: version must be a positive integer, got {n}"
+          "qbal.require_api: version must be a positive integer, got {n}"
         )));
       }
       let n = n as u32;
       if n > plugin_api::API_VERSION {
         return Err(mlua::Error::RuntimeError(format!(
-          "requires spotatui scripting API v{n} (this build provides v{}); update spotatui to use this plugin",
+          "requires qbal scripting API v{n} (this build provides v{}); update qbal to use this plugin",
           plugin_api::API_VERSION
         )));
       }
@@ -48,14 +48,14 @@ pub(super) fn install_api(
     tbl.set("require_api", require_api)?;
   }
 
-  // spotatui.on(event, fn)
+  // qbal.on(event, fn)
   {
     let lua_inner = lua.clone();
     let shared = shared.clone();
     let on = lua.create_function(move |_, (event, callback): (String, mlua::Function)| {
       if !VALID_EVENT_NAMES.contains(&event.as_str()) {
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.on: unknown event '{event}'; valid events: {}",
+          "qbal.on: unknown event '{event}'; valid events: {}",
           VALID_EVENT_NAMES.join(", ")
         )));
       }
@@ -77,7 +77,7 @@ pub(super) fn install_api(
     tbl.set("on", on)?;
   }
 
-  // Reads: spotatui.playback() / current_track() / devices()
+  // Reads: qbal.playback() / current_track() / devices()
   {
     let shared_pb = shared.clone();
     let playback = lua.create_function(move |lua, ()| {
@@ -142,8 +142,20 @@ pub(super) fn install_api(
   }
 
   {
-    let _shared = shared.clone();
-    let search = lua.create_function(move |_, _query: String| Ok(()))?;
+    let shared = shared.clone();
+    let search = lua.create_function(move |_, query: String| {
+      let query = query.trim();
+      if query.is_empty() {
+        return Err(mlua::Error::RuntimeError(
+          "qbal.search: the query is empty".to_string(),
+        ));
+      }
+      shared
+        .effects
+        .borrow_mut()
+        .push(Action::SearchActiveSource(query.to_string()));
+      Ok(())
+    })?;
     tbl.set("search", search)?;
   }
 
@@ -189,9 +201,9 @@ pub(super) fn install_api(
     let client = http_client.clone();
     let handle = rt_handle.clone();
     let http_get = lua.create_function(move |_, (url, callback): (String, mlua::Function)| {
-      validate_http_url("spotatui.http_get", &url)?;
+      validate_http_url("qbal.http_get", &url)?;
       let handle = handle.clone().ok_or_else(|| {
-        mlua::Error::RuntimeError("spotatui.http_get: no tokio runtime available".to_string())
+        mlua::Error::RuntimeError("qbal.http_get: no tokio runtime available".to_string())
       })?;
       let token = register_http_callback(&lua_inner, &shared, callback)?;
       let client = client.clone();
@@ -219,9 +231,9 @@ pub(super) fn install_api(
         Option<mlua::Table>,
         mlua::Function,
       )| {
-        validate_http_url("spotatui.http_post", &url)?;
+        validate_http_url("qbal.http_post", &url)?;
         let handle = handle.clone().ok_or_else(|| {
-          mlua::Error::RuntimeError("spotatui.http_post: no tokio runtime available".to_string())
+          mlua::Error::RuntimeError("qbal.http_post: no tokio runtime available".to_string())
         })?;
         let headers = collect_headers(headers)?;
         let token = register_http_callback(&lua_inner, &shared, callback)?;
@@ -237,7 +249,7 @@ pub(super) fn install_api(
     tbl.set("http_post", http_post)?;
   }
 
-  // spotatui.register_command(name, fn)
+  // qbal.register_command(name, fn)
   {
     let lua_inner = lua.clone();
     let shared = shared.clone();
@@ -245,14 +257,13 @@ pub(super) fn install_api(
       lua.create_function(move |_, (name, callback): (String, mlua::Function)| {
         if name.is_empty() || name.contains(char::is_whitespace) {
           return Err(mlua::Error::RuntimeError(
-            "spotatui.register_command: name must be a non-empty string without whitespace"
-              .to_string(),
+            "qbal.register_command: name must be a non-empty string without whitespace".to_string(),
           ));
         }
         let commands: mlua::Table = lua_inner.named_registry_value(COMMANDS_KEY)?;
         if commands.get::<Option<mlua::Table>>(name.clone())?.is_some() {
           return Err(mlua::Error::RuntimeError(format!(
-            "spotatui.register_command: command '{name}' is already registered"
+            "qbal.register_command: command '{name}' is already registered"
           )));
         }
         let entry = lua_inner.create_table()?;
@@ -264,7 +275,7 @@ pub(super) fn install_api(
     tbl.set("register_command", register_command)?;
   }
 
-  // spotatui.set_playbar(text_or_nil)
+  // qbal.set_playbar(text_or_nil)
   {
     let shared = shared.clone();
     let set_playbar = lua.create_function(move |_, text: Option<String>| {
@@ -278,7 +289,7 @@ pub(super) fn install_api(
     tbl.set("set_playbar", set_playbar)?;
   }
 
-  // spotatui.popup(title, lines)
+  // qbal.popup(title, lines)
   {
     let shared = shared.clone();
     let popup = lua.create_function(move |_, (title, lines_val): (String, mlua::Value)| {
@@ -292,7 +303,7 @@ pub(super) fn install_api(
     tbl.set("popup", popup)?;
   }
 
-  // spotatui.set_theme(tbl)
+  // qbal.set_theme(tbl)
   {
     let shared = shared.clone();
     let set_theme = lua.create_function(move |_, tbl: mlua::Table| {
@@ -301,12 +312,12 @@ pub(super) fn install_api(
         let (field, color_str) = pair?;
         let Some(theme_field) = ThemeField::from_name(&field) else {
           return Err(mlua::Error::RuntimeError(format!(
-            "spotatui.set_theme: unknown theme field '{field}'"
+            "qbal.set_theme: unknown theme field '{field}'"
           )));
         };
         let color = parse_theme_item(&color_str).map_err(|e| {
           mlua::Error::RuntimeError(format!(
-            "spotatui.set_theme: invalid color for field '{field}': {e}"
+            "qbal.set_theme: invalid color for field '{field}': {e}"
           ))
         })?;
         pairs.push((theme_field, color));
@@ -349,7 +360,7 @@ pub(super) fn install_api(
         "context" => RepeatSetting::Context,
         other => {
           return Err(mlua::Error::RuntimeError(format!(
-            "spotatui.set_repeat: expected \"off\", \"track\" or \"context\", got '{other}'"
+            "qbal.set_repeat: expected \"off\", \"track\" or \"context\", got '{other}'"
           )));
         }
       };
@@ -361,7 +372,7 @@ pub(super) fn install_api(
 
   install_action(lua, &tbl, shared, "cycle_repeat", || Action::CycleRepeat)?;
 
-  // spotatui.play_uri(uri): play one Qobuz track.
+  // qbal.play_uri(uri): play one Qobuz track.
   {
     let shared = shared.clone();
     let play_uri = lua.create_function(move |_, uri: String| {
@@ -372,7 +383,7 @@ pub(super) fn install_api(
         }
       } else {
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.play_uri: expected a qobuz:track uri, got '{uri}'"
+          "qbal.play_uri: expected a qobuz:track uri, got '{uri}'"
         )));
       };
       shared.effects.borrow_mut().push(action);
@@ -397,7 +408,7 @@ pub(super) fn install_api(
     tbl.set("cancel_timer", cancel_timer)?;
   }
 
-  // spotatui.config(): theme colors + safe behavior scalars (cached sync read).
+  // qbal.config(): theme colors + safe behavior scalars (cached sync read).
   {
     let shared = shared.clone();
     let config =
@@ -412,7 +423,7 @@ pub(super) fn install_api(
       let Some(nav_target) = NavTarget::from_name(&target) else {
         let valid: Vec<&str> = NavTarget::ALL.iter().map(|t| t.name()).collect();
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.navigate: unknown target '{target}'; valid targets: {}",
+          "qbal.navigate: unknown target '{target}'; valid targets: {}",
           valid.join(", ")
         )));
       };
@@ -441,14 +452,13 @@ pub(super) fn install_api(
     let register_screen = lua.create_function(move |_, (name, spec): (String, mlua::Table)| {
       if name.is_empty() || name.contains(char::is_whitespace) {
         return Err(mlua::Error::RuntimeError(
-          "spotatui.register_screen: name must be a non-empty string without whitespace"
-            .to_string(),
+          "qbal.register_screen: name must be a non-empty string without whitespace".to_string(),
         ));
       }
       let screens: mlua::Table = lua_inner.named_registry_value(SCREENS_KEY)?;
       if screens.get::<Option<mlua::Table>>(name.clone())?.is_some() {
         return Err(mlua::Error::RuntimeError(format!(
-          "spotatui.register_screen: screen '{name}' is already registered"
+          "qbal.register_screen: screen '{name}' is already registered"
         )));
       }
       let on_key: mlua::Function =
@@ -456,7 +466,7 @@ pub(super) fn install_api(
           .get::<Option<mlua::Function>>("on_key")?
           .ok_or_else(|| {
             mlua::Error::RuntimeError(
-              "spotatui.register_screen: spec must have an 'on_key' function".to_string(),
+              "qbal.register_screen: spec must have an 'on_key' function".to_string(),
             )
           })?;
       let entry = lua_inner.create_table()?;
@@ -482,7 +492,7 @@ pub(super) fn install_api(
     let lua_inner = lua.clone();
     let shared = shared.clone();
     let set_screen = lua.create_function(move |_, (name, widgets): (String, mlua::Table)| {
-      let title = verify_screen_owner(&lua_inner, &shared, "spotatui.set_screen", &name)?;
+      let title = verify_screen_owner(&lua_inner, &shared, "qbal.set_screen", &name)?;
       let widgets = parse_screen_widgets(widgets)?;
       shared.effects.borrow_mut().push(Action::SetScreenContent {
         name,
@@ -497,7 +507,7 @@ pub(super) fn install_api(
     let lua_inner = lua.clone();
     let shared = shared.clone();
     let show_screen = lua.create_function(move |_, name: String| {
-      verify_screen_owner(&lua_inner, &shared, "spotatui.show_screen", &name)?;
+      verify_screen_owner(&lua_inner, &shared, "qbal.show_screen", &name)?;
       shared.effects.borrow_mut().push(Action::ShowScreen(name));
       Ok(())
     })?;
@@ -508,7 +518,7 @@ pub(super) fn install_api(
     let lua_inner = lua.clone();
     let shared = shared.clone();
     let close_screen = lua.create_function(move |_, name: String| {
-      verify_screen_owner(&lua_inner, &shared, "spotatui.close_screen", &name)?;
+      verify_screen_owner(&lua_inner, &shared, "qbal.close_screen", &name)?;
       shared.effects.borrow_mut().push(Action::CloseScreen(name));
       Ok(())
     })?;
@@ -544,7 +554,7 @@ pub(super) fn install_api(
         // serde round-trip rejects functions/userdata with a clear error.
         let json: serde_json::Value = lua.from_value(value).map_err(|e| {
           mlua::Error::RuntimeError(format!(
-            "spotatui.storage_set: value must be JSON-serializable: {e}"
+            "qbal.storage_set: value must be JSON-serializable: {e}"
           ))
         })?;
         let mut storage = shared_set.storage.borrow_mut();
@@ -589,7 +599,7 @@ pub(super) fn install_api(
     tbl.set("storage_keys", storage_keys)?;
   }
 
-  lua.globals().set("spotatui", tbl)?;
+  lua.globals().set("qbal", tbl)?;
   Ok(())
 }
 
@@ -598,8 +608,7 @@ fn storage_namespace(shared: &Rc<ScriptShared>) -> mlua::Result<String> {
   let namespace = super::shared::plugin_id(&shared.current_plugin.borrow());
   if namespace.is_empty() {
     return Err(mlua::Error::RuntimeError(
-      "spotatui.storage_*: no plugin context (storage is only available from plugin code)"
-        .to_string(),
+      "qbal.storage_*: no plugin context (storage is only available from plugin code)".to_string(),
     ));
   }
   Ok(namespace)
@@ -640,7 +649,7 @@ fn ensure_storage_loaded(shared: &Rc<ScriptShared>, namespace: &str) {
     .insert(namespace.to_string(), loaded);
 }
 
-/// Install `spotatui.set_timeout(ms, fn)` / `set_interval(ms, fn)`, returning
+/// Install `qbal.set_timeout(ms, fn)` / `set_interval(ms, fn)`, returning
 /// an opaque handle for `cancel_timer`.
 fn install_timer(
   lua: &Lua,
@@ -654,12 +663,12 @@ fn install_timer(
   let f = lua.create_function(move |_, (ms, callback): (i64, mlua::Function)| {
     if ms < 0 {
       return Err(mlua::Error::RuntimeError(format!(
-        "spotatui.{name}: milliseconds must be non-negative, got {ms}"
+        "qbal.{name}: milliseconds must be non-negative, got {ms}"
       )));
     }
     if repeating && ms == 0 {
       return Err(mlua::Error::RuntimeError(format!(
-        "spotatui.{name}: interval must be at least 1 ms"
+        "qbal.{name}: interval must be at least 1 ms"
       )));
     }
     let token = register_callback(&lua_inner, &shared, TIMER_CALLBACKS_KEY, callback)?;
@@ -676,12 +685,12 @@ fn install_timer(
   Ok(())
 }
 
-/// True for Spotify container URIs playable as a context.
+/// True for a `qobuz:track:` URI.
 fn is_track_uri(uri: &str) -> bool {
   uri.starts_with("qobuz:track:")
 }
 
-/// Install an argument-less async data read: `spotatui.<name>(cb)` registers the
+/// Install an argument-less async data read: `qbal.<name>(cb)` registers the
 /// callback and queues a [`DataRequest`] for the engine's next intake pass.
 fn install_data_read(
   lua: &Lua,
@@ -727,9 +736,9 @@ pub(super) fn register_callback(
     .next_token
     .get()
     .checked_add(1)
-    .ok_or_else(|| mlua::Error::RuntimeError("spotatui: token overflow".to_string()))?;
+    .ok_or_else(|| mlua::Error::RuntimeError("qbal: token overflow".to_string()))?;
   let key = i64::try_from(token)
-    .map_err(|_| mlua::Error::RuntimeError("spotatui: token overflow".to_string()))?;
+    .map_err(|_| mlua::Error::RuntimeError("qbal: token overflow".to_string()))?;
   shared.next_token.set(token);
 
   let callbacks: mlua::Table = lua.named_registry_value(registry_key)?;
@@ -814,9 +823,9 @@ fn verify_screen_owner(
 }
 
 /// Name used in every `set_screen` parse error.
-const SET_SCREEN_FN: &str = "spotatui.set_screen";
+const SET_SCREEN_FN: &str = "qbal.set_screen";
 
-/// Maximum `row`/`column` nesting depth accepted by `spotatui.set_screen`.
+/// Maximum `row`/`column` nesting depth accepted by `qbal.set_screen`.
 const MAX_WIDGET_DEPTH: usize = 8;
 
 /// Maximum number of widget nodes in one screen's tree. The depth cap alone does
@@ -824,7 +833,7 @@ const MAX_WIDGET_DEPTH: usize = 8;
 /// budgeted too.
 const MAX_WIDGET_NODES: usize = 256;
 
-/// Parse the widget array for `spotatui.set_screen`.
+/// Parse the widget array for `qbal.set_screen`.
 ///
 /// Each item is a table with a `type` of "paragraph", "list", "gauge",
 /// "cover_art", "row" or "column"; `row`/`column` nest via `children`.
@@ -995,9 +1004,9 @@ fn parse_widget_length(
   }
 }
 
-/// Parse the `lines` argument for `spotatui.popup`.
+/// Parse the `lines` argument for `qbal.popup`.
 fn parse_popup_lines(val: mlua::Value) -> mlua::Result<Vec<PopupLine>> {
-  parse_styled_lines("spotatui.popup", val)
+  parse_styled_lines("qbal.popup", val)
 }
 
 /// Parse styled lines shared by popups and screen widgets.

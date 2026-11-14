@@ -35,13 +35,10 @@ impl App {
     }
   }
 
-  /// Set the decoded shuffle to an explicit value from an external media
-  /// controller (MPRIS), reordering the active source's queue. Returns whether a
-  /// queueable decoded source consumed it. A `false` return does **not** mean
-  /// "hand this to Spotify": the caller rejects the request and corrects the
-  /// client's property instead, because reaching this method at all means a
-  /// decoded source (radio, or the queue slot) owns playback and the Spotify
-  /// context is not what the user is listening to.
+  /// Set the shuffle to an explicit value from an external media controller
+  /// (MPRIS), reordering the playlist. Returns whether the Qobuz session
+  /// consumed it; on `false` (the queue slot plays) the caller rejects the
+  /// request and corrects the client's property.
   #[cfg(all(feature = "mpris", target_os = "linux"))]
   pub fn set_decoded_shuffle(&mut self, on: bool) -> bool {
     if !self.active_queueable_decoded_source() {
@@ -67,9 +64,8 @@ impl App {
   }
 
   pub fn shuffle(&mut self) {
-    // Decoded (non-Spotify) sources: toggle the player-global decoded shuffle and
-    // reorder the owning source's queue in place (the current track stays at the
-    // front, so playback continues uninterrupted).
+    // Toggle the player-global shuffle and reorder the playlist in place (the
+    // current track stays at the front, so playback continues uninterrupted).
     if self.active_queueable_decoded_source() {
       self.decoded_shuffle = !self.decoded_shuffle;
       self.apply_decoded_shuffle();
@@ -82,22 +78,16 @@ impl App {
       return;
     }
 
-    // A decoded source owns playback but has no queue to shuffle: internet radio
-    // is an endless stream, and the native queue slot plays an explicit list over
-    // a suspended context. Both hide the shuffle button and blank shuffle in the
-    // MPRIS snapshot, so the key must no-op to match. Falling through would flip
-    // shuffle on the user's real Spotify device for a source they are not
-    // listening to, invisibly: the playbar on screen is the decoded one, so
-    // nothing would reflect the change.
+    // The native queue slot plays an explicit list over a suspended playlist:
+    // it hides the shuffle button and blanks shuffle in the MPRIS snapshot, so
+    // the key reports that shuffle does not apply.
     if self.active_decoded_source() || self.queue_owns_playback() {
       self.set_status_message(self.strings().status.app.shuffle_unsupported, 2);
     }
   }
 
   pub fn repeat(&mut self) {
-    // Decoded (non-Spotify) sources have no `current_playback_context`; cycle the
-    // player-global decoded repeat instead, mirroring Spotify's
-    // Off -> Repeat All -> Repeat One -> Off.
+    // Cycle the player-global repeat: Off -> Repeat All -> Repeat One -> Off.
     if self.active_queueable_decoded_source() {
       self.decoded_repeat = self.decoded_repeat.next();
       let label = match self.decoded_repeat {
@@ -109,9 +99,7 @@ impl App {
       return;
     }
 
-    // See `shuffle`: radio and the queue slot have no repeat of their own, and
-    // falling through would cycle repeat on the user's real Spotify device with
-    // nothing on screen to show for it.
+    // See `shuffle`: the queue slot has no repeat of its own.
     if self.active_decoded_source() || self.queue_owns_playback() {
       self.set_status_message(self.strings().status.app.repeat_unsupported, 2);
     }

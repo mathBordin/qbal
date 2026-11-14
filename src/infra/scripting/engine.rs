@@ -54,6 +54,8 @@ pub struct ScriptEngine {
   /// Set when the Search generation advanced since the last tick diff
   /// (consumed by the `search_results` event).
   search_gen_advanced: bool,
+  /// Set after the first cache refresh, so the startup results fire no event.
+  search_seeded: bool,
   /// Data requests dispatched but not yet resolved.
   pending_data: Vec<PendingDataRequest>,
   /// Armed plugin timers, fired from the tick pass.
@@ -81,7 +83,7 @@ coroutine.resume = function(...) return pass(pack(resume(...))) end
 "#;
 
 impl ScriptEngine {
-  /// Build the Lua state and install the `spotatui` global table.
+  /// Build the Lua state and install the `qbal` global table.
   pub fn new() -> mlua::Result<Self> {
     let lua = Lua::new();
     let shared = Rc::new(ScriptShared::new());
@@ -101,12 +103,12 @@ impl ScriptEngine {
     };
     lua
       .load(PROTECTED_CALL_GUARD)
-      .set_name("spotatui")
+      .set_name("qbal")
       .call::<()>(expired)?;
     let (http_tx, http_rx) = unbounded_channel();
     let http_client = reqwest::Client::builder()
       .timeout(std::time::Duration::from_secs(30))
-      .user_agent(format!("spotatui/{}", env!("CARGO_PKG_VERSION")))
+      .user_agent(format!("qbal/{}", env!("CARGO_PKG_VERSION")))
       .build()
       .map_err(mlua::Error::external)?;
     let rt_handle = tokio::runtime::Handle::try_current().ok();
@@ -144,6 +146,7 @@ impl ScriptEngine {
       last_queue: None,
       last_route: String::new(),
       search_gen_advanced: false,
+      search_seeded: false,
       pending_data: Vec::new(),
       timers: Vec::new(),
       last_storage_flush: None,
@@ -569,7 +572,7 @@ impl ScriptEngine {
     self.sync_route_and_emit_change(app);
   }
 
-  /// Intake queued `spotatui.get_*` requests (capture generation + dispatch the
+  /// Intake queued `qbal.get_*` requests (capture generation + dispatch the
   /// matching IoEvent) and resolve pending ones whose generation advanced or
   /// whose deadline passed. Intake is atomic on the UI thread while holding
   /// `&mut App`, so no update can be lost between capture and dispatch.
@@ -766,7 +769,7 @@ impl ScriptEngine {
   }
 
   /// Write dirty storage namespaces to disk. Throttled unless `force` (quit).
-  /// Last writer wins across concurrent spotatui instances -- documented.
+  /// Last writer wins across concurrent qbal instances -- documented.
   pub(super) fn flush_storage(&mut self, force: bool) {
     if self.shared.storage_dirty.borrow().is_empty() {
       return;
@@ -859,22 +862,21 @@ impl ScriptEngine {
     }
   }
 
-  /// Refresh the caches backing the synchronous reads (`spotatui.playlists()`
-  /// etc.) when their data generation advanced since the last refresh.
+  /// Refresh the config snapshot backing `qbal.config()`.
   fn refresh_data_caches(&mut self, app: &App) {
-    let _refresh = |slot: &mut u64, kind: PluginDataKind| -> bool {
-      let current = app.plugin_data_generations.get(kind);
-      if *slot == current {
-        return false;
-      }
-      *slot = current;
-      true
-    };
-
-    // Config has no generation counter (theme/settings can change from many
-    // places); rebuilding the small snapshot each pass is cheap.
+    *self.shared.playlists_cache.borrow_mut() = plugin_api::playlists_snapshot(app);
+    *self.shared.queue_cache.borrow_mut() = plugin_api::queue_snapshot(app);
     *self.shared.config_cache.borrow_mut() =
       plugin_api::config_snapshot(&app.user_config, &app.runtime_state);
+    // The `search_results` event fires when new results land, but not for
+    // the results already there when the engine starts.
+    let search = plugin_api::search_results_snapshot(app);
+    let changed = *self.shared.search_results_cache.borrow() != search;
+    if changed {
+      self.search_gen_advanced = self.search_seeded;
+      *self.shared.search_results_cache.borrow_mut() = search;
+    }
+    self.search_seeded = true;
   }
 
   fn drain_http_callbacks(&mut self) {

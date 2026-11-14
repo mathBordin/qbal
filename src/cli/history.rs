@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 pub fn history_subcommand() -> Command {
   Command::new("history")
-    .about("Work with spotatui local listening history")
+    .about("Work with qbal local listening history")
     .subcommand_required(true)
     .subcommand(
       Command::new("recap")
@@ -21,7 +21,7 @@ pub fn history_subcommand() -> Command {
           Arg::new("output")
             .long("output")
             .short('o')
-            .default_value("spotatui-recap.html")
+            .default_value("qbal-recap.html")
             .value_name("PATH")
             .help("Path to write the HTML recap file"),
         ),
