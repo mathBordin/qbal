@@ -67,8 +67,17 @@ pub struct ViewState {
   pub library_selected: LibraryTarget,
   pub search_selected_tracks_index: Option<usize>,
   pub search_selected_albums_index: Option<usize>,
-  /// Whether the search screen lists songs or albums.
+  pub search_selected_artists_index: Option<usize>,
+  /// Which tab the search screen shows: songs, albums or artists.
   pub search_mode: SearchMode,
+  /// The artist page's tab. It follows the last of songs or albums chosen on
+  /// the search screen, so an artist opens in the mode being used.
+  pub artist_tab: crate::core::artist::ArtistTab,
+  /// The cursor on the artist page's popular tracks.
+  pub artist_track_index: usize,
+  /// The cursor on the artist page's discography rows (headings included,
+  /// which the cursor skips).
+  pub artist_release_row: usize,
   pub search_hovered_block: SearchResultBlock,
   pub search_selected_block: SearchResultBlock,
 
@@ -128,6 +137,9 @@ pub struct ViewState {
 
   pub search_tracks_scroll_offset: Cell<usize>,
   pub search_albums_scroll_offset: Cell<usize>,
+  pub search_artists_scroll_offset: Cell<usize>,
+  pub artist_tracks_scroll_offset: Cell<usize>,
+  pub artist_releases_scroll_offset: Cell<usize>,
   pub library_scroll_offset: Cell<usize>,
   pub playlist_scroll_offset: Cell<usize>,
   pub settings_scroll_offset: Cell<usize>,

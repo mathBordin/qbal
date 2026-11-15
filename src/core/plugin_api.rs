@@ -632,6 +632,7 @@ pub fn route_name(route: &crate::core::app::Route) -> String {
     RouteId::HelpMenu => "help",
     RouteId::Queue => "queue",
     RouteId::Stats => "stats",
+    RouteId::Artist => "artist",
     RouteId::PluginScreen(name) => return format!("plugin:{name}"),
   }
   .to_string()

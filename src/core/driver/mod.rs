@@ -613,6 +613,10 @@ impl Driver {
     // The output device only means something while qbal is the one playing,
     // and the probe reads nothing otherwise.
     self.hardware_probe.set_active(playing);
+    // The now playing panel's album details: fetched once per album.
+    if let Some(album_id) = app.playing_track().and_then(|t| t.album_id.clone()) {
+      app.request_album_details(&album_id);
+    }
     app.set_hardware_output(playing.then(|| self.hardware_probe.latest()).flatten());
 
     #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]

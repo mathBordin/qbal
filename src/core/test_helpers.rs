@@ -24,6 +24,7 @@ pub fn describe_event(event: &crate::infra::network::IoEvent) -> String {
   match event {
     IoEvent::PlayQobuzAlbum(uri) => format!("play album {uri}"),
     IoEvent::GetQobuzTracks(uri) => format!("open {uri}"),
+    IoEvent::GetQobuzArtist(_, name) => format!("open artist {name}"),
     IoEvent::StartPlayback(_, Some(uris), offset) => {
       format!("play {} songs from {offset:?}", uris.len())
     }

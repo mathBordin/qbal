@@ -29,6 +29,10 @@ pub(crate) struct NowPlayingView {
   pub year: Option<String>,
   pub track_number: Option<String>,
   pub length: Option<String>,
+  /// How long the rest of the album plays, from here to its last track.
+  pub album_left: Option<String>,
+  pub label: Option<String>,
+  pub genre: Option<String>,
   pub liked: bool,
   pub explicit: bool,
   pub up_next: Vec<String>,
@@ -50,11 +54,37 @@ impl NowPlayingView {
       view.format = format;
       view.output = output.candidates_without_device();
     }
+    view.add_album_details(app, &snapshot);
     view.device = app
       .hardware_output()
       .map(|device| device.labels(&app.strings().screens.device_words()))
       .unwrap_or_default();
     Some(view)
+  }
+
+  /// The playing album's year, label, genre, the track's place in it and the
+  /// time left on it, once its details have arrived.
+  fn add_album_details(&mut self, app: &App, snapshot: &PlaybackSnapshot) {
+    let (Some(details), Some(track)) = (app.album_details(), app.playing_track()) else {
+      return;
+    };
+    if track.album_id.as_deref() != Some(details.album_id.as_str()) {
+      return;
+    }
+    self.year = details.year().map(str::to_string);
+    self.label = details.label.clone();
+    self.genre = details.genre.clone();
+    let Some(track_id) = track.id.as_deref() else {
+      return;
+    };
+    if let Some((position, total)) = details.position_of(track_id) {
+      self.track_number = Some(app.strings().screens.track_of(position, total));
+    }
+    let position_ms = u64::try_from(snapshot.progress_ms).unwrap_or(u64::MAX);
+    self.album_left = details
+      .remaining_ms(track_id, position_ms)
+      .filter(|&ms| ms > 0)
+      .map(|ms| millis_to_minutes(u128::from(ms)));
   }
 
   /// The pure half of [`Self::from_app`].
@@ -68,6 +98,9 @@ impl NowPlayingView {
       track_number: None,
       length: (metadata.duration_ms > 0)
         .then(|| millis_to_minutes(u128::from(metadata.duration_ms))),
+      album_left: None,
+      label: None,
+      genre: None,
       liked: false,
       explicit: false,
       up_next,
@@ -237,6 +270,9 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     strings.now_playing_year,
     strings.now_playing_track,
     strings.now_playing_length,
+    strings.now_playing_album_left,
+    strings.now_playing_label,
+    strings.now_playing_genre,
     strings.now_playing_format,
     strings.output,
     strings.now_playing_device,
@@ -256,6 +292,9 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     (strings.now_playing_year, view.year.clone()),
     (strings.now_playing_track, view.track_number.clone()),
     (strings.now_playing_length, view.length.clone()),
+    (strings.now_playing_album_left, view.album_left.clone()),
+    (strings.now_playing_label, view.label.clone()),
+    (strings.now_playing_genre, view.genre.clone()),
     (
       strings.now_playing_format,
       widest_or_shortest(&view.format, value_width),
@@ -350,6 +389,12 @@ mod tests {
     let view = NowPlayingView {
       title: "Digital Love".into(),
       artists: "Daft Punk".into(),
+      album: "Discovery".into(),
+      year: Some("2001".into()),
+      track_number: Some("3 of 14".into()),
+      album_left: Some("51:20".into()),
+      label: Some("Parlophone".into()),
+      genre: Some("Electronic".into()),
       format: vec![
         "FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 3104 kbps".into(),
         "FLAC 24/96 \u{b7} 3104 kbps".into(),
@@ -379,16 +424,25 @@ mod tests {
         .join("\n")
     };
     let wide = text(70);
+    for row in [
+      "Year        2001",
+      "Track       3 of 14",
+      "Album left  51:20",
+      "Label       Parlophone",
+      "Genre       Electronic",
+    ] {
+      assert!(wide.contains(row), "{row}: {wide}");
+    }
     assert!(
-      wide.contains("Format  FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 3104 kbps"),
+      wide.contains("Format      FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 3104 kbps"),
       "{wide}"
     );
     assert!(
-      wide.contains("Output  32-bit float \u{b7} 48 kHz \u{b7} 2 ch"),
+      wide.contains("Output      32-bit float \u{b7} 48 kHz \u{b7} 2 ch"),
       "{wide}"
     );
     assert!(
-      wide.contains("Device  Bluetooth: LDAC \u{b7} 96 kHz \u{b7} WH-1000XM4"),
+      wide.contains("Device      Bluetooth: LDAC \u{b7} 96 kHz \u{b7} WH-1000XM4"),
       "{wide}"
     );
     let narrow = text(38);

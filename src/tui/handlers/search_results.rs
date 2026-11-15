@@ -1,15 +1,16 @@
-//! The search screen: songs or albums from the Qobuz catalog, by search mode.
+//! The search screen: songs, albums or artists from the Qobuz catalog, one tab
+//! at a time.
 //!
 //! The list is either *hovered* (focus is on the screen, `search_selected_block`
 //! is `Empty`) or *selected* (a row cursor moves inside it). Enter selects the
-//! hovered list, then plays from the selected row: a song starts its list at
-//! that song, an album plays whole from its first track. Tab switches between
-//! songs and albums.
+//! hovered list, then acts on the selected row: a song starts its list at that
+//! song, an album plays whole from its first track, an artist opens the
+//! artist's page. Tab and Shift-Tab move between the tabs.
 
 use super::common_key_events;
 use crate::core::action::{Action, OpenTarget};
 use crate::core::app::{App, SearchMode, SearchResultBlock};
-use crate::core::plugin_api::{AlbumInfo, TrackInfo};
+use crate::core::plugin_api::{AlbumInfo, ArtistInfo, TrackInfo};
 use crate::tui::event::Key;
 
 fn songs(app: &App) -> &[TrackInfo] {
@@ -28,6 +29,14 @@ fn albums(app: &App) -> &[AlbumInfo] {
     .map_or(&[], |paged| paged.items.as_slice())
 }
 
+fn artists(app: &App) -> &[ArtistInfo] {
+  app
+    .search_results()
+    .artists
+    .as_ref()
+    .map_or(&[], |paged| paged.items.as_slice())
+}
+
 fn is_selected(app: &App) -> bool {
   app.view.search_selected_block == app.view.search_mode.block()
 }
@@ -37,6 +46,7 @@ fn cursor(app: &App) -> (usize, Option<usize>) {
   match app.view.search_mode {
     SearchMode::Songs => (songs(app).len(), app.view.search_selected_tracks_index),
     SearchMode::Albums => (albums(app).len(), app.view.search_selected_albums_index),
+    SearchMode::Artists => (artists(app).len(), app.view.search_selected_artists_index),
   }
 }
 
@@ -44,6 +54,7 @@ fn set_cursor(app: &mut App, index: usize) {
   match app.view.search_mode {
     SearchMode::Songs => app.view.search_selected_tracks_index = Some(index),
     SearchMode::Albums => app.view.search_selected_albums_index = Some(index),
+    SearchMode::Artists => app.view.search_selected_artists_index = Some(index),
   }
 }
 
@@ -56,13 +67,24 @@ fn move_cursor(app: &mut App, next: impl FnOnce(&[()], Option<usize>) -> usize) 
   set_cursor(app, next(&rows, index));
 }
 
-/// Play from the selected row: the songs list from that song, or the album whole.
+/// Act on the selected row: play the songs list from that song, play the
+/// album whole, or open the artist's page.
 fn play_selected(app: &mut App) {
   match app.view.search_mode {
     SearchMode::Songs => play_selected_song(app),
     SearchMode::Albums => {
       if let Some(uri) = selected_album_uri(app) {
         app.apply(Action::PlayAlbum { uri });
+      }
+    }
+    SearchMode::Artists => {
+      let artist = app
+        .view
+        .search_selected_artists_index
+        .and_then(|index| artists(app).get(index))
+        .and_then(|artist| Some((artist.uri.clone()?, artist.name.clone())));
+      if let Some((uri, name)) = artist {
+        app.apply(Action::Open(OpenTarget::Artist { uri, name }));
       }
     }
   }
@@ -117,7 +139,8 @@ pub fn handler(key: Key, app: &mut App) {
     Key::Esc => {
       app.view.search_selected_block = SearchResultBlock::Empty;
     }
-    Key::Tab => app.toggle_search_mode(),
+    Key::Tab => app.cycle_search_mode(true),
+    Key::BackTab => app.cycle_search_mode(false),
     k if common_key_events::down_event(k, &app.user_config.keys) && is_selected(app) => {
       move_cursor(app, common_key_events::on_down_press_handler);
     }
@@ -186,7 +209,12 @@ mod tests {
 
   fn app_with_songs(count: u32) -> App {
     let mut app = App::default();
-    app.show_source_search_results("q", (1..=count).map(track).collect(), Vec::new());
+    app.show_source_search_results(
+      "q",
+      (1..=count).map(track).collect(),
+      Vec::new(),
+      Vec::new(),
+    );
     app.set_current_route_state(
       Some(ActiveBlock::SearchResultBlock),
       Some(ActiveBlock::SearchResultBlock),
@@ -228,6 +256,15 @@ mod tests {
     assert_eq!(app.view.search_selected_tracks_index, Some(1));
   }
 
+  fn artist(n: u32) -> ArtistInfo {
+    ArtistInfo {
+      id: Some(n.to_string()),
+      uri: Some(format!("qobuz:artist:{n}")),
+      name: format!("Artist {n}"),
+      image_url: None,
+    }
+  }
+
   fn album(n: u32) -> AlbumInfo {
     AlbumInfo {
       id: Some(n.to_string()),
@@ -258,6 +295,7 @@ mod tests {
       "q",
       (1..=count).map(track).collect(),
       (1..=count).map(album).collect(),
+      (1..=count).map(artist).collect(),
     );
     app.set_current_route_state(
       Some(ActiveBlock::SearchResultBlock),
@@ -267,7 +305,7 @@ mod tests {
   }
 
   #[test]
-  fn tab_switches_between_songs_and_albums_and_leaves_the_list() {
+  fn tab_cycles_songs_albums_artists_and_leaves_the_list() {
     let (mut app, _rx) = app_with_results(3);
     handler(Key::Enter, &mut app);
     assert_eq!(app.view.search_mode, SearchMode::Songs);
@@ -282,7 +320,39 @@ mod tests {
     );
 
     handler(Key::Tab, &mut app);
+    assert_eq!(app.view.search_mode, SearchMode::Artists);
+    handler(Key::Tab, &mut app);
     assert_eq!(app.view.search_mode, SearchMode::Songs);
+    handler(Key::BackTab, &mut app);
+    assert_eq!(app.view.search_mode, SearchMode::Artists);
+  }
+
+  #[test]
+  fn songs_and_albums_set_the_mode_artist_pages_open_in() {
+    use crate::core::artist::ArtistTab;
+    let (mut app, _rx) = app_with_results(1);
+    handler(Key::Tab, &mut app);
+    assert_eq!(app.view.artist_tab, ArtistTab::Albums);
+    handler(Key::Tab, &mut app);
+    assert_eq!(
+      app.view.artist_tab,
+      ArtistTab::Albums,
+      "the artists tab keeps it"
+    );
+    handler(Key::Tab, &mut app);
+    assert_eq!(app.view.artist_tab, ArtistTab::TopTracks);
+  }
+
+  #[test]
+  fn enter_on_an_artist_opens_the_artist_page() {
+    use crate::core::app::RouteId;
+    let (mut app, rx) = app_with_results(2);
+    handler(Key::BackTab, &mut app);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    handler(Key::Enter, &mut app);
+    assert_eq!(next_event(&rx).as_deref(), Some("open artist Artist 2"));
+    assert_eq!(app.get_current_route().id, RouteId::Artist);
   }
 
   #[test]
@@ -362,7 +432,7 @@ mod tests {
     handler(Key::Tab, &mut app);
     handler(Key::Enter, &mut app);
     handler(Key::Down, &mut app);
-    app.show_source_search_results("again", vec![track(9)], vec![album(9)]);
+    app.show_source_search_results("again", vec![track(9)], vec![album(9)], Vec::new());
     assert_eq!(app.view.search_mode, SearchMode::Albums);
     assert_eq!(app.view.search_selected_albums_index, Some(0));
     assert_eq!(app.view.search_selected_block, SearchResultBlock::Empty);

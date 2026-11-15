@@ -105,6 +105,7 @@ pub fn content_active_block_for_route(route_id: &RouteId) -> Option<ActiveBlock>
   match route_id {
     RouteId::TrackTable => Some(ActiveBlock::TrackTable),
     RouteId::Stats => Some(ActiveBlock::Stats),
+    RouteId::Artist => Some(ActiveBlock::Artist),
     RouteId::Search => Some(ActiveBlock::SearchResultBlock),
     RouteId::Home => Some(ActiveBlock::Home),
     _ => None,
@@ -181,7 +182,7 @@ pub fn block_borders_playbar(block: ActiveBlock, config: &UserConfig) -> bool {
   match block {
     ActiveBlock::Library => playbar_on_top(config),
     ActiveBlock::MyPlaylists => !playbar_on_top(config),
-    ActiveBlock::Home | ActiveBlock::TrackTable | ActiveBlock::Stats => true,
+    ActiveBlock::Home | ActiveBlock::TrackTable | ActiveBlock::Stats | ActiveBlock::Artist => true,
     _ => false,
   }
 }

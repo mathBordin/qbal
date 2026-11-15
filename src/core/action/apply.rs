@@ -82,6 +82,7 @@ impl App {
       Action::ToggleSortOrder(context) => self.toggle_sort_order(context),
       Action::Open(target) => match target {
         super::OpenTarget::SourcePlaylist(uri) => self.open_source_playlist_tracks(uri),
+        super::OpenTarget::Artist { uri, name } => self.open_artist(uri, name),
       },
       Action::OpenLibrary(target) => self.open_library_section(target),
       Action::GenerateRecap => self.generate_recap(),

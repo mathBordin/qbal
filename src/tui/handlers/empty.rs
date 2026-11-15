@@ -41,7 +41,7 @@ pub fn handler(key: Key, app: &mut App) {
     }
     k if common_key_events::toward_sidebar_event(k, &app.user_config) => {
       match app.get_current_route().hovered_block {
-        ActiveBlock::Home | ActiveBlock::TrackTable | ActiveBlock::Stats => {
+        ActiveBlock::Home | ActiveBlock::TrackTable | ActiveBlock::Stats | ActiveBlock::Artist => {
           app.set_current_route_state(None, Some(app.view.last_sidebar_block.into()));
         }
         _ => {}

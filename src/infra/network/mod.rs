@@ -53,6 +53,12 @@ pub enum IoEvent {
   /// Play a whole Qobuz album from its first track, by its `qobuz:album:` URI;
   /// handled by `infra::qobuz::dispatch`.
   PlayQobuzAlbum(String),
+  /// Load an artist's page (`qobuz:artist:` URI, name) into `App`; handled by
+  /// `infra::qobuz::dispatch` on a detached task.
+  GetQobuzArtist(String, String),
+  /// Load the details of the playing album (its Qobuz id) for the now playing
+  /// panel; handled by `infra::qobuz::dispatch` on a detached task.
+  GetQobuzAlbumDetails(String),
   /// Start the in-TUI Qobuz browser login (handled by `infra::qobuz::dispatch`).
   QobuzLogin,
   /// Fetch and decode the current track's cover art (album-art URL, source

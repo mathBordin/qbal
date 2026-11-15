@@ -466,6 +466,13 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
     row(help.sort_open, Literal(","), help.context_sortable_lists),
     row(help.search_mode, Literal("<Tab>"), help.context_search).needs(SEARCH),
     row(help.album_open, Literal("o"), help.context_search_results).needs(SEARCH),
+    row(
+      help.go_to_album,
+      Binding(|k| k.go_to_album),
+      help.context_general,
+    ),
+    row(help.artist_tabs, Literal("<Tab>"), help.context_artist),
+    row(help.album_open, Literal("o"), help.context_artist),
     // Append new rows here so the pinned English table keeps its indices.
   ]
 }

@@ -136,6 +136,8 @@ pub struct SettingsStrings {
   pub keys_add_item_to_queue_name: &'static str,
   pub keys_add_item_to_queue_description: &'static str,
   pub keys_show_queue_name: &'static str,
+  pub keys_go_to_album_name: &'static str,
+  pub keys_go_to_album_description: &'static str,
   pub keys_show_queue_description: &'static str,
   pub keys_remove_from_queue_name: &'static str,
   pub keys_remove_from_queue_description: &'static str,
@@ -507,6 +509,10 @@ impl SettingsStrings {
         self.keys_add_item_to_queue_description,
       ),
       "keys.show_queue" => (self.keys_show_queue_name, self.keys_show_queue_description),
+      "keys.go_to_album" => (
+        self.keys_go_to_album_name,
+        self.keys_go_to_album_description,
+      ),
       "keys.remove_from_queue" => (
         self.keys_remove_from_queue_name,
         self.keys_remove_from_queue_description,

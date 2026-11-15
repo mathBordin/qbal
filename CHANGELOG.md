@@ -7,9 +7,19 @@ Releases before 0.1.0 are spotatui's; see its repository for that history.
 
 ### Added
 
-- **Album search**: `Tab` on the search screen switches between songs and
-  albums. `Enter` on an album plays it from the first track; `o` opens its
-  track list instead. One search fills both lists, so switching is instant.
+- **Search tabs: Songs, Albums, Artists**: `Tab` and `Shift-Tab` move between
+  them, and the tab row on the results shows which one is open. `Enter` plays a
+  song (and the songs after it), plays an album from its first track, or opens
+  an artist's page; `o` opens an album's track list instead of playing it. One
+  search fills all three tabs, so switching is instant.
+- **Artist pages**, with two tabs. **Top tracks** lists the artist's most
+  popular tracks. **Albums** lists the discography newest first, grouped as
+  albums, EPs & singles and other releases, with the best quality on offer
+  (`24/96`); duplicate editions are merged into the best one. A page opens on
+  the tab matching the search tab you used last (Songs or Albums).
+- **Album details in the now playing panel**: year, label, genre, the track's
+  place on the album (`3 of 14`) and the time left on the album.
+- **Go to album**: `a` (`go_to_album`) opens the playing track's album.
 - **Audio format in the playbar**: the track's codec, bit depth, sample rate
   and average bitrate (`FLAC · 24-bit · 96 kHz · 3104 kbps`) on the title row,
   shortened to fit narrow terminals.

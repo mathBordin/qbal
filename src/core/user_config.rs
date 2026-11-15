@@ -275,6 +275,7 @@ fn parse_key(key: String) -> Result<Key> {
     "space" => Ok(Key::Char(' ')),
     "enter" => Ok(Key::Enter),
     "tab" => Ok(Key::Tab),
+    "backtab" => Ok(Key::BackTab),
     "home" => Ok(Key::Home),
     "end" => Ok(Key::End),
     "ins" | "insert" => Ok(Key::Ins),
@@ -339,6 +340,7 @@ pub fn key_to_config_string(key: &Key) -> String {
     Key::Home => "home".to_string(),
     Key::End => "end".to_string(),
     Key::Tab => "tab".to_string(),
+    Key::BackTab => "backtab".to_string(),
     Key::Ins => "ins".to_string(),
     Key::F0 => "f0".to_string(),
     Key::F1 => "f1".to_string(),
@@ -421,6 +423,7 @@ pub struct KeyBindingsString {
   cover_art_view: Option<String>,
   add_item_to_queue: Option<String>,
   show_queue: Option<String>,
+  go_to_album: Option<String>,
   remove_from_queue: Option<String>,
   open_settings: Option<String>,
   save_settings: Option<String>,
@@ -471,6 +474,8 @@ pub struct KeyBindings {
   pub cover_art_view: Key,
   pub add_item_to_queue: Key,
   pub show_queue: Key,
+  /// Open the playing track's album in the track table.
+  pub go_to_album: Key,
   pub remove_from_queue: Key,
   pub open_settings: Key,
   pub save_settings: Key,
@@ -852,6 +857,7 @@ impl UserConfig {
         cover_art_view: Key::Char('G'),
         add_item_to_queue: Key::Char('z'),
         show_queue: Key::Char('Q'),
+        go_to_album: Key::Char('a'),
         remove_from_queue: Key::Char('x'),
         open_settings: Key::Alt(','),
         save_settings: Key::Alt('s'),
@@ -1023,6 +1029,7 @@ impl UserConfig {
     to_keys!(cover_art_view);
     to_keys!(add_item_to_queue);
     to_keys!(show_queue);
+    to_keys!(go_to_album);
     to_keys!(remove_from_queue);
     to_keys!(open_settings);
     to_keys!(save_settings);
@@ -1496,6 +1503,7 @@ impl UserConfig {
       k.cover_art_view,
       k.add_item_to_queue,
       k.show_queue,
+      k.go_to_album,
       k.remove_from_queue,
       k.open_settings,
       k.save_settings,
@@ -1734,6 +1742,7 @@ impl UserConfig {
       cover_art_view: Some(key_to_config_string(self.keys.cover_art_view)),
       add_item_to_queue: Some(key_to_config_string(self.keys.add_item_to_queue)),
       show_queue: Some(key_to_config_string(self.keys.show_queue)),
+      go_to_album: Some(key_to_config_string(self.keys.go_to_album)),
       remove_from_queue: Some(key_to_config_string(self.keys.remove_from_queue)),
       open_settings: Some(key_to_config_string(self.keys.open_settings)),
       save_settings: Some(key_to_config_string(self.keys.save_settings)),
@@ -1953,6 +1962,7 @@ mod tests {
       Key::Ctrl('d'),
       Key::Alt('x'),
       Key::Tab,
+      Key::BackTab,
       Key::Home,
       Key::End,
       Key::Ins,

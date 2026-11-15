@@ -23,9 +23,7 @@ Any new typing surface must also be added to
 it mid-typing. Keep feature-gated screens' match arms ungated and `#[cfg]` only
 the body, so the exhaustive `ActiveBlock` match compiles in slim builds. New
 async work becomes an `IoEvent` variant in `src/infra/network/mod.rs`, handled
-by a router (`infra/queue/`, `infra/qobuz/`) or `Network::handle_network_event`. A new `Action` variant is a
-compile error in `src/tui/keymap.rs::default_binding` until its arm names a key,
-a gesture, or `Exposure::Unbound`.
+by a router (`infra/queue/`, `infra/qobuz/`) or `Network::handle_network_event`.
 
 ### Adding a feature-gated sidebar row
 

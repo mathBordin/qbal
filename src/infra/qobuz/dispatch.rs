@@ -79,6 +79,19 @@ pub async fn route_qobuz_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
       play_qobuz_album(app, uri).await;
       true
     }
+    IoEvent::GetQobuzArtist(uri, name) => {
+      // Detached: two catalogue calls must not hold up the serial pump.
+      tokio::spawn(load_qobuz_artist(
+        Arc::clone(app),
+        uri.clone(),
+        name.clone(),
+      ));
+      true
+    }
+    IoEvent::GetQobuzAlbumDetails(album_id) => {
+      tokio::spawn(load_album_details(Arc::clone(app), album_id.clone()));
+      true
+    }
     IoEvent::QobuzLogin => {
       begin_login(app).await;
       true
@@ -229,6 +242,7 @@ enum QobuzStep {
   Library,
   Tracks,
   Search,
+  Artist,
   Stream,
 }
 impl QobuzStep {
@@ -239,6 +253,7 @@ impl QobuzStep {
       Self::Library => strings.qobuz_step_library,
       Self::Tracks => strings.qobuz_step_tracks,
       Self::Search => strings.qobuz_step_search,
+      Self::Artist => strings.qobuz_step_artist,
       Self::Stream => strings.qobuz_step_stream,
     }
   }
@@ -401,13 +416,41 @@ async fn run_qobuz_search(app: &Arc<Mutex<App>>, query: &str) {
     return;
   };
   match source.search(query).await {
-    Ok(results) => {
-      app
-        .lock()
-        .await
-        .show_source_search_results(query, results.tracks, results.albums)
-    }
+    Ok(results) => app.lock().await.show_source_search_results(
+      query,
+      results.tracks,
+      results.albums,
+      results.artists,
+    ),
     Err(e) => report(app, QobuzStep::Search, e).await,
+  }
+}
+
+/// Fetch an artist's page; [`App::show_artist_page`] drops it if another
+/// artist was opened meanwhile.
+async fn load_qobuz_artist(app: Arc<Mutex<App>>, uri: String, name: String) {
+  let Some(source) = build_source(&app, WhenLoggedOut::Login).await else {
+    app.lock().await.artist_page_failed(&uri);
+    return;
+  };
+  match source.artist_page(&uri, &name).await {
+    Ok(page) => app.lock().await.show_artist_page(page),
+    Err(e) => {
+      app.lock().await.artist_page_failed(&uri);
+      report(&app, QobuzStep::Artist, e).await;
+    }
+  }
+}
+
+/// Fetch the playing album's details for the now playing panel. A failure is
+/// only logged: the panel just shows less.
+async fn load_album_details(app: Arc<Mutex<App>>, album_id: String) {
+  let Some(source) = build_source(&app, WhenLoggedOut::Message).await else {
+    return;
+  };
+  match source.album_details(&album_id).await {
+    Ok(details) => app.lock().await.set_album_details(details),
+    Err(e) => log::warn!("[qobuz] album details for {album_id}: {e:#}"),
   }
 }
 

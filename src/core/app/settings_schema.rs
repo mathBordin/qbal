@@ -639,6 +639,12 @@ impl App {
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.show_queue)),
         },
         SettingItem {
+          id: "keys.go_to_album".to_string(),
+          name: strings.keys_go_to_album_name.to_string(),
+          description: strings.keys_go_to_album_description.to_string(),
+          value: SettingValue::Key(key_to_config_string(&self.user_config.keys.go_to_album)),
+        },
+        SettingItem {
           id: "keys.remove_from_queue".to_string(),
           name: strings.keys_remove_from_queue_name.to_string(),
           description: strings.keys_remove_from_queue_description.to_string(),

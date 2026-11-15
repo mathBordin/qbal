@@ -118,7 +118,39 @@ pub struct Album {
   /// `YYYY-MM-DD`, when Qobuz gives the original release date.
   #[serde(default)]
   pub release_date_original: Option<String>,
+  /// An edition's subtitle, e.g. `Deluxe Edition`.
+  #[serde(default)]
+  pub version: Option<String>,
+  /// `album`, `live`, `compilation`, `epSingle`, `other`, `download` or
+  /// `composer`, when given.
+  #[serde(default)]
+  pub release_type: Option<String>,
+  #[serde(default)]
+  pub maximum_bit_depth: Option<u32>,
+  /// kHz, e.g. `96` or `44.1`.
+  #[serde(default)]
+  pub maximum_sampling_rate: Option<f64>,
+  #[serde(default)]
+  pub label: Option<Named>,
+  #[serde(default)]
+  pub genre: Option<Named>,
   pub tracks: Option<Page<Track>>,
+}
+
+/// An artist in a search reply.
+#[derive(Debug, Deserialize)]
+pub struct ArtistItem {
+  #[serde(deserialize_with = "de_id")]
+  pub id: String,
+  #[serde(default)]
+  pub name: String,
+}
+
+/// `artist/get` with `extra=albums`.
+#[derive(Debug, Deserialize)]
+pub struct ArtistWithAlbums {
+  #[serde(default)]
+  pub albums: Page<Album>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,4 +211,5 @@ pub struct Favorites {
 pub struct Search {
   pub tracks: Option<Page<Track>>,
   pub albums: Option<Page<Album>>,
+  pub artists: Option<Page<ArtistItem>>,
 }

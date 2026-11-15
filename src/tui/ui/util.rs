@@ -62,6 +62,63 @@ pub fn draw_selectable_list<S>(
 ) where
   S: std::convert::AsRef<str>,
 {
+  let title = Line::from(Span::styled(
+    title.to_string(),
+    get_color(highlight_state, app.user_config.theme),
+  ));
+  draw_selectable_list_titled(
+    f,
+    app,
+    layout_chunk,
+    title,
+    items,
+    highlight_state,
+    selected_index,
+    scroll_offset,
+  );
+}
+
+/// A tab row for a block title: `Songs │ Albums │ Artists`, the active tab in
+/// the block's colour and reversed, the others dimmed.
+pub fn tab_title(
+  app: &App,
+  labels: &[&str],
+  active: usize,
+  highlight_state: (bool, bool),
+) -> Line<'static> {
+  let theme = app.user_config.theme;
+  let active_style =
+    get_color(highlight_state, theme).add_modifier(Modifier::BOLD | Modifier::REVERSED);
+  let other_style = Style::default().fg(theme.inactive.into());
+  let mut spans = Vec::with_capacity(labels.len() * 2);
+  for (index, label) in labels.iter().enumerate() {
+    if index > 0 {
+      spans.push(Span::styled(" \u{2502} ", other_style));
+    }
+    let style = if index == active {
+      active_style
+    } else {
+      other_style
+    };
+    spans.push(Span::styled(format!(" {label} "), style));
+  }
+  Line::from(spans)
+}
+
+/// [`draw_selectable_list`] with a ready-made title line, such as a tab row.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_selectable_list_titled<S>(
+  f: &mut Frame<'_>,
+  app: &App,
+  layout_chunk: Rect,
+  title: Line<'_>,
+  items: &[S],
+  highlight_state: (bool, bool),
+  selected_index: Option<usize>,
+  scroll_offset: &Cell<usize>,
+) where
+  S: std::convert::AsRef<str>,
+{
   let mut state = ListState::default();
 
   let visible_rows = layout_chunk.height.saturating_sub(2) as usize; // inner area without borders
@@ -79,10 +136,7 @@ pub fn draw_selectable_list<S>(
   let block = Block::default()
     .borders(Borders::ALL)
     .border_type(BorderType::Rounded)
-    .title(Span::styled(
-      title,
-      get_color(highlight_state, app.user_config.theme),
-    ))
+    .title(title)
     .border_style(get_color(highlight_state, app.user_config.theme));
 
   let list = List::new(lst_items)

@@ -43,6 +43,7 @@ fn plugin_key_string(key: Key) -> String {
     Key::AltShiftArrow(arrow) => format!("alt-shift-{}", arrow.name()),
     Key::Enter => "enter".to_string(),
     Key::Tab => "tab".to_string(),
+    Key::BackTab => "backtab".to_string(),
     Key::Esc => "esc".to_string(),
     Key::Backspace => "backspace".to_string(),
     Key::Delete => "del".to_string(),

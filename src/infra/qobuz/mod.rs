@@ -27,7 +27,12 @@ use reqwest::Client;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use tokio::sync::Mutex;
 
-use crate::core::plugin_api::{AlbumInfo, ArtistRef, PlaylistInfo, SearchResults, TrackInfo};
+use crate::core::artist::{
+  arrange_releases, tracks_by_artist, AlbumDetails, ArtistPage, Release, ReleaseKind,
+};
+use crate::core::plugin_api::{
+  AlbumInfo, ArtistInfo, ArtistRef, PlaylistInfo, SearchResults, TrackInfo,
+};
 use crate::core::source::{MediaSource, PlaylistWriter, Searcher};
 use crate::infra::audio::LocalPlayer;
 use stream::cmaf::InitSegment;
@@ -107,6 +112,7 @@ const API_BASE: &str = "https://www.qobuz.com/api.json/0.2/";
 const TRACK_PREFIX: &str = "qobuz:track:";
 const PLAYLIST_PREFIX: &str = "qobuz:playlist:";
 const ALBUM_PREFIX: &str = "qobuz:album:";
+const ARTIST_PREFIX: &str = "qobuz:artist:";
 const FAVORITES_URI: &str = "qobuz:favorites:tracks";
 
 /// Per-request caps; they bound each segment GET, never a whole track.
@@ -119,6 +125,9 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const PAGE_LIMIT: u32 = 500;
 const MAX_ITEMS: usize = 10_000;
 const SEARCH_LIMIT: u32 = 20;
+/// How many tracks the popular-tracks search fetches, and how many it keeps.
+const POPULAR_SEARCH_LIMIT: u32 = 50;
+const POPULAR_TRACKS: usize = 20;
 /// Ids per playlist write call.
 const WRITE_CHUNK: usize = 50;
 /// Playlist writes go out like every endpoint but the two stream-session ones:
@@ -537,6 +546,85 @@ impl QobuzSource {
     }
   }
 
+  /// An artist's page: the discography and the popular tracks, fetched
+  /// together. `name` is the artist's name, which the popular-tracks search
+  /// looks for.
+  pub(crate) async fn artist_page(&self, artist_uri: &str, name: &str) -> Result<ArtistPage> {
+    let artist_id = artist_uri
+      .strip_prefix(ARTIST_PREFIX)
+      .ok_or_else(|| anyhow!("Not a qobuz artist URI: {artist_uri}"))?;
+    let (releases, top_tracks) = tokio::try_join!(
+      self.discography(artist_id),
+      self.popular_tracks(artist_id, name)
+    )?;
+    Ok(ArtistPage {
+      uri: artist_uri.to_string(),
+      name: name.to_string(),
+      loading: false,
+      top_tracks,
+      releases,
+    })
+  }
+
+  /// `GET artist/get?extra=albums`: the artist's own releases, arranged.
+  async fn discography(&self, artist_id: &str) -> Result<Vec<Release>> {
+    let artist: types::ArtistWithAlbums = self
+      .get(
+        "artist/get",
+        &[
+          ("artist_id", artist_id.to_string()),
+          ("extra", "albums".to_string()),
+          ("limit", PAGE_LIMIT.to_string()),
+        ],
+      )
+      .await?;
+    Ok(arrange_releases(
+      artist
+        .albums
+        .items
+        .iter()
+        .filter(|album| album_is_by(album, artist_id))
+        .map(album_to_release)
+        .collect(),
+    ))
+  }
+
+  /// The artist's most popular tracks: a catalogue search for the name, which
+  /// Qobuz orders by popularity, kept to the artist's own tracks.
+  async fn popular_tracks(&self, artist_id: &str, name: &str) -> Result<Vec<TrackInfo>> {
+    let found: types::Search = self
+      .get(
+        "catalog/search",
+        &[
+          ("query", name.to_string()),
+          ("limit", POPULAR_SEARCH_LIMIT.to_string()),
+        ],
+      )
+      .await?;
+    let tracks = found
+      .tracks
+      .unwrap_or_default()
+      .items
+      .iter()
+      .map(|t| track_to_track_info(t, None))
+      .collect();
+    Ok(tracks_by_artist(tracks, artist_id, name, POPULAR_TRACKS))
+  }
+
+  /// `GET album/get`: the album's label, genre, date and track list.
+  pub(crate) async fn album_details(&self, album_id: &str) -> Result<AlbumDetails> {
+    let album: types::Album = self
+      .get(
+        "album/get",
+        &[
+          ("album_id", album_id.to_string()),
+          ("limit", PAGE_LIMIT.to_string()),
+        ],
+      )
+      .await?;
+    Ok(album_to_details(&album))
+  }
+
   /// `GET track/get`: one catalogue track, with its album, for a track that
   /// was started from a bare URI (#716).
   pub(crate) async fn track_info(&self, track_id: &str) -> Result<TrackInfo> {
@@ -724,6 +812,65 @@ fn album_to_album_info(a: &types::Album) -> AlbumInfo {
   }
 }
 
+/// An artist from a catalogue search.
+fn artist_to_artist_info(a: &types::ArtistItem) -> ArtistInfo {
+  ArtistInfo {
+    id: Some(a.id.clone()),
+    uri: Some(format!("{ARTIST_PREFIX}{}", a.id)),
+    name: a.name.clone(),
+    image_url: None,
+  }
+}
+
+/// Whether an album of `artist/get` is the artist's own; appearances on
+/// someone else's record are left out. An album without an artist id stays.
+fn album_is_by(album: &types::Album, artist_id: &str) -> bool {
+  album
+    .artist
+    .as_ref()
+    .and_then(|artist| artist.id.as_deref())
+    .is_none_or(|id| id == artist_id)
+}
+
+fn album_to_release(a: &types::Album) -> Release {
+  Release {
+    uri: format!("{ALBUM_PREFIX}{}", a.id),
+    title: a.title.clone(),
+    version: a.version.clone().filter(|v| !v.is_empty()),
+    release_date: a.release_date_original.clone(),
+    tracks_count: a.tracks_count,
+    kind: ReleaseKind::from_qobuz(a.release_type.as_deref(), a.tracks_count),
+    bit_depth: a.maximum_bit_depth,
+    sample_rate_khz: a.maximum_sampling_rate,
+  }
+}
+
+fn album_to_details(a: &types::Album) -> AlbumDetails {
+  let named = |n: &Option<types::Named>| {
+    n.as_ref()
+      .map(|n| n.name.trim().to_string())
+      .filter(|name| !name.is_empty())
+  };
+  AlbumDetails {
+    album_id: a.id.clone(),
+    title: a.title.clone(),
+    release_date: a.release_date_original.clone(),
+    label: named(&a.label),
+    genre: named(&a.genre),
+    tracks: a
+      .tracks
+      .as_ref()
+      .map(|page| {
+        page
+          .items
+          .iter()
+          .map(|t| (t.id.clone(), t.duration * 1000))
+          .collect()
+      })
+      .unwrap_or_default(),
+  }
+}
+
 /// Map a Qobuz track onto [`TrackInfo`]; `parent` is the album of an `album/get`.
 fn track_to_track_info(t: &types::Track, parent: Option<&types::Album>) -> TrackInfo {
   let album = t.album.as_ref().or(parent);
@@ -796,8 +943,8 @@ impl MediaSource for QobuzSource {
 }
 
 impl Searcher for QobuzSource {
-  /// Songs and albums, from the one catalogue call: the search screen shows
-  /// whichever its mode picks.
+  /// Songs, albums and artists, from the one catalogue call: the search screen
+  /// shows whichever its tab picks.
   async fn search(&self, query: &str) -> Result<SearchResults> {
     let found: types::Search = self
       .get(
@@ -822,10 +969,17 @@ impl Searcher for QobuzSource {
       .iter()
       .map(album_to_album_info)
       .collect();
+    let artists = found
+      .artists
+      .unwrap_or_default()
+      .items
+      .iter()
+      .map(artist_to_artist_info)
+      .collect();
     Ok(SearchResults {
       tracks,
       albums,
-      artists: vec![],
+      artists,
       playlists: vec![],
       shows: vec![],
     })
@@ -1051,6 +1205,65 @@ mod tests {
       Some("https://img/discovery.jpg")
     );
     assert!(album.tracks.is_empty());
+  }
+
+  #[test]
+  fn a_search_reply_carries_artists() {
+    let found: types::Search = serde_json::from_str(
+      r#"{ "artists": { "total": 1, "items": [
+          { "id": 36819, "name": "Daft Punk", "albums_count": 24 } ] } }"#,
+    )
+    .unwrap();
+    let artist = artist_to_artist_info(&found.artists.unwrap().items[0]);
+    assert_eq!(artist.uri.as_deref(), Some("qobuz:artist:36819"));
+    assert_eq!(artist.name, "Daft Punk");
+  }
+
+  #[test]
+  fn the_discography_keeps_the_artist_s_own_releases_with_their_kind_and_quality() {
+    let reply: types::ArtistWithAlbums = serde_json::from_str(
+      r#"{ "id": 36819, "name": "Daft Punk", "albums": { "total": 3, "items": [
+          { "id": "a1", "title": "Discovery", "release_type": "album", "tracks_count": 14,
+            "release_date_original": "2001-03-12", "maximum_bit_depth": 24,
+            "maximum_sampling_rate": 44.1, "artist": { "id": 36819, "name": "Daft Punk" } },
+          { "id": "s1", "title": "Get Lucky", "release_type": "epSingle", "tracks_count": 1,
+            "release_date_original": "2013-04-19", "artist": { "id": 36819, "name": "Daft Punk" } },
+          { "id": "x1", "title": "Various Hits", "release_type": "compilation", "tracks_count": 20,
+            "artist": { "id": 145383, "name": "Various Artists" } } ] } }"#,
+    )
+    .unwrap();
+    let releases: Vec<Release> = reply
+      .albums
+      .items
+      .iter()
+      .filter(|a| album_is_by(a, "36819"))
+      .map(album_to_release)
+      .collect();
+    assert_eq!(releases.len(), 2, "someone else's compilation is left out");
+    assert_eq!(releases[0].uri, "qobuz:album:a1");
+    assert_eq!(releases[0].kind, ReleaseKind::Album);
+    assert_eq!(releases[0].quality().as_deref(), Some("24/44.1"));
+    assert_eq!(releases[1].kind, ReleaseKind::EpSingle);
+  }
+
+  #[test]
+  fn album_details_carry_label_genre_date_and_track_lengths() {
+    let album: types::Album = serde_json::from_str(
+      r#"{ "id": "a1", "title": "Discovery", "release_date_original": "2001-03-12",
+          "label": { "id": 1, "name": "Parlophone" }, "genre": { "id": 2, "name": "Electronic" },
+          "tracks": { "total": 2, "items": [
+            { "id": 11, "title": "One More Time", "duration": 320 },
+            { "id": 12, "title": "Aerodynamic", "duration": 207 } ] } }"#,
+    )
+    .unwrap();
+    let details = album_to_details(&album);
+    assert_eq!(details.label.as_deref(), Some("Parlophone"));
+    assert_eq!(details.genre.as_deref(), Some("Electronic"));
+    assert_eq!(details.year(), Some("2001"));
+    assert_eq!(
+      details.tracks,
+      [("11".to_string(), 320_000), ("12".to_string(), 207_000)]
+    );
   }
 
   #[test]

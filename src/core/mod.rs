@@ -23,6 +23,8 @@ pub mod format;
 pub mod geometry;
 // Headless builds still serialize the full table, including terminal-only formatters.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+pub mod artist;
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod i18n;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod input;

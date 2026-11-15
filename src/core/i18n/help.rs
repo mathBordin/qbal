@@ -77,6 +77,9 @@ pub struct HelpStrings {
   pub sort_open: &'static str,
   pub search_mode: &'static str,
   pub album_open: &'static str,
+  pub go_to_album: &'static str,
+  pub artist_tabs: &'static str,
+  pub context_artist: &'static str,
   pub pane_detach: &'static str,
   pub pane_close: &'static str,
   pub pane_focus_left: &'static str,
@@ -196,6 +199,9 @@ pub const EN: HelpStrings = HelpStrings {
   sort_open: "Open sort menu",
   search_mode: "Switch search between songs and albums",
   album_open: "Open the hovered album's track list",
+  go_to_album: "Open the playing track's album",
+  artist_tabs: "Switch the artist page between top tracks and albums",
+  context_artist: "Artist page",
   pane_detach:
     "Detach the open full-screen view into a pane, or put the focused pane back to full screen",
   pane_close: "Close the focused pane, or hide the main layout when it has focus",
@@ -317,6 +323,9 @@ pub const PT_BR: HelpStrings = HelpStrings {
   sort_open: "Abrir menu de ordenação",
   search_mode: "Alternar a busca entre músicas e álbuns",
   album_open: "Abrir a lista de faixas do álbum selecionado",
+  go_to_album: "Abrir o álbum da faixa tocando",
+  artist_tabs: "Alternar a página do artista entre mais tocadas e álbuns",
+  context_artist: "Página do artista",
   pane_detach:
     "Destacar a tela cheia aberta em um painel, ou devolver o painel em foco à tela cheia",
   pane_close: "Fechar o painel em foco, ou ocultar o layout principal quando ele estiver em foco",
@@ -437,6 +446,9 @@ pub const FR: HelpStrings = HelpStrings {
   sort_open: "Ouvrir le menu de tri",
   search_mode: "Basculer la recherche entre titres et albums",
   album_open: "Ouvrir la liste des titres de l'album sélectionné",
+  go_to_album: "Ouvrir l'album du titre en cours",
+  artist_tabs: "Basculer la page de l'artiste entre titres phares et albums",
+  context_artist: "Page de l'artiste",
   pane_detach:
     "Détacher la vue plein écran dans un panneau, ou remettre le panneau actif en plein écran",
   pane_close:

@@ -33,6 +33,7 @@ use log::info;
 use crate::infra::queue::RepeatMode;
 
 mod album_theme;
+mod artist_view;
 mod audio_analysis;
 mod construction;
 mod help;
@@ -90,6 +91,10 @@ pub struct App {
   /// The device the sound reaches and its format, refreshed by the driver;
   /// `None` when nothing plays or neither PipeWire nor the kernel says.
   hardware_output: Option<crate::core::stream_format::OutputDevice>,
+  /// The open (or last opened) artist page.
+  artist_page: Option<crate::core::artist::ArtistPage>,
+  /// The playing album's details, for the now playing panel.
+  album_details: Option<crate::core::artist::AlbumDetails>,
   /// Presentation state of the terminal frontend (cursors, scroll offsets, edit
   /// buffers, focus, popups, terminal geometry). See [`ViewState`]: handlers and
   /// draw functions write it freely; nothing outside `tui/` and these `App`
@@ -290,6 +295,16 @@ impl App {
         log::error!("Error from dispatch {}", e);
         // TODO: handle error
       };
+    }
+  }
+
+  /// [`App::dispatch`] for background work with no spinner: the playing
+  /// album's details load on every track change and must not flash it.
+  pub(crate) fn dispatch_without_spinner(&mut self, action: IoEvent) {
+    if let Some(io_tx) = &self.io_tx {
+      if let Err(e) = io_tx.send(action) {
+        log::error!("Error from dispatch {}", e);
+      }
     }
   }
 

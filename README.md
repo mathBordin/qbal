@@ -61,7 +61,8 @@ page in your browser.
 | --- | --- |
 | `?` | Every key binding |
 | `/` | Search Qobuz |
-| `Tab` | Switch the search between songs and albums |
+| `Tab` | Next search tab: songs, albums, artists |
+| `a` | Open the album of the playing track |
 | `Enter` | Play / open |
 | `Space` | Play / pause |
 | `n` / `p` | Next / previous track |

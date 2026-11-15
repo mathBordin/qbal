@@ -242,7 +242,7 @@ tick. If the app stalls past several interval periods, the interval fires once a
 - `qbal.back()` - go back, like the back key.
 - `qbal.current_route()` - the current screen name. The same names come with the
   `route_change` event: `home`, `search`, `track_table`, `queue`, `settings`, `help`,
-  `lyrics`, `cover_art`, `miniplayer`, `analysis`, `stats`, `announcement`,
+  `lyrics`, `cover_art`, `miniplayer`, `analysis`, `stats`, `artist`, `announcement`,
   `recap_prompt`, `exit_prompt`, `error`, and `plugin:<name>` for plugin screens.
 
 ### Persistent storage

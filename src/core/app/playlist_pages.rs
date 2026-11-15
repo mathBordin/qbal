@@ -39,42 +39,48 @@ impl App {
     self.source_table_uri = Some(uri.to_string());
   }
 
-  /// Show the search hits as a songs-only result set with the songs block
-  /// focused.
-  /// Store a search's songs and albums and put both cursors on their top rows.
-  /// Focus leaves the lists, and the hover lands on the one the mode shows.
+  /// Store a search's songs, albums and artists and put every cursor on its
+  /// top row. Focus leaves the lists, and the hover lands on the shown tab.
   pub(crate) fn show_source_search_results(
     &mut self,
     _query: &str,
     tracks: Vec<TrackInfo>,
     albums: Vec<AlbumInfo>,
+    artists: Vec<crate::core::plugin_api::ArtistInfo>,
   ) {
-    let track_total = tracks.len() as u32;
-    let album_total = albums.len() as u32;
+    fn paged<T>(items: Vec<T>) -> Option<Paged<T>> {
+      let total = items.len() as u32;
+      Some(Paged {
+        items,
+        total,
+        ..Default::default()
+      })
+    }
     // No cursor clamp: the search starts again at the top row.
     self.search_results = SearchResult {
-      tracks: Some(Paged {
-        items: tracks,
-        total: track_total,
-        ..Default::default()
-      }),
-      albums: Some(Paged {
-        items: albums,
-        total: album_total,
-        ..Default::default()
-      }),
+      tracks: paged(tracks),
+      albums: paged(albums),
+      artists: paged(artists),
       ..Default::default()
     };
     self.view.search_selected_tracks_index = Some(0);
     self.view.search_selected_albums_index = Some(0);
+    self.view.search_selected_artists_index = Some(0);
     self.view.search_hovered_block = self.view.search_mode.block();
     self.view.search_selected_block = SearchResultBlock::Empty;
   }
 
-  /// Switch the search screen between songs and albums. Focus leaves the list,
-  /// so the next Enter selects the new one.
-  pub(crate) fn toggle_search_mode(&mut self) {
-    self.view.search_mode = self.view.search_mode.toggled();
+  /// Move the search screen to its next tab (or the previous one). Focus
+  /// leaves the list, so the next Enter selects the new one. Choosing songs
+  /// or albums also sets the mode artist pages open in.
+  pub(crate) fn cycle_search_mode(&mut self, forward: bool) {
+    use crate::core::artist::ArtistTab;
+    self.view.search_mode = self.view.search_mode.cycled(forward);
+    match self.view.search_mode {
+      SearchMode::Songs => self.view.artist_tab = ArtistTab::TopTracks,
+      SearchMode::Albums => self.view.artist_tab = ArtistTab::Albums,
+      SearchMode::Artists => {}
+    }
     self.view.search_hovered_block = self.view.search_mode.block();
     self.view.search_selected_block = SearchResultBlock::Empty;
   }

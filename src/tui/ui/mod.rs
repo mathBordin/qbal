@@ -1,3 +1,4 @@
+pub mod artist;
 pub mod audio_analysis;
 pub mod columns;
 pub mod head_unit;
@@ -79,6 +80,9 @@ fn draw_route_content(f: &mut Frame<'_>, app: &App, content_area: Rect) {
     }
     RouteId::Stats => {
       draw_stats(f, app, content_area);
+    }
+    RouteId::Artist => {
+      artist::draw_artist(f, app, content_area);
     }
     RouteId::Error
     | RouteId::Analysis

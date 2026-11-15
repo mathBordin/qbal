@@ -6,12 +6,14 @@ use crate::tui::theme::ThemeExt;
 use ratatui::{
   layout::Rect,
   style::Style,
-  text::{Span, Text},
+  text::{Line, Span, Text},
   widgets::{Block, BorderType, Borders, Paragraph},
   Frame,
 };
 
-use super::util::{draw_selectable_list, get_color, get_search_results_highlight_state};
+use super::util::{
+  draw_selectable_list_titled, get_color, get_search_results_highlight_state, tab_title,
+};
 
 /// Draws the search input, Help button and Settings button into pre-split
 /// areas (see `tui::layout::split_input_help_and_settings`). Splitting is
@@ -55,10 +57,7 @@ pub fn draw_input_and_help_box(
   };
   app.view.input_scroll_offset.set(scroll_offset);
 
-  let mode_label = match app.view.search_mode {
-    SearchMode::Songs => app.strings().screens.songs,
-    SearchMode::Albums => app.strings().screens.albums,
-  };
+  let mode_label = mode_label(app, app.view.search_mode);
   let input_title = app.strings().screens.search_titled(mode_label);
 
   let input = Paragraph::new(lines).scroll((0, scroll_offset)).block(
@@ -163,11 +162,59 @@ fn album_row(strings: &Strings, album: &AlbumInfo) -> String {
   row
 }
 
+fn mode_label(app: &App, mode: SearchMode) -> &'static str {
+  let screens = &app.strings().screens;
+  match mode {
+    SearchMode::Songs => screens.songs,
+    SearchMode::Albums => screens.albums,
+    SearchMode::Artists => screens.artists,
+  }
+}
+
+/// The results block's title: the three tabs, the shown one highlighted.
+fn tabs(app: &App, block: SearchResultBlock) -> Line<'static> {
+  let labels: Vec<&str> = SearchMode::ALL
+    .iter()
+    .map(|m| mode_label(app, *m))
+    .collect();
+  let active = SearchMode::ALL
+    .iter()
+    .position(|m| *m == app.view.search_mode)
+    .unwrap_or(0);
+  tab_title(
+    app,
+    &labels,
+    active,
+    get_search_results_highlight_state(app, block),
+  )
+}
+
 pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   match app.view.search_mode {
     SearchMode::Songs => draw_song_results(f, app, layout_chunk),
     SearchMode::Albums => draw_album_results(f, app, layout_chunk),
+    SearchMode::Artists => draw_artist_results(f, app, layout_chunk),
   }
+}
+
+/// The artists of the search; Enter opens one's page.
+fn draw_artist_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
+  let artists: Vec<String> = app
+    .search_results()
+    .artists
+    .as_ref()
+    .map(|artists| artists.items.iter().map(|a| a.name.clone()).collect())
+    .unwrap_or_default();
+  draw_selectable_list_titled(
+    f,
+    app,
+    layout_chunk,
+    tabs(app, SearchResultBlock::ArtistSearch),
+    &artists,
+    get_search_results_highlight_state(app, SearchResultBlock::ArtistSearch),
+    app.view.search_selected_artists_index,
+    &app.view.search_artists_scroll_offset,
+  );
 }
 
 fn draw_song_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
@@ -190,11 +237,11 @@ fn draw_song_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     })
     .unwrap_or_default();
 
-  draw_selectable_list(
+  draw_selectable_list_titled(
     f,
     app,
     layout_chunk,
-    app.strings().screens.songs,
+    tabs(app, SearchResultBlock::SongSearch),
     &songs,
     get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
     app.view.search_selected_tracks_index,
@@ -217,11 +264,11 @@ fn draw_album_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     })
     .unwrap_or_default();
 
-  draw_selectable_list(
+  draw_selectable_list_titled(
     f,
     app,
     layout_chunk,
-    app.strings().screens.albums,
+    tabs(app, SearchResultBlock::AlbumSearch),
     &albums,
     get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
     app.view.search_selected_albums_index,
@@ -268,18 +315,23 @@ mod tests {
   }
 
   #[test]
-  fn search_results_are_one_full_size_song_list() {
+  fn search_results_are_one_full_size_list_under_the_three_tabs() {
     let mut app = App::default();
     app.show_source_search_results(
       "q",
       vec![track("Blue", "Joni"), track("Kind", "Miles")],
+      Vec::new(),
       Vec::new(),
     );
     let content = rendered(&app, Rect::new(0, 0, 90, 30));
     assert!(content.contains("Songs"), "{content}");
     assert!(content.contains("Blue - Joni"), "{content}");
     assert!(content.contains("Kind - Miles"), "{content}");
-    for removed in ["Artists", "Albums", "Playlists", "Podcasts"] {
+    assert!(
+      content.contains("Songs  \u{2502}  Albums  \u{2502}  Artists"),
+      "the tab row names all three: {content}"
+    );
+    for removed in ["Playlists", "Podcasts"] {
       assert!(
         !content.contains(removed),
         "{removed} pane is gone: {content}"
@@ -337,8 +389,8 @@ mod tests {
       total_tracks: Some(14),
       ..AlbumInfo::default()
     };
-    app.show_source_search_results("q", vec![track("Blue", "Joni")], vec![album]);
-    app.toggle_search_mode();
+    app.show_source_search_results("q", vec![track("Blue", "Joni")], vec![album], Vec::new());
+    app.cycle_search_mode(true);
     assert_eq!(app.view.search_mode, SearchMode::Albums);
     let content = rendered(&app, Rect::new(0, 0, 90, 10));
     println!(

@@ -253,6 +253,9 @@ pub enum OpenTarget {
   /// A decoded source's playlist or folder, routed by URI scheme (`file:`,
   /// `subsonic:`, `youtube:playlist:`, `qobuz:`); an unknown scheme is a no-op.
   SourcePlaylist(String),
+  /// An artist's page, by `qobuz:artist:<id>` URI; the name is what the
+  /// popular-tracks search looks for.
+  Artist { uri: String, name: String },
 }
 
 /// Library sidebar sections reachable through [`Action::OpenLibrary`].

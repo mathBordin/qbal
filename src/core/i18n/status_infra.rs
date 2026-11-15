@@ -20,6 +20,7 @@ pub struct InfraStatusStrings {
   pub qobuz_step_library: &'static str,
   pub qobuz_step_tracks: &'static str,
   pub qobuz_step_search: &'static str,
+  pub qobuz_step_artist: &'static str,
   pub qobuz_step_stream: &'static str,
   pub qobuz_operation_failed: &'static str,
   pub qobuz_no_full_stream: &'static str,
@@ -147,6 +148,7 @@ pub const EN: InfraStatusStrings = InfraStatusStrings {
   qobuz_step_library: "library",
   qobuz_step_tracks: "tracks",
   qobuz_step_search: "search",
+  qobuz_step_artist: "artist page",
   qobuz_step_stream: "stream",
   qobuz_operation_failed: "Qobuz: {step}: {error}",
   qobuz_no_full_stream:
@@ -196,6 +198,7 @@ pub const PT_BR: InfraStatusStrings = InfraStatusStrings {
   qobuz_step_library: "biblioteca",
   qobuz_step_tracks: "faixas",
   qobuz_step_search: "busca",
+  qobuz_step_artist: "página do artista",
   qobuz_step_stream: "stream",
   qobuz_operation_failed: "Qobuz: {step}: {error}",
   qobuz_no_full_stream:
@@ -246,6 +249,7 @@ pub const FR: InfraStatusStrings = InfraStatusStrings {
   qobuz_step_library: "bibliothèque",
   qobuz_step_tracks: "titres",
   qobuz_step_search: "recherche",
+  qobuz_step_artist: "page de l'artiste",
   qobuz_step_stream: "flux",
   qobuz_operation_failed: "Qobuz : {step} : {error}",
   qobuz_no_full_stream:

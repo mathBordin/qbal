@@ -128,6 +128,8 @@ pub const EN: SettingsStrings = SettingsStrings {
   keys_add_item_to_queue_name: "Add to Queue",
   keys_add_item_to_queue_description: "Add selected item to queue",
   keys_show_queue_name: "Show Queue",
+  keys_go_to_album_name: "Go to Album",
+  keys_go_to_album_description: "Open the playing track's album",
   keys_show_queue_description: "Show playback queue",
   keys_remove_from_queue_name: "Remove from Queue",
   keys_remove_from_queue_description: "Remove the selected track from the queue",

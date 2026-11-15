@@ -469,6 +469,13 @@ impl App {
             }
           }
         }
+        "keys.go_to_album" => {
+          if let SettingValue::Key(v) = &setting.value {
+            if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {
+              self.user_config.keys.go_to_album = key;
+            }
+          }
+        }
         "keys.remove_from_queue" => {
           if let SettingValue::Key(v) = &setting.value {
             if let Ok(key) = crate::core::user_config::parse_key_public(v.clone()) {

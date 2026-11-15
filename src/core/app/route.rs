@@ -10,26 +10,34 @@ pub(super) const DEFAULT_ROUTE: Route = Route {
 pub enum SearchResultBlock {
   SongSearch,
   AlbumSearch,
+  ArtistSearch,
   #[default]
   Empty,
 }
 
-/// What the search screen lists, and what Enter plays: single songs, or whole
-/// albums. One catalogue search fills both lists, so switching needs no new
-/// request.
+/// The search screen's tab: songs (Enter plays the song), albums (Enter plays
+/// the whole album) or artists (Enter opens the artist's page). One catalogue
+/// search fills all three, so switching needs no new request.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum SearchMode {
   #[default]
   Songs,
   Albums,
+  Artists,
 }
 
 impl SearchMode {
-  pub fn toggled(self) -> Self {
-    match self {
-      SearchMode::Songs => SearchMode::Albums,
-      SearchMode::Albums => SearchMode::Songs,
-    }
+  pub const ALL: [SearchMode; 3] = [SearchMode::Songs, SearchMode::Albums, SearchMode::Artists];
+
+  /// The next tab, or the previous one when `forward` is false, wrapping.
+  pub fn cycled(self, forward: bool) -> Self {
+    let index = Self::ALL.iter().position(|m| *m == self).unwrap_or(0);
+    let len = Self::ALL.len();
+    Self::ALL[if forward {
+      (index + 1) % len
+    } else {
+      (index + len - 1) % len
+    }]
   }
 
   /// The results block this mode lists.
@@ -37,6 +45,7 @@ impl SearchMode {
     match self {
       SearchMode::Songs => SearchResultBlock::SongSearch,
       SearchMode::Albums => SearchResultBlock::AlbumSearch,
+      SearchMode::Artists => SearchResultBlock::ArtistSearch,
     }
   }
 }
@@ -65,6 +74,7 @@ pub enum ActiveBlock {
   SortMenu,
   Queue,
   Stats,
+  Artist,
   /// A plugin-registered custom screen (the screen name lives in
   /// [`RouteId::PluginScreen`]; `ActiveBlock` is `Copy` and can't carry it).
   /// Only script effects construct it.
@@ -116,6 +126,8 @@ pub enum RouteId {
   HelpMenu,
   Queue,
   Stats,
+  /// An artist's page: popular tracks and discography.
+  Artist,
   /// A plugin-registered custom screen, keyed by its registered name.
   /// Only script effects construct it.
   #[cfg_attr(not(feature = "scripting"), allow(dead_code))]

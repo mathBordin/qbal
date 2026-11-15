@@ -1,5 +1,6 @@
 mod analysis;
 mod announcement_prompt;
+mod artist;
 mod common_key_events;
 #[cfg(feature = "cover-art")]
 mod cover_art_view;
@@ -148,6 +149,7 @@ pub fn handle_app(key: Key, app: &mut App) {
     _ if key == app.user_config.keys.show_queue => {
       app.apply(Action::Navigate(NavTarget::Queue));
     }
+    _ if key == app.user_config.keys.go_to_album => app.go_to_playing_album(),
 
     _ if key == app.user_config.keys.shuffle => {
       app.apply(Action::ToggleShuffle);
@@ -354,6 +356,9 @@ fn handle_block_events(key: Key, app: &mut App) {
     ActiveBlock::Stats => {
       stats::handler(key, app);
     }
+    ActiveBlock::Artist => {
+      artist::handler(key, app);
+    }
     ActiveBlock::RecapPrompt => {
       recap_prompt::handler(key, app);
     }
@@ -381,7 +386,7 @@ fn handle_escape(app: &mut App) {
     ActiveBlock::TrackTable => {
       app.set_current_route_state(Some(ActiveBlock::Empty), None);
     }
-    ActiveBlock::Queue => {
+    ActiveBlock::Queue | ActiveBlock::Artist => {
       app.pop_navigation_stack();
     }
     ActiveBlock::LyricsView => {

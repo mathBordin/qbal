@@ -9,7 +9,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 // Handle event when the search input block is active
 pub fn handler(key: Key, app: &mut App) {
   match key {
-    Key::Tab => app.toggle_search_mode(),
+    Key::Tab => app.cycle_search_mode(true),
+    Key::BackTab => app.cycle_search_mode(false),
     Key::Ctrl('k') => {
       app
         .view

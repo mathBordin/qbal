@@ -130,6 +130,8 @@ pub const FR: SettingsStrings = SettingsStrings {
   keys_add_item_to_queue_name: "Ajouter à la file",
   keys_add_item_to_queue_description: "Ajouter l'élément sélectionné à la file",
   keys_show_queue_name: "Afficher la file",
+  keys_go_to_album_name: "Aller à l'album",
+  keys_go_to_album_description: "Ouvrir l'album du titre en cours",
   keys_show_queue_description: "Afficher la file de lecture",
   keys_remove_from_queue_name: "Retirer de la file",
   keys_remove_from_queue_description: "Retirer le titre sélectionné de la file",

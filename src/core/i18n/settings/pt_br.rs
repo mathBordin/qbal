@@ -130,6 +130,8 @@ pub const PT_BR: SettingsStrings = SettingsStrings {
   keys_add_item_to_queue_name: "Adicionar à fila",
   keys_add_item_to_queue_description: "Adicionar o item selecionado à fila",
   keys_show_queue_name: "Mostrar fila",
+  keys_go_to_album_name: "Ir para o álbum",
+  keys_go_to_album_description: "Abrir o álbum da faixa tocando",
   keys_show_queue_description: "Mostrar a fila de reprodução",
   keys_remove_from_queue_name: "Remover da fila",
   keys_remove_from_queue_description: "Remover a faixa selecionada da fila",
