@@ -55,6 +55,7 @@ use anyhow::{Context, Result};
 use rodio::{Decoder, Player};
 
 use super::volume_gain;
+use crate::core::stream_format::OutputFormat;
 
 /// An audio player driving the system default output device.
 ///
@@ -126,6 +127,9 @@ struct Sink {
   /// spotted (see module docs). `None` when the key could not be read, which
   /// only disables the comparison — never fakes a change.
   device_name: Option<String>,
+  /// The format the device was opened with.
+  #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+  output: OutputFormat,
 }
 
 /// How often a wait on the audio thread stops to re-ask whether the device is
@@ -184,6 +188,13 @@ impl LocalPlayer {
       stage_generation: AtomicU64::new(0),
       stage_transition: Mutex::new(()),
     })
+  }
+
+  /// The format the output device was opened with. Changes when the device is
+  /// reopened on another one.
+  #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+  pub fn output_format(&self) -> OutputFormat {
+    self.sink.lock().unwrap().output.clone()
   }
 
   /// Start a stage: the generation it must still hold at each sink transition.
@@ -554,6 +565,7 @@ fn open_sink() -> Result<Sink> {
     .default_output_device()
     .context("no audio output device available")?;
   let device_key = device_key(&device);
+  let device_label = device_key.clone();
 
   let lost = Arc::new(AtomicBool::new(false));
   let on_error = {
@@ -570,7 +582,7 @@ fn open_sink() -> Result<Sink> {
     }
   };
 
-  let (init_tx, init_rx) = mpsc::channel::<std::result::Result<Player, String>>();
+  let (init_tx, init_rx) = mpsc::channel::<std::result::Result<(Player, OutputFormat), String>>();
   let (keepalive_tx, keepalive_rx) = mpsc::channel::<()>();
 
   std::thread::Builder::new()
@@ -593,7 +605,16 @@ fn open_sink() -> Result<Sink> {
           // handoff between sources tears the player down) — silence it.
           stream.log_on_drop(false);
           let sink = Player::connect_new(stream.mixer());
-          if init_tx.send(Ok(sink)).is_err() {
+          let config = stream.config();
+          let (bits, float) = sample_format_parts(config.sample_format());
+          let output = OutputFormat {
+            sample_rate: config.sample_rate().get(),
+            channels: config.channel_count().get(),
+            bits,
+            float,
+            device: device_label,
+          };
+          if init_tx.send(Ok((sink, output))).is_err() {
             return; // player was dropped before init completed
           }
           // Keep `stream` (and the device) alive until the player drops its
@@ -608,7 +629,7 @@ fn open_sink() -> Result<Sink> {
     })
     .context("spawning local audio output thread")?;
 
-  let player = init_rx
+  let (player, output) = init_rx
     .recv_timeout(DEVICE_OPEN_TIMEOUT)
     .context("local audio output thread did not open a device")?
     .map_err(|e| anyhow::anyhow!("opening default audio output device: {e}"))?;
@@ -618,7 +639,14 @@ fn open_sink() -> Result<Sink> {
     _keepalive: keepalive_tx,
     lost,
     device_name: device_key,
+    output,
   })
+}
+
+/// Bits per sample and whether they are floating point, for a cpal sample type.
+fn sample_format_parts(format: rodio::cpal::SampleFormat) -> (u8, bool) {
+  let bits = u8::try_from(format.bits_per_sample()).unwrap_or(u8::MAX);
+  (bits, format.is_float())
 }
 
 /// The device's description; reading it has no side effect.
@@ -648,6 +676,14 @@ mod tests {
   #[test]
   fn the_first_reopen_is_due_at_once() {
     assert!(reopen_due(0, None));
+  }
+
+  #[test]
+  fn sample_formats_report_their_width_and_kind() {
+    use rodio::cpal::SampleFormat;
+    assert_eq!(sample_format_parts(SampleFormat::F32), (32, true));
+    assert_eq!(sample_format_parts(SampleFormat::I16), (16, false));
+    assert_eq!(sample_format_parts(SampleFormat::I32), (32, false));
   }
 
   #[test]

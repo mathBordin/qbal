@@ -132,6 +132,8 @@ pub struct Driver {
   /// the file so a stale session is never resurrected.
   last_session_save: Option<Instant>,
   session_was_present: bool,
+  /// Reads the sound card's running format off-thread.
+  hardware_probe: crate::infra::audio::HardwareProbe,
 }
 
 /// The startup route's data fetch, gated on what the route needs.
@@ -199,6 +201,7 @@ impl Driver {
       last_cover_art_key: None,
       last_session_save: None,
       session_was_present: false,
+      hardware_probe: crate::infra::audio::HardwareProbe::start(),
     }
   }
 
@@ -607,6 +610,8 @@ impl Driver {
     // Only the native position below reads the flag.
     let _ = source_owns_playback;
     app.note_playing(playing);
+    // The card format only means something while qbal is the one playing.
+    app.set_hardware_output(playing.then(|| self.hardware_probe.latest()).flatten());
 
     #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
     match env.viz_bars {

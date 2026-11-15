@@ -50,6 +50,9 @@ pub enum IoEvent {
   /// Run a Qobuz catalog search and populate `app.search_results`., handled by
   /// `infra::qobuz::dispatch`.
   GetQobuzSearchResults(String),
+  /// Play a whole Qobuz album from its first track, by its `qobuz:album:` URI;
+  /// handled by `infra::qobuz::dispatch`.
+  PlayQobuzAlbum(String),
   /// Start the in-TUI Qobuz browser login (handled by `infra::qobuz::dispatch`).
   QobuzLogin,
   /// Fetch and decode the current track's cover art (album-art URL, source

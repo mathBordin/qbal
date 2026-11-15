@@ -17,6 +17,8 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use crate::core::stream_format::{output_candidates, widest_fitting, HardwareFormat, OutputFormat};
+
 use super::util::{display_track_progress, get_color, get_track_progress_percentage};
 
 const PLAYBAR_CONTROLS: [PlaybarControl; 7] = [
@@ -797,8 +799,13 @@ struct LocalPlaybarView {
   /// session; `false` for the native queue slot, whose playbar drops the mode
   /// segments entirely rather than showing blank `Shuffle:`/`Repeat:` labels.
   show_modes: bool,
-  /// The delivered audio format (Qobuz, e.g. `FLAC 24/96`), shown after the artists.
-  quality: Option<String>,
+  /// The delivered audio format (Qobuz), from the most to the least detailed
+  /// wording; the widest that fits shows on the right of the name row.
+  quality: Vec<String>,
+  /// The format the output device runs at, on the right of the artists row.
+  output: Option<OutputFormat>,
+  /// The format the sound card runs at, after the output format.
+  hardware: Option<HardwareFormat>,
 }
 
 /// Render the playbar for an active Qobuz playback session; the download
@@ -823,7 +830,9 @@ fn draw_qobuz_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     volume_percent: app.runtime_state.volume_percent,
     queue_position: (qobuz.tracks.len() > 1).then(|| (qobuz.index + 1, qobuz.tracks.len())),
     show_modes: true,
-    quality: qobuz.quality.map(|q| q.label()),
+    quality: qobuz.quality.map(|q| q.labels()).unwrap_or_default(),
+    output: Some(qobuz.player.output_format()),
+    hardware: app.hardware_output().cloned(),
   };
   render_local_playbar(f, app, layout_chunk, &view);
 }
@@ -925,35 +934,52 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
     .border_style(get_color(highlight_state, app.user_config.theme));
   f.render_widget(title_block, layout_chunk);
 
-  let mut subtitle = vec![Span::styled(
+  let artist_area = playbar_areas.artist_area;
+  let dim = Style::default()
+    .fg(app.user_config.theme.playbar_text.into())
+    .add_modifier(app.user_config.behavior.emphasis(Modifier::DIM));
+  let mut name_block = Block::default().title(Span::styled(
+    view.name.clone(),
+    Style::default()
+      .fg(app.user_config.theme.selected.into())
+      .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
+  ));
+  // The delivered stream format sits on the right of the name row, in the
+  // widest wording the name leaves room for.
+  let name_width = UnicodeWidthStr::width(view.name.as_str());
+  let stream_room = usize::from(artist_area.width).saturating_sub(name_width + 2);
+  if let Some(label) = widest_fitting(&view.quality, stream_room) {
+    name_block = name_block.title(Line::from(Span::styled(label.to_string(), dim)).right_aligned());
+  }
+  let artist = Paragraph::new(Text::from(Line::from(Span::styled(
     view.artists.clone(),
     Style::default().fg(app.user_config.theme.playbar_text.into()),
-  )];
-  if let Some(quality) = view.quality.as_ref() {
-    let separator = if view.artists.is_empty() {
-      ""
-    } else {
-      " \u{2022} "
-    };
-    subtitle.push(Span::styled(
-      format!("{separator}{quality}"),
-      Style::default()
-        .fg(app.user_config.theme.playbar_text.into())
-        .add_modifier(app.user_config.behavior.emphasis(Modifier::DIM)),
-    ));
+  ))))
+  .style(Style::default().fg(app.user_config.theme.playbar_text.into()))
+  .block(name_block);
+  f.render_widget(artist, artist_area);
+
+  // The output device's format sits on the right of the artists row.
+  if artist_area.height >= 2 {
+    let screens = &app.strings().screens;
+    let candidates = output_candidates(view.output.as_ref(), view.hardware.as_ref(), screens.card);
+    if !candidates.is_empty() {
+      let prefix = format!("{}: ", screens.output);
+      let artists_width = UnicodeWidthStr::width(view.artists.as_str());
+      let room = usize::from(artist_area.width)
+        .saturating_sub(artists_width + 2)
+        .saturating_sub(UnicodeWidthStr::width(prefix.as_str()));
+      if let Some(label) = widest_fitting(&candidates, room) {
+        let row = Rect::new(artist_area.x, artist_area.y + 1, artist_area.width, 1);
+        let line = Line::from(vec![
+          Span::styled(prefix, dim),
+          Span::styled(label.to_string(), dim),
+        ])
+        .right_aligned();
+        f.render_widget(Paragraph::new(line), row);
+      }
+    }
   }
-  let lines = Text::from(Line::from(subtitle));
-  let artist = Paragraph::new(lines)
-    .style(Style::default().fg(app.user_config.theme.playbar_text.into()))
-    .block(
-      Block::default().title(Span::styled(
-        view.name.clone(),
-        Style::default()
-          .fg(app.user_config.theme.selected.into())
-          .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
-      )),
-    );
-  f.render_widget(artist, playbar_areas.artist_area);
 
   draw_playbar_controls(f, app, playbar_areas.controls_area);
 
@@ -1022,7 +1048,9 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       // The native queue ignores the decoded shuffle/repeat modes (they belong
       // to the suspended source resumed once the queue drains), so hide them.
       show_modes: false,
-      quality: d.quality.clone(),
+      quality: d.quality.map(|q| q.labels()).unwrap_or_default(),
+      output: Some(d.player.output_format()),
+      hardware: app.hardware_output().cloned(),
     };
     render_local_playbar(f, app, layout_chunk, &view);
     return;
@@ -1304,9 +1332,18 @@ mod tests {
       .collect()
   }
 
-  #[test]
-  fn playbar_renders_delivered_quality_after_artists() {
-    let view = LocalPlaybarView {
+  fn flac_labels() -> Vec<String> {
+    crate::infra::qobuz::StreamQuality {
+      sample_rate: 44_100,
+      bits_per_sample: 16,
+      flac: true,
+      bitrate_kbps: Some(987),
+    }
+    .labels()
+  }
+
+  fn view_with(quality: Vec<String>, output: Option<OutputFormat>) -> LocalPlaybarView {
+    LocalPlaybarView {
       source_label: "Qobuz",
       name: "Track".to_string(),
       artists: "Artist".to_string(),
@@ -1316,22 +1353,80 @@ mod tests {
       volume_percent: 50,
       queue_position: None,
       show_modes: true,
-      quality: Some("FLAC 16/44.1".to_string()),
-    };
+      quality,
+      output,
+      hardware: None,
+    }
+  }
+
+  fn built_in_output() -> OutputFormat {
+    OutputFormat {
+      sample_rate: 48_000,
+      channels: 2,
+      bits: 32,
+      float: true,
+      device: Some("Built-in Audio".to_string()),
+    }
+  }
+
+  #[test]
+  fn playbar_shows_the_stream_format_on_the_name_row() {
+    let view = view_with(flac_labels(), None);
     let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &view);
     assert!(
-      content.contains("Artist \u{2022} FLAC 16/44.1"),
-      "the delivered format should follow the artists: {content}"
+      content.contains("FLAC \u{b7} 16-bit \u{b7} 44.1 kHz \u{b7} 987 kbps"),
+      "the delivered format shows in full: {content}"
     );
+    assert!(
+      !content.contains("Output"),
+      "no output row without a device"
+    );
+  }
 
-    let no_artists = LocalPlaybarView {
-      artists: String::new(),
+  #[test]
+  fn the_stream_format_shortens_to_what_the_width_allows() {
+    let view = view_with(flac_labels(), None);
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 40, 6), &view);
+    assert!(
+      content.contains("FLAC 16/44.1 \u{b7} 987 kbps"),
+      "{content}"
+    );
+    assert!(!content.contains("16-bit"), "{content}");
+
+    let long_name = LocalPlaybarView {
+      name: "A track whose name takes the whole row".to_string(),
       ..view
     };
-    let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &no_artists);
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 44, 6), &long_name);
     assert!(
-      content.contains("FLAC 16/44.1") && !content.contains('\u{2022}'),
-      "no separator without artists: {content}"
+      !content.contains("FLAC"),
+      "the name wins over the format: {content}"
+    );
+  }
+
+  #[test]
+  fn playbar_shows_the_output_format_on_the_artists_row() {
+    let view = view_with(flac_labels(), Some(built_in_output()));
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &view);
+    assert!(
+      content.contains("Output: 32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{b7} Built-in Audio"),
+      "{content}"
+    );
+    let narrow = rendered_text(&App::default(), Rect::new(0, 0, 50, 6), &view);
+    assert!(
+      !narrow.contains("Built-in Audio") && narrow.contains("48 kHz"),
+      "the device name is the first thing dropped: {narrow}"
+    );
+  }
+
+  #[test]
+  fn a_playbar_with_one_text_row_keeps_only_the_name_row() {
+    let view = view_with(flac_labels(), Some(built_in_output()));
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 5), &view);
+    assert!(content.contains("987 kbps"), "{content}");
+    assert!(
+      !content.contains("Output"),
+      "no second row to put the output on: {content}"
     );
   }
 
@@ -1431,5 +1526,24 @@ mod tests {
       buffer
     };
     assert_eq!(render(&current), render(&baseline));
+  }
+
+  #[test]
+  fn the_card_format_follows_the_output_format() {
+    let mut view = view_with(flac_labels(), Some(built_in_output()));
+    view.hardware = crate::core::stream_format::parse_hw_params(
+      "format: S24_3LE\nchannels: 2\nrate: 96000 (96000/1)\n",
+      Some("DAC"),
+    );
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &view);
+    assert!(
+      content.contains("Output: 32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{b7} Built-in Audio \u{2192} Card: 24-bit \u{b7} 96 kHz"),
+      "{content}"
+    );
+    let narrow = rendered_text(&App::default(), Rect::new(0, 0, 50, 6), &view);
+    assert!(
+      narrow.contains("Card: 24-bit \u{b7} 96 kHz"),
+      "the card format stays: {narrow}"
+    );
   }
 }

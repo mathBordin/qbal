@@ -89,6 +89,11 @@ pub enum Action {
     uris: Vec<String>,
     offset: Option<usize>,
   },
+  /// Play a whole album from its first track, addressed by its album URI
+  /// (`qobuz:album:<id>`); Enter on an album in the search screen's album mode.
+  PlayAlbum {
+    uri: String,
+  },
   /// Add one track to the native queue (the queue key).
   QueueTrack(TrackInfo),
   /// Jump to one native-queue item, addressed by URI with the 0-based position

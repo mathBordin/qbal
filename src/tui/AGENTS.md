@@ -16,9 +16,7 @@ Six places, not four:
 5. `common_key_events::content_active_block_for_route` if right-arrow from the
    sidebar should reach it.
 6. A row in `help_entries` (`src/tui/keymap.rs`) for any new key, with the
-   `Requirement` the key needs (`Requirement::None` for a source-agnostic key),
-   and, for any new `Action` variant, a `default_binding` arm plus a
-   `sample_actions()` value in the same file.
+   `Requirement` the key needs (`Requirement::None` for a source-agnostic key).
 
 Any new typing surface must also be added to
 `runner.rs::key_reaches_handlers_before_back`, or the default back key `q` closes

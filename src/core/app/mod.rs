@@ -87,6 +87,9 @@ pub struct App {
   pub audio_capture_active: bool,
   /// Whether the last tick saw a source play.
   playing_last_tick: bool,
+  /// The format the sound card runs at, refreshed by the driver; `None` when
+  /// no card is playing or the kernel does not say.
+  hardware_output: Option<crate::core::stream_format::HardwareFormat>,
   /// Presentation state of the terminal frontend (cursors, scroll offsets, edit
   /// buffers, focus, popups, terminal geometry). See [`ViewState`]: handlers and
   /// draw functions write it freely; nothing outside `tui/` and these `App`

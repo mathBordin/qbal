@@ -6,6 +6,7 @@ impl Default for App {
       spectrum_data: None,
       audio_capture_active: false,
       playing_last_tick: false,
+      hardware_output: None,
       view: ViewState {
         search_hovered_block: SearchResultBlock::SongSearch,
         ..ViewState::default()

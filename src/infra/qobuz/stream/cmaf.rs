@@ -9,6 +9,7 @@
 use anyhow::{anyhow, Result};
 
 use super::crypto::decrypt_frame;
+use crate::core::stream_format::khz;
 
 /// Box type of the init payload.
 pub const INIT_UUID: [u8; 16] = [
@@ -37,14 +38,28 @@ impl InitSegment {
   }
 
   /// The delivered audio format, which can be lower than the requested one.
-  pub fn quality(&self) -> StreamQuality {
+  /// `duration_ms` is the track's length, which turns the file size into the
+  /// average bitrate; `0` leaves the bitrate out.
+  pub fn quality(&self, duration_ms: u64) -> StreamQuality {
+    let flac = self.header.starts_with(b"fLaC");
     StreamQuality {
       sample_rate: self.sample_rate,
       bits_per_sample: self.bits_per_sample,
-      flac: self.header.starts_with(b"fLaC"),
+      flac,
+      bitrate_kbps: if flac {
+        // bytes * 8 bits per millisecond is kbit/s.
+        (duration_ms > 0)
+          .then(|| u32::try_from(self.total_bytes().saturating_mul(8) / duration_ms).ok())
+          .flatten()
+      } else {
+        Some(MP3_KBPS)
+      },
     }
   }
 }
+
+/// The only lossy format Qobuz serves is constant-bitrate MP3 at this rate.
+const MP3_KBPS: u32 = 320;
 
 /// The audio format of a delivered stream, read from segment 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,20 +68,34 @@ pub struct StreamQuality {
   pub bits_per_sample: u8,
   /// `false` for the MP3 format, the only non-FLAC one Qobuz serves.
   pub flac: bool,
+  /// Average bitrate in kbit/s: file size over the track's length for FLAC,
+  /// the fixed rate for MP3.
+  pub bitrate_kbps: Option<u32>,
 }
 
 impl StreamQuality {
-  /// Playbar label, worded like the quality setting: `FLAC 24/96` or `MP3 320`.
-  pub fn label(&self) -> String {
-    if !self.flac {
-      return "MP3 320".to_string();
-    }
-    let khz = if self.sample_rate.is_multiple_of(1000) {
-      (self.sample_rate / 1000).to_string()
+  /// Every wording from the most to the least detailed, for the widest one that
+  /// fits the playbar: `FLAC · 24-bit · 96 kHz · 2304 kbps`, then
+  /// `FLAC 24/96 · 2304 kbps`, then `FLAC 24/96`.
+  #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+  pub fn labels(&self) -> Vec<String> {
+    let khz = khz(self.sample_rate);
+    let rate = self.bitrate_kbps.map(|kbps| format!("{kbps} kbps"));
+    let (full, short) = if self.flac {
+      (
+        format!("FLAC \u{b7} {}-bit \u{b7} {khz} kHz", self.bits_per_sample),
+        format!("FLAC {}/{khz}", self.bits_per_sample),
+      )
     } else {
-      format!("{:.1}", self.sample_rate as f64 / 1000.0)
+      (format!("MP3 \u{b7} {khz} kHz"), "MP3".to_string())
     };
-    format!("FLAC {}/{khz}", self.bits_per_sample)
+    let with_rate = |text: &str| match &rate {
+      Some(rate) => format!("{text} \u{b7} {rate}"),
+      None => text.to_string(),
+    };
+    let mut all = vec![with_rate(&full), with_rate(&short), short];
+    all.dedup();
+    all
   }
 }
 
@@ -366,24 +395,57 @@ mod tests {
     assert_eq!(init.total_bytes(), 642);
     assert_eq!(init.sample_rate, 96_000);
     assert_eq!(init.bits_per_sample, 24);
-    assert_eq!(init.quality().label(), "FLAC 24/96");
+    assert_eq!(
+      init.quality(1_000).labels(),
+      vec![
+        "FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 5 kbps".to_string(),
+        "FLAC 24/96 \u{b7} 5 kbps".to_string(),
+        "FLAC 24/96".to_string(),
+      ]
+    );
   }
 
   #[test]
-  fn quality_label_matches_the_setting_wording() {
-    let flac = |sample_rate, bits_per_sample| StreamQuality {
+  fn quality_labels_run_from_the_full_wording_to_the_short_one() {
+    let flac = |sample_rate, bits_per_sample, bitrate_kbps| StreamQuality {
       sample_rate,
       bits_per_sample,
       flac: true,
+      bitrate_kbps,
     };
-    assert_eq!(flac(44_100, 16).label(), "FLAC 16/44.1");
-    assert_eq!(flac(88_200, 24).label(), "FLAC 24/88.2");
-    assert_eq!(flac(192_000, 24).label(), "FLAC 24/192");
+    assert_eq!(
+      flac(44_100, 16, Some(987)).labels(),
+      vec![
+        "FLAC \u{b7} 16-bit \u{b7} 44.1 kHz \u{b7} 987 kbps",
+        "FLAC 16/44.1 \u{b7} 987 kbps",
+        "FLAC 16/44.1",
+      ]
+    );
+    assert_eq!(
+      flac(192_000, 24, None).labels(),
+      vec!["FLAC \u{b7} 24-bit \u{b7} 192 kHz", "FLAC 24/192"]
+    );
     let mp3 = StreamQuality {
       flac: false,
-      ..flac(44_100, 16)
+      bitrate_kbps: Some(320),
+      ..flac(44_100, 16, None)
     };
-    assert_eq!(mp3.label(), "MP3 320");
+    assert_eq!(
+      mp3.labels(),
+      vec![
+        "MP3 \u{b7} 44.1 kHz \u{b7} 320 kbps",
+        "MP3 \u{b7} 320 kbps",
+        "MP3"
+      ]
+    );
+  }
+
+  #[test]
+  fn the_flac_bitrate_is_the_file_size_over_the_track_length() {
+    // 642 bytes over one second is 5.1 kbit/s, truncated.
+    let init = parse_init(&init_segment(&[100, 200, 300])).unwrap();
+    assert_eq!(init.quality(1_000).bitrate_kbps, Some(5));
+    assert_eq!(init.quality(0).bitrate_kbps, None);
   }
 
   #[test]

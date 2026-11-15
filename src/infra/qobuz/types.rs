@@ -115,6 +115,9 @@ pub struct Album {
   pub image: Image,
   #[serde(default)]
   pub tracks_count: u32,
+  /// `YYYY-MM-DD`, when Qobuz gives the original release date.
+  #[serde(default)]
+  pub release_date_original: Option<String>,
   pub tracks: Option<Page<Track>>,
 }
 
@@ -175,4 +178,5 @@ pub struct Favorites {
 #[derive(Debug, Deserialize)]
 pub struct Search {
   pub tracks: Option<Page<Track>>,
+  pub albums: Option<Page<Album>>,
 }

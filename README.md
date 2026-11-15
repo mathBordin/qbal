@@ -15,7 +15,9 @@
 A fast [Qobuz](https://www.qobuz.com) player for the Linux terminal, written in Rust.
 
 Browse your Qobuz favorites, playlists and albums, search the catalog, and play
-in lossless quality without leaving the terminal. Qbal adds synced lyrics, an
+in lossless quality without leaving the terminal. The playbar shows the format
+of the track (codec, bit depth, sample rate, bitrate) and the format your sound
+card actually runs at. Qbal adds synced lyrics, an
 audio visualizer, album art, a play queue, listening statistics, media keys,
 Discord status, and Lua plugins.
 
@@ -58,6 +60,7 @@ page in your browser.
 | --- | --- |
 | `?` | Every key binding |
 | `/` | Search Qobuz |
+| `Tab` | Switch the search between songs and albums |
 | `Enter` | Play / open |
 | `Space` | Play / pause |
 | `n` / `p` | Next / previous track |

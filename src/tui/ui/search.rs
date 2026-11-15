@@ -1,4 +1,6 @@
-use crate::core::app::{ActiveBlock, App, SearchResultBlock};
+use crate::core::app::{ActiveBlock, App, SearchMode, SearchResultBlock};
+use crate::core::i18n::Strings;
+use crate::core::plugin_api::AlbumInfo;
 use crate::tui::layout::COMPACT_TOP_ROW_THRESHOLD;
 use crate::tui::theme::ThemeExt;
 use ratatui::{
@@ -53,7 +55,11 @@ pub fn draw_input_and_help_box(
   };
   app.view.input_scroll_offset.set(scroll_offset);
 
-  let input_title = app.strings().screens.search;
+  let mode_label = match app.view.search_mode {
+    SearchMode::Songs => app.strings().screens.songs,
+    SearchMode::Albums => app.strings().screens.albums,
+  };
+  let input_title = app.strings().screens.search_titled(mode_label);
 
   let input = Paragraph::new(lines).scroll((0, scroll_offset)).block(
     Block::default()
@@ -124,7 +130,47 @@ pub fn draw_input_and_help_box(
   f.render_widget(settings, settings_area);
 }
 
+/// One album row: `Title - Artist (2001 · 14 tracks)`; the parts Qobuz did not
+/// give are left out.
+fn album_row(strings: &Strings, album: &AlbumInfo) -> String {
+  let artists = album
+    .artists
+    .iter()
+    .map(|artist| artist.name.as_str())
+    .collect::<Vec<_>>()
+    .join(", ");
+  let mut row = album.name.clone();
+  if !artists.is_empty() {
+    row = format!("{row} - {artists}");
+  }
+  let year = album
+    .release_date
+    .as_deref()
+    .and_then(|date| date.get(..4))
+    .map(str::to_string);
+  let tracks = album
+    .total_tracks
+    .filter(|&count| count > 0)
+    .map(|count| strings.screens.track_count(count));
+  let details = [year, tracks]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" \u{b7} ");
+  if !details.is_empty() {
+    row = format!("{row} ({details})");
+  }
+  row
+}
+
 pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
+  match app.view.search_mode {
+    SearchMode::Songs => draw_song_results(f, app, layout_chunk),
+    SearchMode::Albums => draw_album_results(f, app, layout_chunk),
+  }
+}
+
+fn draw_song_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let songs: Vec<String> = app
     .search_results()
     .tracks
@@ -153,6 +199,33 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
     app.view.search_selected_tracks_index,
     &app.view.search_tracks_scroll_offset,
+  );
+}
+
+/// The albums of the search, as text rows: the cover shows only once an album plays.
+fn draw_album_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
+  let albums: Vec<String> = app
+    .search_results()
+    .albums
+    .as_ref()
+    .map(|albums| {
+      albums
+        .items
+        .iter()
+        .map(|album| album_row(app.strings(), album))
+        .collect()
+    })
+    .unwrap_or_default();
+
+  draw_selectable_list(
+    f,
+    app,
+    layout_chunk,
+    app.strings().screens.albums,
+    &albums,
+    get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
+    app.view.search_selected_albums_index,
+    &app.view.search_albums_scroll_offset,
   );
 }
 
@@ -197,7 +270,11 @@ mod tests {
   #[test]
   fn search_results_are_one_full_size_song_list() {
     let mut app = App::default();
-    app.show_source_search_tracks("q", vec![track("Blue", "Joni"), track("Kind", "Miles")]);
+    app.show_source_search_results(
+      "q",
+      vec![track("Blue", "Joni"), track("Kind", "Miles")],
+      Vec::new(),
+    );
     let content = rendered(&app, Rect::new(0, 0, 90, 30));
     assert!(content.contains("Songs"), "{content}");
     assert!(content.contains("Blue - Joni"), "{content}");
@@ -242,5 +319,46 @@ mod tests {
     app.refresh_language();
     let content = rendered_input(&app, Rect::new(0, 0, 40, 3));
     assert!(content.contains(app.strings().screens.search), "{content}");
+  }
+
+  #[test]
+  fn album_mode_lists_albums_with_artist_year_and_track_count() {
+    use crate::core::app::SearchMode;
+    use crate::core::plugin_api::{AlbumInfo, ArtistRef};
+    let mut app = App::default();
+    let album = AlbumInfo {
+      uri: Some("qobuz:album:1".into()),
+      name: "Discovery".into(),
+      artists: vec![ArtistRef {
+        id: None,
+        name: "Daft Punk".into(),
+      }],
+      release_date: Some("2001-03-12".into()),
+      total_tracks: Some(14),
+      ..AlbumInfo::default()
+    };
+    app.show_source_search_results("q", vec![track("Blue", "Joni")], vec![album]);
+    app.toggle_search_mode();
+    assert_eq!(app.view.search_mode, SearchMode::Albums);
+    let content = rendered(&app, Rect::new(0, 0, 90, 10));
+    println!(
+      "{}",
+      content
+        .chars()
+        .collect::<Vec<_>>()
+        .chunks(90)
+        .map(|r| r.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+    );
+    assert!(content.contains("Albums"), "{content}");
+    assert!(
+      content.contains("Discovery - Daft Punk (2001 \u{b7} 14 tracks)"),
+      "{content}"
+    );
+    assert!(
+      !content.contains("Blue - Joni"),
+      "songs are hidden: {content}"
+    );
   }
 }

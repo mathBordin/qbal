@@ -9,8 +9,36 @@ pub(super) const DEFAULT_ROUTE: Route = Route {
 #[derive(PartialEq, Debug, Default)]
 pub enum SearchResultBlock {
   SongSearch,
+  AlbumSearch,
   #[default]
   Empty,
+}
+
+/// What the search screen lists, and what Enter plays: single songs, or whole
+/// albums. One catalogue search fills both lists, so switching needs no new
+/// request.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SearchMode {
+  #[default]
+  Songs,
+  Albums,
+}
+
+impl SearchMode {
+  pub fn toggled(self) -> Self {
+    match self {
+      SearchMode::Songs => SearchMode::Albums,
+      SearchMode::Albums => SearchMode::Songs,
+    }
+  }
+
+  /// The results block this mode lists.
+  pub fn block(self) -> SearchResultBlock {
+    match self {
+      SearchMode::Songs => SearchResultBlock::SongSearch,
+      SearchMode::Albums => SearchResultBlock::AlbumSearch,
+    }
+  }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

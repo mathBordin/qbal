@@ -36,6 +36,7 @@ use super::{
   Unauthorized,
 };
 use crate::core::app::{App, TrackTableContext};
+use crate::core::plugin_api::TrackInfo;
 use crate::core::source::{MediaSource, Searcher, Source};
 use crate::core::state::PersistedRuntimeState;
 use crate::infra::audio::{LocalPlayer, PreparedStream};
@@ -72,6 +73,10 @@ pub async fn route_qobuz_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
     }
     IoEvent::GetQobuzSearchResults(query) => {
       run_qobuz_search(app, query).await;
+      true
+    }
+    IoEvent::PlayQobuzAlbum(uri) => {
+      play_qobuz_album(app, uri).await;
       true
     }
     IoEvent::QobuzLogin => {
@@ -390,17 +395,30 @@ async fn load_qobuz_tracks(app: &Arc<Mutex<App>>, playlist_uri: &str) {
   }
 }
 
-/// Run a catalog search and populate the songs block of `app.search_results`.
+/// Run a catalog search and populate the songs and albums of `app.search_results`.
 async fn run_qobuz_search(app: &Arc<Mutex<App>>, query: &str) {
   let Some(source) = build_source(app, WhenLoggedOut::Login).await else {
     return;
   };
   match source.search(query).await {
-    Ok(results) => app
-      .lock()
-      .await
-      .show_source_search_tracks(query, results.tracks),
+    Ok(results) => {
+      app
+        .lock()
+        .await
+        .show_source_search_results(query, results.tracks, results.albums)
+    }
     Err(e) => report(app, QobuzStep::Search, e).await,
+  }
+}
+
+/// Fetch the album's tracks and play them from the first, as one queue.
+async fn play_qobuz_album(app: &Arc<Mutex<App>>, album_uri: &str) {
+  let Some(source) = build_source(app, WhenLoggedOut::Message).await else {
+    return;
+  };
+  match source.tracks(album_uri).await {
+    Ok(tracks) => start_qobuz_tracks(app, tracks, 0, None).await,
+    Err(e) => report(app, QobuzStep::Tracks, e).await,
   }
 }
 
@@ -471,13 +489,14 @@ fn next_fetch_id() -> u64 {
 
 /// Download the track at `uri` into a tempfile, for the native queue engine's
 /// off-pump fetch (playing is the queue's job), and return its delivered
-/// format label. Reads the progressive stream to its end, so its per-segment
-/// retries apply here too.
+/// format. Reads the progressive stream to its end, so its per-segment
+/// retries apply here too. `duration_ms` is the track's length, for the bitrate.
 pub(crate) async fn download_for_queue(
   source: &QobuzSource,
   uri: &str,
   quality: u8,
-) -> Result<(NamedTempFile, String)> {
+  duration_ms: u64,
+) -> Result<(NamedTempFile, StreamQuality)> {
   let track_id = track_id_from_uri(uri)?;
   let tmp = NamedTempFile::new().context("creating temp file for Qobuz stream")?;
   let (init, stream) = source.begin_stream(track_id, quality).await?;
@@ -489,7 +508,7 @@ pub(crate) async fn download_for_queue(
     .context("download task")?
     .context("downloading the Qobuz stream")
     .map_err(|e| stream_cause(&failure, e))?;
-  Ok((tmp, init.quality().label()))
+  Ok((tmp, init.quality(duration_ms)))
 }
 
 /// The segment error behind a failed read, when there is one: the reader and
@@ -507,6 +526,7 @@ async fn prepare_track(
   source: &QobuzSource,
   track_id: &str,
   quality: u8,
+  duration_ms: u64,
 ) -> Result<(
   NamedTempFile,
   progressive::Completion,
@@ -515,7 +535,7 @@ async fn prepare_track(
 )> {
   let tmp = NamedTempFile::new().context("creating temp file for Qobuz stream")?;
   let (init, stream) = source.begin_stream(track_id, quality).await?;
-  let delivered = init.quality();
+  let delivered = init.quality(duration_ms);
   let total = init.total_bytes();
   let failure = stream.failure();
   let complete = stream.completion();
@@ -546,12 +566,13 @@ fn spawn_fetch(
   track_id: String,
   quality: u8,
 ) {
+  let duration_ms = session.current().map_or(0, |t| t.duration_ms);
   spawn_resolve(app, session);
   let app = Arc::clone(app);
   let source = Arc::clone(&session.source);
   let fetch_id = session.fetch_id;
   let task = tokio::spawn(async move {
-    match prepare_track(&source, &track_id, quality).await {
+    match prepare_track(&source, &track_id, quality, duration_ms).await {
       Ok((tmp, complete, delivered, prepared)) => {
         commit_fetch(&app, fetch_id, (tmp, complete), delivered, prepared).await
       }
@@ -755,6 +776,17 @@ pub(crate) async fn start_qobuz_queue(
       .map(|p| p.items.as_slice());
     snapshot_tracks(&guard.track_table.tracks, search, uris)
   };
+  start_qobuz_tracks(app, tracks, start_idx, resume).await;
+}
+
+/// [`start_qobuz_queue`] for tracks already in hand (an album fetched from the
+/// catalogue).
+async fn start_qobuz_tracks(
+  app: &Arc<Mutex<App>>,
+  tracks: Vec<TrackInfo>,
+  start_idx: usize,
+  resume: Option<ResumePoint>,
+) {
   if tracks.is_empty() {
     set_error(
       app,

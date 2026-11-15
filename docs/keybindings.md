@@ -30,6 +30,8 @@ The third column is the name to use under `keybindings:` in `config.yml`.
 | Next / previous page | `Ctrl-d` / `Ctrl-u` | `next_page` / `previous_page` |
 | Start / end of the list | `Ctrl-a` / `Ctrl-e` | `jump_to_start` / `jump_to_end` |
 | Search Qobuz | `/` | `search` |
+| Switch the search between songs and albums | `Tab` (on the search screen) | |
+| Open an album's track list instead of playing it | `o` (in the album results) | |
 | Help | `?` | `help` |
 | Settings | `Alt-,` | `open_settings` |
 | Save settings | `Alt-s` | `save_settings` |

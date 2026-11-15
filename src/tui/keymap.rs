@@ -464,6 +464,8 @@ pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> 
     ),
     row(help.stats_period, Literal("[ / ]"), help.context_stats),
     row(help.sort_open, Literal(","), help.context_sortable_lists),
+    row(help.search_mode, Literal("<Tab>"), help.context_search).needs(SEARCH),
+    row(help.album_open, Literal("o"), help.context_search_results).needs(SEARCH),
     // Append new rows here so the pinned English table keeps its indices.
   ]
 }

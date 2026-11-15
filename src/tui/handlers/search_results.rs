@@ -1,13 +1,15 @@
-//! The search screen: one list of songs from the Qobuz catalog.
+//! The search screen: songs or albums from the Qobuz catalog, by search mode.
 //!
 //! The list is either *hovered* (focus is on the screen, `search_selected_block`
 //! is `Empty`) or *selected* (a row cursor moves inside it). Enter selects the
-//! hovered list, then plays from the selected row.
+//! hovered list, then plays from the selected row: a song starts its list at
+//! that song, an album plays whole from its first track. Tab switches between
+//! songs and albums.
 
 use super::common_key_events;
-use crate::core::action::Action;
-use crate::core::app::{App, SearchResultBlock};
-use crate::core::plugin_api::TrackInfo;
+use crate::core::action::{Action, OpenTarget};
+use crate::core::app::{App, SearchMode, SearchResultBlock};
+use crate::core::plugin_api::{AlbumInfo, TrackInfo};
 use crate::tui::event::Key;
 
 fn songs(app: &App) -> &[TrackInfo] {
@@ -18,17 +20,55 @@ fn songs(app: &App) -> &[TrackInfo] {
     .map_or(&[], |paged| paged.items.as_slice())
 }
 
+fn albums(app: &App) -> &[AlbumInfo] {
+  app
+    .search_results()
+    .albums
+    .as_ref()
+    .map_or(&[], |paged| paged.items.as_slice())
+}
+
 fn is_selected(app: &App) -> bool {
-  app.view.search_selected_block == SearchResultBlock::SongSearch
+  app.view.search_selected_block == app.view.search_mode.block()
 }
 
-fn move_cursor(app: &mut App, next: impl FnOnce(&[TrackInfo], Option<usize>) -> usize) {
-  let index = next(songs(app), app.view.search_selected_tracks_index);
-  app.view.search_selected_tracks_index = Some(index);
+/// The shown list's length and cursor row.
+fn cursor(app: &App) -> (usize, Option<usize>) {
+  match app.view.search_mode {
+    SearchMode::Songs => (songs(app).len(), app.view.search_selected_tracks_index),
+    SearchMode::Albums => (albums(app).len(), app.view.search_selected_albums_index),
+  }
 }
 
-/// Play the result list from the selected row.
+fn set_cursor(app: &mut App, index: usize) {
+  match app.view.search_mode {
+    SearchMode::Songs => app.view.search_selected_tracks_index = Some(index),
+    SearchMode::Albums => app.view.search_selected_albums_index = Some(index),
+  }
+}
+
+/// Move the cursor with one of the shared list-navigation functions, which
+/// only look at the list's length.
+fn move_cursor(app: &mut App, next: impl FnOnce(&[()], Option<usize>) -> usize) {
+  let (len, index) = cursor(app);
+  // A `Vec` of a zero-sized type holds its length without allocating.
+  let rows = vec![(); len];
+  set_cursor(app, next(&rows, index));
+}
+
+/// Play from the selected row: the songs list from that song, or the album whole.
 fn play_selected(app: &mut App) {
+  match app.view.search_mode {
+    SearchMode::Songs => play_selected_song(app),
+    SearchMode::Albums => {
+      if let Some(uri) = selected_album_uri(app) {
+        app.apply(Action::PlayAlbum { uri });
+      }
+    }
+  }
+}
+
+fn play_selected_song(app: &mut App) {
   let Some(paged) = app.search_results().tracks.as_ref() else {
     return;
   };
@@ -44,8 +84,23 @@ fn play_selected(app: &mut App) {
   app.apply(Action::PlayUris { uris, offset });
 }
 
+fn selected_album_uri(app: &App) -> Option<String> {
+  let index = app.view.search_selected_albums_index?;
+  albums(app).get(index)?.uri.clone()
+}
+
+/// Show the selected album's tracks in the track table.
+fn open_selected_album(app: &mut App) {
+  if app.view.search_mode != SearchMode::Albums || !is_selected(app) {
+    return;
+  }
+  if let Some(uri) = selected_album_uri(app) {
+    app.apply(Action::Open(OpenTarget::SourcePlaylist(uri)));
+  }
+}
+
 fn queue_selected(app: &mut App) {
-  if !is_selected(app) {
+  if app.view.search_mode != SearchMode::Songs || !is_selected(app) {
     return;
   }
   let track = app
@@ -62,6 +117,7 @@ pub fn handler(key: Key, app: &mut App) {
     Key::Esc => {
       app.view.search_selected_block = SearchResultBlock::Empty;
     }
+    Key::Tab => app.toggle_search_mode(),
     k if common_key_events::down_event(k, &app.user_config.keys) && is_selected(app) => {
       move_cursor(app, common_key_events::on_down_press_handler);
     }
@@ -72,14 +128,12 @@ pub fn handler(key: Key, app: &mut App) {
       move_cursor(app, |_, _| common_key_events::on_high_press_handler());
     }
     k if common_key_events::middle_event(k) && is_selected(app) => {
-      move_cursor(app, |items, _| {
-        common_key_events::on_middle_press_handler(items)
+      move_cursor(app, |rows, _| {
+        common_key_events::on_middle_press_handler(rows)
       });
     }
     k if common_key_events::low_event(k) && is_selected(app) => {
-      move_cursor(app, |items, _| {
-        common_key_events::on_low_press_handler(items)
-      });
+      move_cursor(app, |rows, _| common_key_events::on_low_press_handler(rows));
     }
     k if common_key_events::left_event(k, &app.user_config.keys)
       && !common_key_events::sidebar_on_right(&app.user_config) =>
@@ -95,10 +149,11 @@ pub fn handler(key: Key, app: &mut App) {
     }
     Key::Enter if is_selected(app) => play_selected(app),
     Key::Enter => {
-      let index = app.view.search_selected_tracks_index.unwrap_or(0);
-      app.view.search_selected_tracks_index = Some(index);
-      app.view.search_selected_block = SearchResultBlock::SongSearch;
+      let (_, index) = cursor(app);
+      set_cursor(app, index.unwrap_or(0));
+      app.view.search_selected_block = app.view.search_mode.block();
     }
+    Key::Char('o') => open_selected_album(app),
     _ if key == app.user_config.keys.add_item_to_queue => queue_selected(app),
     _ => {}
   }
@@ -131,7 +186,7 @@ mod tests {
 
   fn app_with_songs(count: u32) -> App {
     let mut app = App::default();
-    app.show_source_search_tracks("q", (1..=count).map(track).collect());
+    app.show_source_search_results("q", (1..=count).map(track).collect(), Vec::new());
     app.set_current_route_state(
       Some(ActiveBlock::SearchResultBlock),
       Some(ActiveBlock::SearchResultBlock),
@@ -171,5 +226,149 @@ mod tests {
     handler(Key::Esc, &mut app);
     assert_eq!(app.view.search_selected_block, SearchResultBlock::Empty);
     assert_eq!(app.view.search_selected_tracks_index, Some(1));
+  }
+
+  fn album(n: u32) -> AlbumInfo {
+    AlbumInfo {
+      id: Some(n.to_string()),
+      uri: Some(format!("qobuz:album:{n}")),
+      name: format!("Album {n}"),
+      total_tracks: Some(10),
+      ..AlbumInfo::default()
+    }
+  }
+
+  /// An app on the search screen with `count` songs and albums, whose
+  /// dispatched events the returned receiver collects.
+  fn app_with_results(
+    count: u32,
+  ) -> (
+    App,
+    std::sync::mpsc::Receiver<crate::infra::network::IoEvent>,
+  ) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut app = App::new_with_state(
+      tx,
+      crate::core::user_config::UserConfig::new(),
+      crate::core::state::RuntimeState::default(),
+      None,
+      crate::core::i18n::Language::En,
+    );
+    app.show_source_search_results(
+      "q",
+      (1..=count).map(track).collect(),
+      (1..=count).map(album).collect(),
+    );
+    app.set_current_route_state(
+      Some(ActiveBlock::SearchResultBlock),
+      Some(ActiveBlock::SearchResultBlock),
+    );
+    (app, rx)
+  }
+
+  #[test]
+  fn tab_switches_between_songs_and_albums_and_leaves_the_list() {
+    let (mut app, _rx) = app_with_results(3);
+    handler(Key::Enter, &mut app);
+    assert_eq!(app.view.search_mode, SearchMode::Songs);
+    assert!(is_selected(&app));
+
+    handler(Key::Tab, &mut app);
+    assert_eq!(app.view.search_mode, SearchMode::Albums);
+    assert_eq!(app.view.search_selected_block, SearchResultBlock::Empty);
+    assert_eq!(
+      app.view.search_hovered_block,
+      SearchResultBlock::AlbumSearch
+    );
+
+    handler(Key::Tab, &mut app);
+    assert_eq!(app.view.search_mode, SearchMode::Songs);
+  }
+
+  #[test]
+  fn each_mode_keeps_its_own_cursor() {
+    let (mut app, _rx) = app_with_results(4);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    handler(Key::Down, &mut app);
+    assert_eq!(app.view.search_selected_tracks_index, Some(2));
+
+    handler(Key::Tab, &mut app);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    assert_eq!(app.view.search_selected_albums_index, Some(1));
+    assert_eq!(app.view.search_selected_tracks_index, Some(2));
+  }
+
+  /// The next dispatched event, in words.
+  fn next_event(rx: &std::sync::mpsc::Receiver<crate::infra::network::IoEvent>) -> Option<String> {
+    rx.try_recv()
+      .ok()
+      .map(|event| crate::core::test_helpers::describe_event(&event))
+  }
+
+  #[test]
+  fn enter_on_an_album_plays_the_whole_album() {
+    let (mut app, rx) = app_with_results(3);
+    handler(Key::Tab, &mut app);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    handler(Key::Enter, &mut app);
+    assert_eq!(next_event(&rx).as_deref(), Some("play album qobuz:album:2"));
+    assert!(
+      rx.try_recv().is_err(),
+      "nothing else is dispatched for an album"
+    );
+  }
+
+  #[test]
+  fn o_opens_the_selected_album_s_track_list() {
+    let (mut app, rx) = app_with_results(2);
+    handler(Key::Tab, &mut app);
+    handler(Key::Enter, &mut app);
+    handler(Key::Char('o'), &mut app);
+    assert_eq!(next_event(&rx).as_deref(), Some("open qobuz:album:1"));
+  }
+
+  #[test]
+  fn o_and_the_queue_key_do_nothing_in_the_wrong_mode() {
+    let (mut app, rx) = app_with_results(2);
+    handler(Key::Enter, &mut app);
+    handler(Key::Char('o'), &mut app);
+    assert!(rx.try_recv().is_err(), "o only opens albums");
+
+    handler(Key::Tab, &mut app);
+    handler(Key::Enter, &mut app);
+    let queue_key = app.user_config.keys.add_item_to_queue;
+    handler(queue_key, &mut app);
+    assert!(rx.try_recv().is_err(), "the queue key adds songs only");
+  }
+
+  #[test]
+  fn enter_on_a_song_still_plays_the_song_list_from_that_row() {
+    let (mut app, rx) = app_with_results(3);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    handler(Key::Enter, &mut app);
+    assert_eq!(
+      next_event(&rx).as_deref(),
+      Some("play 3 songs from Some(1)")
+    );
+  }
+
+  #[test]
+  fn a_new_search_resets_both_cursors_and_keeps_the_mode() {
+    let (mut app, _rx) = app_with_results(3);
+    handler(Key::Tab, &mut app);
+    handler(Key::Enter, &mut app);
+    handler(Key::Down, &mut app);
+    app.show_source_search_results("again", vec![track(9)], vec![album(9)]);
+    assert_eq!(app.view.search_mode, SearchMode::Albums);
+    assert_eq!(app.view.search_selected_albums_index, Some(0));
+    assert_eq!(app.view.search_selected_block, SearchResultBlock::Empty);
+    assert_eq!(
+      app.view.search_hovered_block,
+      SearchResultBlock::AlbumSearch
+    );
   }
 }

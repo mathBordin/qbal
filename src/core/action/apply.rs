@@ -58,6 +58,7 @@ impl App {
         }
       }
       Action::PlayUris { uris, offset } => self.start_playback_uris(uris, offset),
+      Action::PlayAlbum { uri } => self.play_album(uri),
       Action::QueueTrack(track) => self.add_track_to_native_queue(track),
       Action::PlayQueueItem { uri, position } => self.play_queue_item(&uri, position),
       Action::RemoveFromQueue { uri, position } => {

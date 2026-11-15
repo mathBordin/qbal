@@ -27,3 +27,23 @@ fn nav_target_names_round_trip() {
   }
   assert_eq!(NavTarget::from_name("nowhere"), None);
 }
+
+#[test]
+fn play_album_asks_for_the_album_by_uri() {
+  use crate::infra::network::IoEvent;
+  let (tx, rx) = std::sync::mpsc::channel();
+  let mut app = App::new_with_state(
+    tx,
+    crate::core::user_config::UserConfig::new(),
+    crate::core::state::RuntimeState::default(),
+    None,
+    crate::core::i18n::Language::En,
+  );
+  app.apply(Action::PlayAlbum {
+    uri: "qobuz:album:42".into(),
+  });
+  assert!(matches!(
+    rx.try_recv(),
+    Ok(IoEvent::PlayQobuzAlbum(uri)) if uri == "qobuz:album:42"
+  ));
+}

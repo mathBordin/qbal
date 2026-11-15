@@ -27,7 +27,7 @@ use reqwest::Client;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use tokio::sync::Mutex;
 
-use crate::core::plugin_api::{ArtistRef, PlaylistInfo, SearchResults, TrackInfo};
+use crate::core::plugin_api::{AlbumInfo, ArtistRef, PlaylistInfo, SearchResults, TrackInfo};
 use crate::core::source::{MediaSource, PlaylistWriter, Searcher};
 use crate::infra::audio::LocalPlayer;
 use stream::cmaf::InitSegment;
@@ -701,6 +701,29 @@ fn album_to_playlist_info(a: &types::Album) -> PlaylistInfo {
   }
 }
 
+/// An album from a catalogue search; its tracks load when it is opened or played.
+fn album_to_album_info(a: &types::Album) -> AlbumInfo {
+  AlbumInfo {
+    id: Some(a.id.clone()),
+    uri: Some(format!("{ALBUM_PREFIX}{}", a.id)),
+    name: a.title.clone(),
+    artists: a
+      .artist
+      .iter()
+      .filter(|n| !n.name.is_empty())
+      .map(|n| ArtistRef {
+        id: n.id.clone(),
+        name: n.name.clone(),
+      })
+      .collect(),
+    album_type: None,
+    release_date: a.release_date_original.clone(),
+    total_tracks: Some(a.tracks_count),
+    image_url: a.image.large.clone(),
+    tracks: Vec::new(),
+  }
+}
+
 /// Map a Qobuz track onto [`TrackInfo`]; `parent` is the album of an `album/get`.
 fn track_to_track_info(t: &types::Track, parent: Option<&types::Album>) -> TrackInfo {
   let album = t.album.as_ref().or(parent);
@@ -773,7 +796,8 @@ impl MediaSource for QobuzSource {
 }
 
 impl Searcher for QobuzSource {
-  /// Tracks only: the search screen lists songs.
+  /// Songs and albums, from the one catalogue call: the search screen shows
+  /// whichever its mode picks.
   async fn search(&self, query: &str) -> Result<SearchResults> {
     let found: types::Search = self
       .get(
@@ -791,9 +815,16 @@ impl Searcher for QobuzSource {
       .iter()
       .map(|t| track_to_track_info(t, None))
       .collect();
+    let albums = found
+      .albums
+      .unwrap_or_default()
+      .items
+      .iter()
+      .map(album_to_album_info)
+      .collect();
     Ok(SearchResults {
       tracks,
-      albums: vec![],
+      albums,
       artists: vec![],
       playlists: vec![],
       shows: vec![],
@@ -995,6 +1026,38 @@ mod tests {
     assert!(playlist_to_playlist_info(&page.playlists.items[1])
       .image_url
       .is_none());
+  }
+
+  #[test]
+  fn a_search_reply_carries_songs_and_albums() {
+    let found: types::Search = serde_json::from_str(
+      r#"{ "query": "discovery",
+        "albums": { "total": 1, "items": [
+          { "id": "0825646", "title": "Discovery", "tracks_count": 14,
+            "release_date_original": "2001-03-12",
+            "artist": { "id": 36819, "name": "Daft Punk" },
+            "image": { "large": "https://img/discovery.jpg" } } ] },
+        "tracks": { "total": 0, "items": [] } }"#,
+    )
+    .unwrap();
+    let album = album_to_album_info(&found.albums.unwrap().items[0]);
+    assert_eq!(album.uri.as_deref(), Some("qobuz:album:0825646"));
+    assert_eq!(album.name, "Discovery");
+    assert_eq!(album.artists[0].name, "Daft Punk");
+    assert_eq!(album.release_date.as_deref(), Some("2001-03-12"));
+    assert_eq!(album.total_tracks, Some(14));
+    assert_eq!(
+      album.image_url.as_deref(),
+      Some("https://img/discovery.jpg")
+    );
+    assert!(album.tracks.is_empty());
+  }
+
+  #[test]
+  fn a_search_reply_without_albums_still_parses() {
+    let found: types::Search =
+      serde_json::from_str(r#"{ "tracks": { "total": 0, "items": [] } }"#).unwrap();
+    assert!(found.albums.is_none());
   }
 
   #[test]

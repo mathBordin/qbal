@@ -13,12 +13,8 @@
   action tree at 0 by a raw text scan that includes tests, comments, and
   string literals. CI clippy never compiles tests, so write a test
   catch-all as `_other =>` and only on a `Result`/`Option` scrutinee.
-- Every `Action` variant has an arm in `tui/keymap.rs::default_binding`,
-  naming the key or gesture that produces it; a variant no gesture produces
-  is `Exposure::Unbound("reason")`. A new variant is a compile error until
-  it has an arm, and a test failure until `sample_actions()` in the same
-  file has a value for it (an `Unbound` one also goes into the `UNBOUND`
-  pin, which a producer scan of `src/tui/` checks). Feature-gate an arm's
-  body, never the arm: clippy skips a match when any arm carries a `#[cfg]`.
+- A new variant needs its arm in `App::apply` (`apply.rs`) and a test in
+  `tests.rs`. Feature-gate an arm's body, never the arm: clippy skips a
+  match when any arm carries a `#[cfg]`.
 - `Action` derives serde (the Lua plugins' wire shape); a payload type added to
   it must stay serde-derivable.

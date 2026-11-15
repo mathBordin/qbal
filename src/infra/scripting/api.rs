@@ -372,7 +372,7 @@ pub(super) fn install_api(
 
   install_action(lua, &tbl, shared, "cycle_repeat", || Action::CycleRepeat)?;
 
-  // qbal.play_uri(uri): play one Qobuz track.
+  // qbal.play_uri(uri): play one Qobuz track, or a whole album.
   {
     let shared = shared.clone();
     let play_uri = lua.create_function(move |_, uri: String| {
@@ -381,9 +381,11 @@ pub(super) fn install_api(
           uris: vec![uri],
           offset: None,
         }
+      } else if uri.starts_with("qobuz:album:") {
+        Action::PlayAlbum { uri }
       } else {
         return Err(mlua::Error::RuntimeError(format!(
-          "qbal.play_uri: expected a qobuz:track uri, got '{uri}'"
+          "qbal.play_uri: expected a qobuz:track or qobuz:album uri, got '{uri}'"
         )));
       };
       shared.effects.borrow_mut().push(action);

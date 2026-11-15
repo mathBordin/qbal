@@ -1039,6 +1039,14 @@ mod action_tests {
   }
 
   #[test]
+  fn play_uri_album_plays_the_whole_album() {
+    assert!(matches!(
+      run_action(r#"qbal.play_uri("qobuz:album:0825646")"#),
+      Action::PlayAlbum { uri } if uri == "qobuz:album:0825646"
+    ));
+  }
+
+  #[test]
   fn play_uri_garbage_raises() {
     let mut engine = ScriptEngine::new().unwrap();
     assert!(engine

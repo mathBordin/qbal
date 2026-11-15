@@ -496,10 +496,10 @@ pub struct DecodedQueuePlayback {
   /// The handle to abort the background download task if the slot is cleared
   /// or replaced before the download completes.
   pub abort_handle: Option<DownloadAbortHandle>,
-  /// The delivered audio format of a downloaded track (Qobuz, e.g.
-  /// `FLAC 24/96`), shown after the artists in the playbar.
+  /// The delivered audio format of a downloaded track (Qobuz), shown in the
+  /// playbar.
   #[cfg_attr(not(feature = "tui"), allow(dead_code))]
-  pub quality: Option<String>,
+  pub quality: Option<crate::infra::qobuz::StreamQuality>,
 }
 
 /// What the native queue's playback slot is currently playing. Call sites ask

@@ -214,7 +214,8 @@ does exactly what the matching key does.
 - `qbal.shuffle(on)` - turn shuffle on or off.
 - `qbal.set_repeat(mode)` - `"off"`, `"track"` or `"context"`.
 - `qbal.cycle_repeat()` - cycle repeat like the repeat key.
-- `qbal.play_uri(uri)` - play one `qobuz:track:` uri. Anything else raises.
+- `qbal.play_uri(uri)` - play one `qobuz:track:` uri, or a whole album from its
+  `qobuz:album:` uri. Anything else raises.
 - `qbal.search(query)` - search Qobuz and show the results.
 - `qbal.notify(msg, ttl_secs?)` - show a status message (default 4 seconds).
 

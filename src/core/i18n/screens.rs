@@ -7,6 +7,14 @@ pub struct ScreenStrings {
   pub settings: &'static str,
   pub type_help: &'static str,
   pub songs: &'static str,
+  pub albums: &'static str,
+  pub output: &'static str,
+  /// The sound card, before the format it runs at: `Card: 24-bit · 96 kHz`.
+  pub card: &'static str,
+  /// `Search · {mode}`: the search box titled with the search mode.
+  pub search_titled: &'static str,
+  /// `{count} tracks`.
+  pub track_count: &'static str,
   pub artists: &'static str,
   pub playlists: &'static str,
   pub artist: &'static str,
@@ -120,6 +128,11 @@ pub const EN: ScreenStrings = ScreenStrings {
   settings: "Settings",
   type_help: "Type ?",
   songs: "Songs",
+  albums: "Albums",
+  output: "Output",
+  card: "Card",
+  search_titled: "Search \u{b7} {mode}",
+  track_count: "{count} tracks",
   artists: "Artists",
   playlists: "Playlists",
   artist: "Artist",
@@ -236,6 +249,11 @@ pub const PT_BR: ScreenStrings = ScreenStrings {
   settings: "Configurações",
   type_help: "Digite ?",
   songs: "Músicas",
+  albums: "Álbuns",
+  output: "Saída",
+  card: "Placa",
+  search_titled: "Buscar \u{b7} {mode}",
+  track_count: "{count} faixas",
   artists: "Artistas",
   playlists: "Playlists",
   artist: "Artista",
@@ -353,6 +371,11 @@ pub const FR: ScreenStrings = ScreenStrings {
   settings: "Paramètres",
   type_help: "Tapez ?",
   songs: "Titres",
+  albums: "Albums",
+  output: "Sortie",
+  card: "Carte",
+  search_titled: "Rechercher \u{b7} {mode}",
+  track_count: "{count} titres",
   artists: "Artistes",
   playlists: "Playlists",
   artist: "Artiste",
@@ -467,6 +490,12 @@ pub const FR: ScreenStrings = ScreenStrings {
 impl ScreenStrings {
   pub fn type_key(&self, key: &str) -> String {
     crate::core::i18n::format_template(self.type_key, &[("key", key)])
+  }
+  pub fn search_titled(&self, mode: &str) -> String {
+    crate::core::i18n::format_template(self.search_titled, &[("mode", mode)])
+  }
+  pub fn track_count(&self, count: u32) -> String {
+    crate::core::i18n::format_template(self.track_count, &[("count", &count.to_string())])
   }
   pub fn songs_searching(&self, query: &str) -> String {
     crate::core::i18n::format_template(self.songs_searching, &[("query", query)])

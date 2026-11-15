@@ -44,6 +44,8 @@ pub mod sort;
 pub mod source;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
 pub mod state;
+#[cfg_attr(not(feature = "tui"), allow(dead_code))]
+pub mod stream_format;
 #[cfg(test)]
 pub mod test_helpers;
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]

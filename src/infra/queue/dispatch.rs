@@ -16,6 +16,7 @@ use crate::core::plugin_api::TrackInfo;
 use crate::core::queue::is_qobuz_uri;
 use crate::core::source::Source;
 use crate::infra::network::IoEvent;
+use crate::infra::qobuz::StreamQuality;
 use crate::infra::queue::QueueEnd;
 
 use crate::infra::audio::LocalPlayer;
@@ -202,10 +203,12 @@ async fn play_queued_qobuz(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str) 
   let app_for_spawn = Arc::clone(app);
   let uri = uri.to_string();
   let name = track.name.clone();
+  let duration_ms = track.duration_ms;
   let handle = tokio::spawn(async move {
-    let result = crate::infra::qobuz::dispatch::download_for_queue(&source, &uri, quality)
-      .await
-      .map(|(tmp, label)| (tmp, Some(label)));
+    let result =
+      crate::infra::qobuz::dispatch::download_for_queue(&source, &uri, quality, duration_ms)
+        .await
+        .map(|(tmp, delivered)| (tmp, Some(delivered)));
     finish_decoded_fetch(&app_for_spawn, fetch_id, result, &name).await;
   });
 
@@ -250,8 +253,8 @@ async fn publish_pending_decoded(
 }
 
 /// Complete a background queue fetch: if the slot still carries `fetch_id`,
-/// stage the downloaded file and finalize the slot (with the delivered format
-/// label, when the source reports one); otherwise (skipped, torn down, or
+/// stage the downloaded file and finalize the slot (with the delivered format,
+/// when the source reports one); otherwise (skipped, torn down, or
 /// replaced meanwhile) drop the result silently. On a download or decode
 /// failure the queue advances past the item, exactly like the old inline
 /// path. The stage runs off the `App` lock (its clear waits on the audio
@@ -261,7 +264,7 @@ async fn publish_pending_decoded(
 async fn finish_decoded_fetch(
   app: &Arc<Mutex<App>>,
   fetch_id: u64,
-  result: anyhow::Result<(tempfile::NamedTempFile, Option<String>)>,
+  result: anyhow::Result<(tempfile::NamedTempFile, Option<StreamQuality>)>,
   track_name: &str,
 ) {
   use crate::infra::queue::QueueNowPlaying;

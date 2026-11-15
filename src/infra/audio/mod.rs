@@ -6,7 +6,9 @@
 
 // Shared decode/output engine. Gated on `audio-decode`, which `local-files`,
 // `subsonic` and `qobuz` pull in, so the player is reachable from each source.
+mod hardware;
 mod player;
+pub use hardware::HardwareProbe;
 pub use player::LocalPlayer;
 pub use player::PreparedStream;
 pub use player::Reopen;

@@ -66,6 +66,9 @@ pub struct ViewState {
   /// The sidebar row the cursor is on, by identity.
   pub library_selected: LibraryTarget,
   pub search_selected_tracks_index: Option<usize>,
+  pub search_selected_albums_index: Option<usize>,
+  /// Whether the search screen lists songs or albums.
+  pub search_mode: SearchMode,
   pub search_hovered_block: SearchResultBlock,
   pub search_selected_block: SearchResultBlock,
 
@@ -124,6 +127,7 @@ pub struct ViewState {
   pub plugin_popup_scroll: u16,
 
   pub search_tracks_scroll_offset: Cell<usize>,
+  pub search_albums_scroll_offset: Cell<usize>,
   pub library_scroll_offset: Cell<usize>,
   pub playlist_scroll_offset: Cell<usize>,
   pub settings_scroll_offset: Cell<usize>,

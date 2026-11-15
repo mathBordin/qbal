@@ -54,7 +54,7 @@ ratatui-image = { version = "11.1.0", optional = true, default-features = false,
 image = { version = "0.25", optional = true }
 mlua = { version = "0.12", features = ["lua54", "vendored", "serde"], optional = true }
 md-5 = { version = "0.11" }
-# Subsonic, YouTube and Qobuz stream each track to a tempfile before playing it through the shared
+# Qobuz streams each track into a tempfile while playing it through the shared
 # rodio sink. Also a dev-dependency (used by tests across features).
 tempfile = { version = "3" }
 # Qobuz transport: the signed-request and key-derivation primitives plus the
@@ -69,31 +69,13 @@ hkdf = { version = "0.13" }
 bytes = { version = "1" }
 
 # stream-download buffers a byte stream behind a Read+Seek adapter that rodio
-# can decode while the download runs. Internet radio uses it on an infinite HTTP
-# (ICY) stream, without seeking; Qobuz uses it on its segment transport, with
-# seeking. icy-metadata parses in-band StreamTitle now-playing metadata and is
-# only compiled under the opt-in `internet-radio` feature.
+# can decode while the download runs: Qobuz uses it on its segment transport.
 stream-download = { version = "0.24", default-features = false, features = ["reqwest-rustls"] }
 
-# Local-files media source dependencies
-# Local-files audio output. Defaults pull in cpal `playback` plus the common
-# codecs (flac/mp3/mp4-aac/vorbis/wav) via symphonia. Drives the default device
-# on all three platforms; the macOS gate in `LocalPlayer` is gone since rodio
-# 0.22 / cpal 0.17 were measured on CoreAudio. Unrelated to librespot's own
-# rodio-backend, which is why librespot keeps portaudio-backend on macOS.
+# Audio output: decodes FLAC/MP3/AAC/Vorbis through symphonia and drives the
+# default output device through cpal.
 rodio = { version = "0.22" }
 
-# Streaming dependencies: our maintained librespot fork, published on crates.io
-# as qbal-librespot-* (upstream 0.8.0 + CDN 530 fallback for silent playback,
-# dealer reconnect/session-loss recovery, OAuth callback listener hardening,
-# previous-on-first-track restarting instead of stopping (#366), Spirc ignoring
-# play-request ids of direct `Player::load`s so a queued track's end cannot stop
-# the next one, a fork-only session disconnect-reason API the app depends on,
-# and the SpClient calls of the internal API that replaces the Web API
-# - upstream 0.8 cannot be substituted). The `package =` rename keeps `librespot_*` imports and
-# `librespot-*/feature` refs unchanged; `=`-pinned so all seven crates upgrade in
-# lockstep. See QBAL_FORK.md in the fork repo for the carried patches.
-# No default features: the TLS stack is chosen per target below.
 futures = "0.3.32"
 url = "2.5"
 

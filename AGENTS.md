@@ -216,8 +216,7 @@ global actions (`handle_app` in `src/tui/handlers/mod.rs`);
 `common_key_events::{up,down,left,right}_event` extend this to per-screen
 navigation. Adding a binding means fields on both `KeyBindings` and
 `KeyBindingsString` in `src/core/user_config.rs`, a `help_entries` row in
-`src/tui/keymap.rs` with its `Requirement`, and, when the key produces an
-`Action`, that variant's `default_binding` arm pointing at the new field.
+`src/tui/keymap.rs` with its `Requirement`.
 
 ### Requirements
 

@@ -5,6 +5,21 @@ Releases before 0.1.0 are spotatui's; see its repository for that history.
 
 ## [Unreleased]
 
+### Added
+
+- **Album search**: `Tab` on the search screen switches between songs and
+  albums. `Enter` on an album plays it from the first track; `o` opens its
+  track list instead. One search fills both lists, so switching is instant.
+- **Audio format in the playbar**: the track's codec, bit depth, sample rate
+  and average bitrate (`FLAC · 24-bit · 96 kHz · 3104 kbps`) on the title row,
+  shortened to fit narrow terminals.
+- **Output format in the playbar**: the format Qbal hands to the sound system,
+  and the format the sound card runs at, read from `/proc/asound`
+  (`Output: 32-bit float · 48 kHz · 2 ch → Card: 24-bit · 96 kHz`). When the two
+  differ, PipeWire or PulseAudio is converting the audio.
+- **Lua plugins**: `qbal.play_uri` also takes a `qobuz:album:` uri and plays
+  the whole album.
+
 ## [0.1.0] 2026-11-14
 
 ### Changed
