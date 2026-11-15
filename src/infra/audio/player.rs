@@ -93,6 +93,26 @@ pub struct LocalPlayer {
   /// neither clear a newer track nor append behind it. The decode between
   /// them runs outside it.
   stage_transition: Mutex<()>,
+  /// Rates the current device opened at something else for, so a track at one
+  /// of them stops costing a pointless reopen on every track change.
+  refused_rates: Mutex<RefusedRates>,
+}
+
+/// The (device, rate) pairs a device refused. Keyed on the device's name, so
+/// a different output is asked again.
+#[derive(Default)]
+struct RefusedRates(Vec<(Option<String>, u32)>);
+
+impl RefusedRates {
+  fn contains(&self, device: &Option<String>, rate: u32) -> bool {
+    self.0.iter().any(|(d, r)| d == device && *r == rate)
+  }
+
+  fn remember(&mut self, device: Option<String>, rate: u32) {
+    if !self.contains(&device, rate) {
+      self.0.push((device, rate));
+    }
+  }
 }
 
 /// One default-output read, keyed on the opened device's id so a swapped
@@ -197,6 +217,7 @@ impl LocalPlayer {
       reopen: Mutex::new(ReopenState::default()),
       stage_generation: AtomicU64::new(0),
       stage_transition: Mutex::new(()),
+      refused_rates: Mutex::new(RefusedRates::default()),
     })
   }
 
@@ -232,12 +253,20 @@ impl LocalPlayer {
   ///
   /// **Blocking:** may open a device, like [`new`](Self::new).
   fn sink_at_rate(&self, stage: u64, sink: Arc<Player>, rate: u32) -> Result<Arc<Player>> {
-    if self.sink.lock().unwrap().output.sample_rate == rate {
+    let device = {
+      let current = self.sink.lock().unwrap();
+      if current.output.sample_rate == rate {
+        return Ok(sink);
+      }
+      current.device_name.clone()
+    };
+    if self.refused_rates.lock().unwrap().contains(&device, rate) {
       return Ok(sink);
     }
     let fresh = match open_sink(Some(rate)) {
       Ok(fresh) if fresh.output.sample_rate == rate => fresh,
       Ok(fresh) => {
+        self.refused_rates.lock().unwrap().remember(device, rate);
         log::info!(
           "[audio] output refused {rate} Hz (opened at {} Hz); keeping the current rate",
           fresh.output.sample_rate
@@ -747,6 +776,20 @@ mod tests {
     assert_eq!(sample_format_parts(SampleFormat::F32), (32, true));
     assert_eq!(sample_format_parts(SampleFormat::I16), (16, false));
     assert_eq!(sample_format_parts(SampleFormat::I32), (32, false));
+  }
+
+  #[test]
+  fn a_refused_rate_is_remembered_per_device() {
+    let speakers = Some("Speakers".to_string());
+    let dac = Some("DAC".to_string());
+    let mut refused = RefusedRates::default();
+    assert!(!refused.contains(&speakers, 96_000));
+    refused.remember(speakers.clone(), 96_000);
+    refused.remember(speakers.clone(), 96_000);
+    assert!(refused.contains(&speakers, 96_000));
+    assert!(!refused.contains(&speakers, 44_100), "only that rate");
+    assert!(!refused.contains(&dac, 96_000), "only that device");
+    assert_eq!(refused.0.len(), 1, "remembered once");
   }
 
   #[test]

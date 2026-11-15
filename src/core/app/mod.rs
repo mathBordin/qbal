@@ -95,6 +95,9 @@ pub struct App {
   artist_page: Option<crate::core::artist::ArtistPage>,
   /// The playing album's details, for the now playing panel.
   album_details: Option<crate::core::artist::AlbumDetails>,
+  /// When the album-details fetch last failed, so it is retried after a pause
+  /// rather than on every tick.
+  album_details_failed_at: Option<std::time::Instant>,
   /// Presentation state of the terminal frontend (cursors, scroll offsets, edit
   /// buffers, focus, popups, terminal geometry). See [`ViewState`]: handlers and
   /// draw functions write it freely; nothing outside `tui/` and these `App`

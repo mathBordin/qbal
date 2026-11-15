@@ -9,6 +9,7 @@ impl Default for App {
       hardware_output: None,
       artist_page: None,
       album_details: None,
+      album_details_failed_at: None,
       view: ViewState {
         search_hovered_block: SearchResultBlock::SongSearch,
         ..ViewState::default()

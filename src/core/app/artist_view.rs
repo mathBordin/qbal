@@ -5,6 +5,9 @@ use crate::core::artist::{
   discography_rows, first_release_row, AlbumDetails, ArtistPage, ArtistTab,
 };
 
+/// How long to wait before asking again for album details that failed to load.
+const ALBUM_DETAILS_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl App {
   /// Open an artist's page: show it loading at once, and fetch the popular
   /// tracks and the discography. It opens on the tab of the mode last chosen
@@ -60,17 +63,35 @@ impl App {
     self.view.artist_tab == ArtistTab::Albums
   }
 
-  /// Ask for the details of the album `album_id`, once per album.
+  /// Ask for the details of the album `album_id`, once per album. A fetch that
+  /// failed is asked again after [`ALBUM_DETAILS_RETRY`].
   pub(crate) fn request_album_details(&mut self, album_id: &str) {
+    self.request_album_details_at(album_id, std::time::Instant::now());
+  }
+
+  fn request_album_details_at(&mut self, album_id: &str, now: std::time::Instant) {
     if self.album_details.as_ref().map(|d| d.album_id.as_str()) == Some(album_id) {
-      return;
+      let retry_due = self
+        .album_details_failed_at
+        .is_some_and(|at| now.saturating_duration_since(at) >= ALBUM_DETAILS_RETRY);
+      if !retry_due {
+        return;
+      }
     }
+    self.album_details_failed_at = None;
     // A placeholder stops the next tick from asking again while the fetch runs.
     self.album_details = Some(AlbumDetails {
       album_id: album_id.to_string(),
       ..AlbumDetails::default()
     });
     self.dispatch_without_spinner(IoEvent::GetQobuzAlbumDetails(album_id.to_string()));
+  }
+
+  /// Note that the fetch for `album_id` failed, unless the album changed.
+  pub(crate) fn album_details_failed(&mut self, album_id: &str) {
+    if self.album_details.as_ref().map(|d| d.album_id.as_str()) == Some(album_id) {
+      self.album_details_failed_at = Some(std::time::Instant::now());
+    }
   }
 
   /// Store fetched album details, unless the album changed meanwhile.
@@ -196,5 +217,25 @@ mod tests {
       ..AlbumDetails::default()
     });
     assert_eq!(app.album_details().unwrap().album_id, "a1");
+  }
+
+  #[test]
+  fn failed_album_details_are_asked_again_after_a_pause() {
+    let (mut app, rx) = app_with_events();
+    let start = std::time::Instant::now();
+    app.request_album_details_at("a1", start);
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::GetQobuzAlbumDetails(_))
+    ));
+
+    app.album_details_failed("a1");
+    app.request_album_details_at("a1", start + std::time::Duration::from_secs(5));
+    assert!(rx.try_recv().is_err(), "not again straight away");
+
+    app.request_album_details_at("a1", start + std::time::Duration::from_secs(31));
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::GetQobuzAlbumDetails(id)) if id == "a1"));
+    app.request_album_details_at("a1", start + std::time::Duration::from_secs(32));
+    assert!(rx.try_recv().is_err(), "the retry is asked once, too");
   }
 }

@@ -450,7 +450,10 @@ async fn load_album_details(app: Arc<Mutex<App>>, album_id: String) {
   };
   match source.album_details(&album_id).await {
     Ok(details) => app.lock().await.set_album_details(details),
-    Err(e) => log::warn!("[qobuz] album details for {album_id}: {e:#}"),
+    Err(e) => {
+      log::warn!("[qobuz] album details for {album_id}: {e:#}");
+      app.lock().await.album_details_failed(&album_id);
+    }
   }
 }
 
