@@ -8,7 +8,7 @@ behavior:
   language: auto
 
   # --- Qobuz ---
-  qobuz_quality: 6 # 5 = MP3 320, 6 = FLAC 16/44.1, 7 = FLAC 24/96, 27 = FLAC 24/192
+  qobuz_quality: 27 # 5 = MP3 320, 6 = FLAC 16/44.1, 7 = FLAC 24/96, 27 = FLAC 24/192 (the most a track has)
 
   # --- Timing ---
   seek_milliseconds: 5000

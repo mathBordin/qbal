@@ -37,6 +37,16 @@
 //! [`LocalPlayer::reopen`] to rebuild the output on the new default device, and
 //! restages the track there.
 //!
+//! ## Sample rate
+//!
+//! rodio converts a source to the output's sample rate with a crude converter:
+//! linear interpolation going up, and dropped samples with no filter going
+//! down (which aliases). So the output is opened at the playing track's rate
+//! (see [`LocalPlayer::stage_file`]): rodio then passes the samples through
+//! untouched, and any conversion left is the sound server's (PipeWire's is a
+//! proper resampler, and it can switch the card to the track's rate). A device
+//! that refuses the rate keeps its current one.
+//!
 //! ## Threading
 //!
 //! `rodio::MixerDeviceSink` is `!Send`, so it cannot live on the shared player
@@ -177,7 +187,7 @@ impl LocalPlayer {
   /// setup, off any latency-sensitive path. Returns an error if no output
   /// device is available (e.g. headless CI).
   pub fn new() -> Result<Self> {
-    let sink = open_sink()?;
+    let sink = open_sink(None)?;
     // Start silent; nothing is queued until the first `play_file`.
     sink.player.pause();
     Ok(Self {
@@ -213,6 +223,48 @@ impl LocalPlayer {
       anyhow::bail!("audio output device stopped responding");
     }
     Ok(())
+  }
+
+  /// The sink to play a `rate` Hz source through: `sink` when its output
+  /// already runs at that rate, else a fresh output opened at it, swapped in
+  /// for `stage` (see the module docs on sample rate). A device that cannot
+  /// open at `rate` keeps `sink`, and rodio converts as before.
+  ///
+  /// **Blocking:** may open a device, like [`new`](Self::new).
+  fn sink_at_rate(&self, stage: u64, sink: Arc<Player>, rate: u32) -> Result<Arc<Player>> {
+    if self.sink.lock().unwrap().output.sample_rate == rate {
+      return Ok(sink);
+    }
+    let fresh = match open_sink(Some(rate)) {
+      Ok(fresh) if fresh.output.sample_rate == rate => fresh,
+      Ok(fresh) => {
+        log::info!(
+          "[audio] output refused {rate} Hz (opened at {} Hz); keeping the current rate",
+          fresh.output.sample_rate
+        );
+        return Ok(sink);
+      }
+      Err(e) => {
+        log::info!("[audio] could not open the output at {rate} Hz: {e:#}");
+        return Ok(sink);
+      }
+    };
+    fresh.player.pause();
+    fresh
+      .player
+      .set_volume(volume_gain(self.volume_percent.load(Ordering::Relaxed)));
+    let _transition = self.stage_transition.lock().unwrap();
+    if !Arc::ptr_eq(&sink, &self.player()) {
+      anyhow::bail!("audio output device changed");
+    }
+    if self.stage_generation.load(Ordering::SeqCst) != stage {
+      anyhow::bail!("superseded by a later track");
+    }
+    let player = Arc::clone(&fresh.player);
+    // Dropping the old sink releases its device on its own thread.
+    *self.sink.lock().unwrap() = fresh;
+    *self.device_check.lock().unwrap() = None;
+    Ok(player)
   }
 
   /// Append `source` for `stage`, unless a later stage started since it began
@@ -364,7 +416,10 @@ impl LocalPlayer {
   ///
   /// **Blocking:** opens a device, like [`new`](Self::new).
   pub fn reopen(&self) -> Result<()> {
-    let fresh = open_sink()?;
+    // Keep the rate the track was playing at; the new device may refuse it,
+    // in which case its own default stands.
+    let rate = self.sink.lock().unwrap().output.sample_rate;
+    let fresh = open_sink(Some(rate)).or_else(|_| open_sink(None))?;
     // Configure before publishing: once swapped in, other threads can see it.
     fresh.player.pause();
     fresh
@@ -431,6 +486,7 @@ impl LocalPlayer {
     let decoder = Decoder::new(BufReader::new(file))
       .with_context(|| format!("decoding audio file {}", path.display()))?;
 
+    let sink = self.sink_at_rate(stage, sink, rodio::Source::sample_rate(&decoder).get())?;
     self.append_for_stage(stage, &sink, decoder)
   }
 
@@ -476,6 +532,7 @@ impl LocalPlayer {
     let stage = self.begin_stage();
     let sink = self.live_player()?;
     self.clear_for_stage(stage, &sink)?;
+    let sink = self.sink_at_rate(stage, sink, stream.0.sample_rate().get())?;
     self.append_for_stage(stage, &sink, stream.0)
   }
 
@@ -553,8 +610,10 @@ impl LocalPlayer {
 // ---------------------------------------------------------------------------
 
 /// Open the default output device on a dedicated thread and return the live
-/// [`Sink`] (dropping its keepalive releases the device).
-fn open_sink() -> Result<Sink> {
+/// [`Sink`] (dropping its keepalive releases the device). With `rate`, ask for
+/// that sample rate; the device may fall back to another of its configs, which
+/// the returned sink's `output` reports.
+fn open_sink(rate: Option<u32>) -> Result<Sink> {
   use rodio::cpal::traits::HostTrait;
   use rodio::cpal::StreamError;
   use rodio::DeviceSinkBuilder;
@@ -595,6 +654,10 @@ fn open_sink() -> Result<Sink> {
       // whose default output cannot be opened gets a clear error instead of
       // audio from a surprise device.
       let opened = DeviceSinkBuilder::from_device(device)
+        .map(|builder| match rate.and_then(std::num::NonZeroU32::new) {
+          Some(rate) => builder.with_sample_rate(rate),
+          None => builder,
+        })
         .map(|builder| builder.with_error_callback(on_error))
         .and_then(|builder| builder.open_sink_or_fallback());
       match opened {

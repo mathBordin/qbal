@@ -120,15 +120,23 @@ fn process_input(app: &mut App, input: String) {
   );
 }
 
+/// A character's display width; control characters (which a paste can carry)
+/// have none and take no columns.
 fn compute_character_width(character: char) -> u16 {
   UnicodeWidthChar::width(character)
-    .unwrap()
-    .try_into()
-    .unwrap()
+    .and_then(|width| u16::try_from(width).ok())
+    .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn a_control_character_has_no_width_instead_of_crashing() {
+    assert_eq!(super::compute_character_width('\u{7}'), 0);
+    assert_eq!(super::compute_character_width('a'), 1);
+    assert_eq!(super::compute_character_width('\u{1F3B5}'), 2);
+  }
+
   use super::*;
 
   fn str_to_vec_char(s: &str) -> Vec<char> {

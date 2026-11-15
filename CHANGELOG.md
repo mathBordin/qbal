@@ -20,6 +20,22 @@ Releases before 0.1.0 are spotatui's; see its repository for that history.
 - **Album details in the now playing panel**: year, label, genre, the track's
   place on the album (`3 of 14`) and the time left on the album.
 - **Go to album**: `a` (`go_to_album`) opens the playing track's album.
+
+### Changed
+
+- **No more resampling inside Qbal**: the sound output now opens at each
+  track's sample rate. Before, every track was converted to the output's rate
+  (usually 48 kHz) by rodio's converter, which interpolates linearly going up
+  and drops samples without filtering going down. Any conversion left is now
+  PipeWire's, or none if PipeWire is allowed to follow the track's rate (see
+  "Best audio quality" in `docs/configuration.md`).
+- **FLAC 24/192 is the default quality**: Qobuz sends each track in the best
+  version it has, up to that.
+
+### Fixed
+
+- Typing or pasting a control character into the search box no longer crashes
+  Qbal.
 - **Audio format in the playbar**: the track's codec, bit depth, sample rate
   and average bitrate (`FLAC · 24-bit · 96 kHz · 3104 kbps`) on the title row,
   shortened to fit narrow terminals.

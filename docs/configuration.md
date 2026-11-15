@@ -81,7 +81,7 @@ browser (or shows its address if no browser opens). The token is kept in
 
 ```yaml
 behavior:
-  qobuz_quality: 6   # 5 = MP3 320, 6 = FLAC 16/44.1, 7 = FLAC 24/96, 27 = FLAC 24/192
+  qobuz_quality: 27  # 5 = MP3 320, 6 = FLAC 16/44.1, 7 = FLAC 24/96, 27 = FLAC 24/192 (the most a track has)
 ```
 
 This is the quality Qbal asks for. Qobuz serves some tracks in a lower one, so
@@ -89,6 +89,32 @@ the playbar shows what it actually delivered, for example `FLAC 16/44.1`.
 
 Tracks play while they download, and a seek past the downloaded part continues
 the download from there.
+
+### Best audio quality
+
+Qbal plays FLAC without changing it: the samples are decoded exactly, nothing
+processes them, and at 100% volume none of them is scaled. It also opens the
+sound output at each track's own sample rate, so it never resamples.
+
+What happens next is up to PipeWire. By default it runs at 48 kHz and resamples
+anything else (with a good resampler). To let your sound card follow each
+track's rate instead (44.1, 96, 192 kHz…), allow those rates:
+
+```bash
+mkdir -p ~/.config/pipewire/pipewire.conf.d
+cat > ~/.config/pipewire/pipewire.conf.d/qbal-rates.conf <<'CONF'
+context.properties = {
+    default.clock.allowed-rates = [ 44100 48000 88200 96000 176400 192000 ]
+}
+CONF
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+
+The playbar's output line then shows the card at the track's rate, for example
+`Output: 32-bit float · 96 kHz · 2 ch → USB DAC: 24-bit · 96 kHz`. PipeWire only
+switches the rate while nothing else is playing, and the card keeps to the
+rates it supports. Bluetooth is different: the codec (LDAC, aptX, AAC, SBC)
+decides the quality there.
 
 Environment variables:
 

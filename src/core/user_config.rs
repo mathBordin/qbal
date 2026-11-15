@@ -67,8 +67,10 @@ pub fn normalize_tick_rate_milliseconds(value: i64) -> u64 {
 const QOBUZ_QUALITY_IDS: [u8; 4] = [5, 6, 7, 27];
 /// Settings-screen labels for the Qobuz qualities, in [`QOBUZ_QUALITY_IDS`] order.
 pub const QOBUZ_QUALITY_LABELS: &[&str] = &["MP3 320", "FLAC 16/44.1", "FLAC 24/96", "FLAC 24/192"];
-/// The default quality (FLAC 16/44.1) as an index into both tables.
-const QOBUZ_QUALITY_DEFAULT_INDEX: usize = 1;
+/// The default quality as an index into both tables: the best, FLAC 24/192.
+/// Qobuz sends the best version a track has up to it, so a CD-quality album
+/// still arrives as 16/44.1, and a plan without hi-res gets CD quality.
+const QOBUZ_QUALITY_DEFAULT_INDEX: usize = 3;
 const QOBUZ_QUALITY_DEFAULT: u8 = QOBUZ_QUALITY_IDS[QOBUZ_QUALITY_DEFAULT_INDEX];
 
 /// The settings label of a Qobuz `format_id` (unknown ids read as the default).
