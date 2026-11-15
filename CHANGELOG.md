@@ -38,7 +38,6 @@ Releases before 0.1.0 are spotatui's; see its repository for that history.
   failed load, instead of staying empty until the next track.
 - An output that cannot run at a track's sample rate is no longer reopened on
   every track change: qbal remembers the refusal for that device.
-
 - Typing or pasting a control character into the search box no longer crashes
   Qbal.
 - **Audio format in the playbar**: the track's codec, bit depth, sample rate
