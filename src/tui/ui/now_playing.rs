@@ -32,6 +32,12 @@ pub(crate) struct NowPlayingView {
   pub liked: bool,
   pub explicit: bool,
   pub up_next: Vec<String>,
+  /// The delivered stream's format, most detailed wording first.
+  pub format: Vec<String>,
+  /// The format qbal hands the sound system, most detailed first.
+  pub output: Vec<String>,
+  /// The device the sound reaches and its format, with and without its name.
+  pub device: Vec<String>,
 }
 
 impl NowPlayingView {
@@ -39,7 +45,16 @@ impl NowPlayingView {
   pub(crate) fn from_app(app: &App) -> Option<Self> {
     let snapshot = current_playback_snapshot(app)?;
     let up_next = queued_after(app);
-    Some(Self::build(&snapshot, up_next))
+    let mut view = Self::build(&snapshot, up_next);
+    if let Some((format, output)) = super::player::audible_formats(app) {
+      view.format = format;
+      view.output = output.candidates_without_device();
+    }
+    view.device = app
+      .hardware_output()
+      .map(|device| device.labels(&app.strings().screens.device_words()))
+      .unwrap_or_default();
+    Some(view)
   }
 
   /// The pure half of [`Self::from_app`].
@@ -56,6 +71,9 @@ impl NowPlayingView {
       liked: false,
       explicit: false,
       up_next,
+      format: Vec::new(),
+      output: Vec::new(),
+      device: Vec::new(),
     }
   }
 }
@@ -183,6 +201,14 @@ fn draw_cover(_f: &mut Frame<'_>, _app: &App, _area: Rect) -> u16 {
   0
 }
 
+/// The widest of `candidates` (widest first) that fits `width`, else the
+/// shortest, which the row then truncates; `None` when there are none.
+fn widest_or_shortest(candidates: &[String], width: usize) -> Option<String> {
+  crate::core::stream_format::widest_fitting(candidates, width)
+    .or_else(|| candidates.last().map(String::as_str))
+    .map(str::to_string)
+}
+
 fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'static>> {
   let theme = &app.user_config.theme;
   let strings = &app.strings().screens;
@@ -211,6 +237,9 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     strings.now_playing_year,
     strings.now_playing_track,
     strings.now_playing_length,
+    strings.now_playing_format,
+    strings.output,
+    strings.now_playing_device,
   ];
   let label_width = labels
     .iter()
@@ -227,6 +256,18 @@ fn detail_lines(app: &App, view: &NowPlayingView, width: u16) -> Vec<Line<'stati
     (strings.now_playing_year, view.year.clone()),
     (strings.now_playing_track, view.track_number.clone()),
     (strings.now_playing_length, view.length.clone()),
+    (
+      strings.now_playing_format,
+      widest_or_shortest(&view.format, value_width),
+    ),
+    (
+      strings.output,
+      widest_or_shortest(&view.output, value_width),
+    ),
+    (
+      strings.now_playing_device,
+      widest_or_shortest(&view.device, value_width),
+    ),
   ];
   for (label, value) in rows {
     let Some(value) = value else { continue };
@@ -302,6 +343,58 @@ mod tests {
     let names = queued_after(&app);
     assert_eq!(names.len(), UP_NEXT_LEN);
     assert_eq!(names[0], "Next 1");
+  }
+
+  #[test]
+  fn the_panel_lists_the_stream_output_and_device_formats_in_the_width_it_has() {
+    let view = NowPlayingView {
+      title: "Digital Love".into(),
+      artists: "Daft Punk".into(),
+      format: vec![
+        "FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 3104 kbps".into(),
+        "FLAC 24/96 \u{b7} 3104 kbps".into(),
+        "FLAC 24/96".into(),
+      ],
+      output: vec![
+        "32-bit float \u{b7} 48 kHz \u{b7} 2 ch".into(),
+        "48 kHz".into(),
+      ],
+      device: vec![
+        "Bluetooth: LDAC \u{b7} 96 kHz \u{b7} WH-1000XM4".into(),
+        "Bluetooth: LDAC \u{b7} 96 kHz".into(),
+      ],
+      ..NowPlayingView::default()
+    };
+    let text = |width| {
+      detail_lines(&App::default(), &view, width)
+        .iter()
+        .map(|line| {
+          line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+    };
+    let wide = text(70);
+    assert!(
+      wide.contains("Format  FLAC \u{b7} 24-bit \u{b7} 96 kHz \u{b7} 3104 kbps"),
+      "{wide}"
+    );
+    assert!(
+      wide.contains("Output  32-bit float \u{b7} 48 kHz \u{b7} 2 ch"),
+      "{wide}"
+    );
+    assert!(
+      wide.contains("Device  Bluetooth: LDAC \u{b7} 96 kHz \u{b7} WH-1000XM4"),
+      "{wide}"
+    );
+    let narrow = text(38);
+    assert!(narrow.contains("FLAC 24/96 \u{b7} 3104 kbps"), "{narrow}");
+    assert!(narrow.contains("Bluetooth: LDAC \u{b7} 96 kHz"), "{narrow}");
+    assert!(!narrow.contains("WH-1000XM4"), "{narrow}");
   }
 
   #[test]

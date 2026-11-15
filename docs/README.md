@@ -16,5 +16,5 @@ Qbal is a Qobuz player for the Linux terminal.
 
 ## Help
 
-- **[Report a bug](https://github.com/mathBordin/ghosbuz/issues)**, with a
+- **[Report a bug](https://github.com/mathBordin/qbal/issues)**, with a
   [debug log](configuration.md#logging) if you can.

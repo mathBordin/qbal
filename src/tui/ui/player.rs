@@ -808,6 +808,23 @@ struct LocalPlaybarView {
   hardware: Option<OutputDevice>,
 }
 
+/// The formats of what is audible: the delivered stream's wordings (most
+/// detailed first) and the format the output device was opened with. The
+/// native queue slot wins over the Qobuz session, as in the playbar.
+pub(crate) fn audible_formats(app: &App) -> Option<(Vec<String>, OutputFormat)> {
+  if let Some(crate::infra::queue::QueueNowPlaying::Decoded(d)) = app.queue_now.as_ref() {
+    return Some((
+      d.quality.map(|q| q.labels()).unwrap_or_default(),
+      d.player.output_format(),
+    ));
+  }
+  let qobuz = app.qobuz_playback.as_ref()?;
+  Some((
+    qobuz.quality.map(|q| q.labels()).unwrap_or_default(),
+    qobuz.player.output_format(),
+  ))
+}
+
 /// Render the playbar for an active Qobuz playback session; the download
 /// window (`advancing`) shows as a loading suffix, like the queue slot.
 fn draw_qobuz_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {

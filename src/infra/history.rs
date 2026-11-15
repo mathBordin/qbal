@@ -1471,7 +1471,7 @@ fn render_history_recap_html_with(
             
             <div class="card-footer">
               <span class="card-footer-left">{generated_by}<strong>Qbal</strong></span>
-              <span class="card-footer-right">github.com/mathBordin/ghosbuz</span>
+              <span class="card-footer-right">github.com/mathBordin/qbal</span>
             </div>
           </div>
         </div>
@@ -1780,7 +1780,7 @@ fn render_history_recap_html_with(
       ctx.textAlign = 'right';
       ctx.fillStyle = ACCENT;
       ctx.font = '400 11px "JetBrains Mono", monospace';
-      ctx.fillText('github.com/mathBordin/ghosbuz', CARD_W - 32, 642);
+      ctx.fillText('github.com/mathBordin/qbal', CARD_W - 32, 642);
       ctx.restore();
 
       // Card border on top of everything
@@ -2684,11 +2684,11 @@ mod tests {
   #[test]
   fn english_recap_html_keeps_the_original_bytes() {
     let html = render_history_recap_html(RecapPeriod::All, &[], RecapPeriod::ThirtyDays, &[]);
-    // FNV-1a of the complete pre-localization empty export, including JS and CSS.
+    // FNV-1a of the complete empty English export, including JS and CSS.
     let hash = html.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
       (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     });
-    assert_eq!(hash, 0x4f8cf7ce405be707);
+    assert_eq!(hash, 0xa08ac53fea67f6bf);
   }
 
   #[test]

@@ -190,7 +190,7 @@ pub fn bluetooth_codec_name(codec: &str) -> String {
 impl OutputDevice {
   /// `Bluetooth: LDAC · 96 kHz`, `USB DAC: 24-bit · 96 kHz`, `Speakers:
   /// 24-bit · 48 kHz`; with the device name added when `named`.
-  fn label(&self, words: &DeviceWords<'_>, named: bool) -> String {
+  pub(crate) fn label(&self, words: &DeviceWords<'_>, named: bool) -> String {
     let (kind, detail) = match &self.kind {
       DeviceKind::Bluetooth { codec } => {
         let mut parts: Vec<String> = codec.iter().map(|c| bluetooth_codec_name(c)).collect();
@@ -231,6 +231,25 @@ impl OutputDevice {
   }
 }
 
+impl OutputDevice {
+  /// The label with the device name, then without, for the widest that fits.
+  pub fn labels(&self, words: &DeviceWords<'_>) -> Vec<String> {
+    let mut all = vec![self.label(words, true), self.label(words, false)];
+    all.dedup();
+    all
+  }
+}
+
+impl OutputFormat {
+  /// [`OutputFormat::candidates`] without the device name, which on PipeWire
+  /// is only the sound server's.
+  pub fn candidates_without_device(&self) -> Vec<String> {
+    let all = self.candidates();
+    let skip = usize::from(all.len() > 2);
+    all.into_iter().skip(skip).collect()
+  }
+}
+
 /// The output line from the most to the least detailed: what qbal hands the
 /// sound system, then the device the sound reaches and its format. The device
 /// part outlives the app part as the width shrinks, because it is the one that
@@ -250,7 +269,9 @@ pub fn output_candidates(
   // The app part drops its own device name first: on PipeWire it is only the
   // sound server's ("default", "PipeWire"), while the device part names the
   // real output.
-  let app_without_device: Vec<&String> = app.iter().skip(usize::from(app.len() > 2)).collect();
+  let app_without_device: Vec<String> = output
+    .map(OutputFormat::candidates_without_device)
+    .unwrap_or_default();
   for app in &app_without_device {
     all.push(format!("{app} \u{2192} {named}"));
   }

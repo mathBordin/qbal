@@ -107,7 +107,7 @@ impl UtilsNetwork for Network {
     const MAX_ANNOUNCEMENT_FEED_BYTES: usize = 256 * 1024;
     const ANNOUNCEMENTS_ENV_KEY: &str = "QBAL_ANNOUNCEMENTS_URL";
     const DEFAULT_ANNOUNCEMENTS_URL: &str =
-      "https://raw.githubusercontent.com/mathBordin/ghosbuz/main/announcements.json";
+      "https://raw.githubusercontent.com/mathBordin/qbal/main/announcements.json";
 
     let (announcements_enabled, feed_url) = {
       let app = self.app.lock().await;

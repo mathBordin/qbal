@@ -31,8 +31,8 @@ playbar still shows the sound card's format, labelled "Card".
 ## 3. Build
 
 ```bash
-git clone https://github.com/mathBordin/ghosbuz
-cd ghosbuz
+git clone https://github.com/mathBordin/qbal
+cd qbal
 cargo build --release --features cover-art,audio-viz
 ```
 
@@ -60,7 +60,7 @@ Check whether you run PipeWire with `pactl info | grep "Server Name"`.
 ## Update
 
 ```bash
-cd ghosbuz
+cd qbal
 git pull
 cargo build --release --features cover-art,audio-viz
 cp target/release/qbal ~/.local/bin/

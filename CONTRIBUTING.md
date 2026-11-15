@@ -12,7 +12,7 @@ Bug reports, fixes, translations and themes are all welcome.
 
 ## Report a bug
 
-Open an [issue](https://github.com/mathBordin/ghosbuz/issues) with what you did,
+Open an [issue](https://github.com/mathBordin/qbal/issues) with what you did,
 what you expected and what happened. Attach the log: run `qbal --debug`,
 reproduce the problem, and attach the file whose path Qbal prints when it exits
 (read it first; see [Logging](docs/configuration.md#logging)). After a crash,
@@ -24,8 +24,8 @@ Install Rust and the system libraries from
 [docs/installation.md](docs/installation.md), then:
 
 ```bash
-git clone https://github.com/mathBordin/ghosbuz
-cd ghosbuz
+git clone https://github.com/mathBordin/qbal
+cd qbal
 cargo run                               # default build
 cargo run --features cover-art,audio-viz  # everything
 cargo run --no-default-features -- history recap   # headless, CLI only

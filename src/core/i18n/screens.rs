@@ -77,6 +77,8 @@ pub struct ScreenStrings {
   pub now_playing_year: &'static str,
   pub now_playing_track: &'static str,
   pub now_playing_length: &'static str,
+  pub now_playing_format: &'static str,
+  pub now_playing_device: &'static str,
   pub now_playing_explicit: &'static str,
   pub now_playing_up_next: &'static str,
   pub now_playing_too_narrow: &'static str,
@@ -200,6 +202,8 @@ pub const EN: ScreenStrings = ScreenStrings {
   now_playing_year: "Year",
   now_playing_track: "Track",
   now_playing_length: "Length",
+  now_playing_format: "Format",
+  now_playing_device: "Device",
   now_playing_explicit: "Explicit",
   now_playing_up_next: "Up next",
   now_playing_too_narrow: "Widen the terminal to show the now playing panel",
@@ -248,8 +252,7 @@ pub const EN: ScreenStrings = ScreenStrings {
   cover_failed: "Cover art unavailable",
   cover_empty: "No cover art available",
   log_location: "Log located in {path}",
-  report_bugs:
-    "Please report any bugs or missing features to https://github.com/mathBordin/ghosbuz",
+  report_bugs: "Please report any bugs or missing features to https://github.com/mathBordin/qbal",
 };
 
 // Keep ..EN so new English fields compile before their translations are added.
@@ -327,6 +330,8 @@ pub const PT_BR: ScreenStrings = ScreenStrings {
   now_playing_year: "Ano",
   now_playing_track: "Faixa",
   now_playing_length: "Duração",
+  now_playing_format: "Formato",
+  now_playing_device: "Dispositivo",
   now_playing_explicit: "Explícito",
   now_playing_up_next: "A seguir",
   now_playing_too_narrow: "Alargue o terminal para mostrar o painel Tocando agora",
@@ -375,7 +380,7 @@ pub const PT_BR: ScreenStrings = ScreenStrings {
   cover_failed: "Capa indisponível",
   cover_empty: "Nenhuma capa disponível",
   log_location: "Log em {path}",
-  report_bugs: "Relate bugs ou recursos que faltam em https://github.com/mathBordin/ghosbuz",
+  report_bugs: "Relate bugs ou recursos que faltam em https://github.com/mathBordin/qbal",
   ..EN
 };
 
@@ -455,6 +460,8 @@ pub const FR: ScreenStrings = ScreenStrings {
   now_playing_year: "Année",
   now_playing_track: "Piste",
   now_playing_length: "Durée",
+  now_playing_format: "Format",
+  now_playing_device: "Appareil",
   now_playing_explicit: "Explicite",
   now_playing_up_next: "À suivre",
   now_playing_too_narrow: "Élargissez le terminal pour afficher le panneau Lecture en cours",
@@ -503,8 +510,7 @@ pub const FR: ScreenStrings = ScreenStrings {
   cover_failed: "Pochette indisponible",
   cover_empty: "Aucune pochette disponible",
   log_location: "Journal dans {path}",
-  report_bugs:
-    "Signalez les bugs ou fonctions manquantes sur https://github.com/mathBordin/ghosbuz",
+  report_bugs: "Signalez les bugs ou fonctions manquantes sur https://github.com/mathBordin/qbal",
   ..EN
 };
 

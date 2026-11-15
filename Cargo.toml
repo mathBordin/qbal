@@ -1,8 +1,8 @@
 [package]
 name = "qbal"
 description = "Terminal music player for Qobuz"
-documentation = "https://github.com/mathBordin/ghosbuz/tree/main/docs"
-repository = "https://github.com/mathBordin/ghosbuz"
+documentation = "https://github.com/mathBordin/qbal/tree/main/docs"
+repository = "https://github.com/mathBordin/qbal"
 keywords = ["music-player", "qobuz", "tui", "terminal", "music"]
 categories = ["command-line-utilities", "multimedia::audio"]
 version = "0.1.0"
