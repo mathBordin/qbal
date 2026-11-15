@@ -11,6 +11,13 @@ pub struct ScreenStrings {
   pub output: &'static str,
   /// The sound card, before the format it runs at: `Card: 24-bit · 96 kHz`.
   pub card: &'static str,
+  /// The output kinds, named the same way: `Speakers: 24-bit · 48 kHz`.
+  pub speakers: &'static str,
+  /// The analog jack: headphones or line out.
+  pub wired: &'static str,
+  pub usb_dac: &'static str,
+  pub hdmi: &'static str,
+  pub bluetooth: &'static str,
   /// `Search · {mode}`: the search box titled with the search mode.
   pub search_titled: &'static str,
   /// `{count} tracks`.
@@ -131,6 +138,11 @@ pub const EN: ScreenStrings = ScreenStrings {
   albums: "Albums",
   output: "Output",
   card: "Card",
+  speakers: "Speakers",
+  wired: "Wired",
+  usb_dac: "USB DAC",
+  hdmi: "HDMI",
+  bluetooth: "Bluetooth",
   search_titled: "Search \u{b7} {mode}",
   track_count: "{count} tracks",
   artists: "Artists",
@@ -252,6 +264,11 @@ pub const PT_BR: ScreenStrings = ScreenStrings {
   albums: "Álbuns",
   output: "Saída",
   card: "Placa",
+  speakers: "Alto-falantes",
+  wired: "Com fio",
+  usb_dac: "DAC USB",
+  hdmi: "HDMI",
+  bluetooth: "Bluetooth",
   search_titled: "Buscar \u{b7} {mode}",
   track_count: "{count} faixas",
   artists: "Artistas",
@@ -374,6 +391,11 @@ pub const FR: ScreenStrings = ScreenStrings {
   albums: "Albums",
   output: "Sortie",
   card: "Carte",
+  speakers: "Haut-parleurs",
+  wired: "Filaire",
+  usb_dac: "DAC USB",
+  hdmi: "HDMI",
+  bluetooth: "Bluetooth",
   search_titled: "Rechercher \u{b7} {mode}",
   track_count: "{count} titres",
   artists: "Artistes",
@@ -490,6 +512,17 @@ pub const FR: ScreenStrings = ScreenStrings {
 impl ScreenStrings {
   pub fn type_key(&self, key: &str) -> String {
     crate::core::i18n::format_template(self.type_key, &[("key", key)])
+  }
+  /// The output kind names, for the playbar's output line.
+  pub fn device_words(&self) -> crate::core::stream_format::DeviceWords<'static> {
+    crate::core::stream_format::DeviceWords {
+      speakers: self.speakers,
+      wired: self.wired,
+      usb_dac: self.usb_dac,
+      hdmi: self.hdmi,
+      bluetooth: self.bluetooth,
+      card: self.card,
+    }
   }
   pub fn search_titled(&self, mode: &str) -> String {
     crate::core::i18n::format_template(self.search_titled, &[("mode", mode)])

@@ -16,8 +16,9 @@ A fast [Qobuz](https://www.qobuz.com) player for the Linux terminal, written in 
 
 Browse your Qobuz favorites, playlists and albums, search the catalog, and play
 in lossless quality without leaving the terminal. The playbar shows the format
-of the track (codec, bit depth, sample rate, bitrate) and the format your sound
-card actually runs at. Qbal adds synced lyrics, an
+of the track (codec, bit depth, sample rate, bitrate) and what reaches your
+ears: the format of your speakers, headphone jack, USB DAC or HDMI, or the codec
+of your Bluetooth device. Qbal adds synced lyrics, an
 audio visualizer, album art, a play queue, listening statistics, media keys,
 Discord status, and Lua plugins.
 

@@ -86,11 +86,15 @@ impl HardwareFormat {
   }
 }
 
-/// Bits per sample of an ALSA format name: `S16_LE` is 16, `S24_3LE` 24,
-/// `FLOAT_LE` 32 and float, `FLOAT64_LE` 64 and float. `None` for formats with
-/// no plain sample width (DSD, IEC958 passthrough).
-fn alsa_bits(format: &str) -> Option<(u8, bool)> {
+/// Bits per sample of an ALSA or PipeWire format name: `S16_LE` and `S16LE`
+/// are 16, `S24_3LE` 24, `FLOAT_LE` and `F32LE` 32 and float, `FLOAT64_LE` and
+/// `F64LE` 64 and float. `None` for formats with no plain sample width (DSD,
+/// IEC958 passthrough).
+pub(crate) fn alsa_bits(format: &str) -> Option<(u8, bool)> {
   if let Some(rest) = format.strip_prefix("FLOAT") {
+    return Some((if rest.starts_with("64") { 64 } else { 32 }, true));
+  }
+  if let Some(rest) = format.strip_prefix('F') {
     return Some((if rest.starts_with("64") { 64 } else { 32 }, true));
   }
   let digits = format.strip_prefix(['S', 'U'])?;
@@ -124,25 +128,138 @@ pub fn parse_hw_params(text: &str, card: Option<&str>) -> Option<HardwareFormat>
   })
 }
 
+/// What kind of output the sound reaches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceKind {
+  /// Built-in speakers.
+  Speakers,
+  /// The analog jack: headphones, a headset or line out.
+  Wired,
+  /// A USB audio device: a USB-C or USB-A DAC, a USB headset.
+  UsbDac,
+  /// HDMI or DisplayPort audio.
+  Hdmi,
+  /// Bluetooth, with the codec PipeWire encodes to (`ldac`, `aac`, `sbc`…).
+  Bluetooth { codec: Option<String> },
+  /// A sound card PipeWire did not describe.
+  Card,
+}
+
+/// The device the sound reaches and the format it runs at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputDevice {
+  pub kind: DeviceKind,
+  /// The device's name, e.g. `WH-1000XM4`, `FiiO KA3`.
+  pub name: Option<String>,
+  /// For a sound card, the format the kernel says it runs at. For Bluetooth,
+  /// the audio PipeWire feeds the encoder, of which only the rate is shown:
+  /// the codec decides the quality from there.
+  pub format: Option<HardwareFormat>,
+}
+
+/// The translated names of the output kinds.
+#[derive(Debug, Clone, Copy)]
+pub struct DeviceWords<'a> {
+  pub speakers: &'a str,
+  pub wired: &'a str,
+  pub usb_dac: &'a str,
+  pub hdmi: &'a str,
+  pub bluetooth: &'a str,
+  pub card: &'a str,
+}
+
+/// A Bluetooth codec as its makers spell it: `ldac` is `LDAC`, `aptx_hd`
+/// `aptX HD`, `sbc_xq` `SBC-XQ`. Unknown ones are upper-cased.
+pub fn bluetooth_codec_name(codec: &str) -> String {
+  match codec {
+    "sbc" => "SBC".into(),
+    "sbc_xq" => "SBC-XQ".into(),
+    "aac" | "aac_eld" => "AAC".into(),
+    "aptx" => "aptX".into(),
+    "aptx_hd" => "aptX HD".into(),
+    "aptx_ll" | "aptx_ll_duplex" => "aptX LL".into(),
+    "ldac" => "LDAC".into(),
+    "lc3" | "lc3plus_h3" => "LC3".into(),
+    "msbc" => "mSBC".into(),
+    "cvsd" => "CVSD".into(),
+    other if other.starts_with("opus") => "Opus".into(),
+    other => other.to_uppercase(),
+  }
+}
+
+impl OutputDevice {
+  /// `Bluetooth: LDAC · 96 kHz`, `USB DAC: 24-bit · 96 kHz`, `Speakers:
+  /// 24-bit · 48 kHz`; with the device name added when `named`.
+  fn label(&self, words: &DeviceWords<'_>, named: bool) -> String {
+    let (kind, detail) = match &self.kind {
+      DeviceKind::Bluetooth { codec } => {
+        let mut parts: Vec<String> = codec.iter().map(|c| bluetooth_codec_name(c)).collect();
+        if let Some(format) = &self.format {
+          parts.push(format!("{} kHz", khz(format.sample_rate)));
+        }
+        (words.bluetooth, parts.join(" \u{b7} "))
+      }
+      other => {
+        let word = match other {
+          DeviceKind::Speakers => words.speakers,
+          DeviceKind::Wired => words.wired,
+          DeviceKind::UsbDac => words.usb_dac,
+          DeviceKind::Hdmi => words.hdmi,
+          DeviceKind::Bluetooth { .. } | DeviceKind::Card => words.card,
+        };
+        (
+          word,
+          self
+            .format
+            .as_ref()
+            .map(HardwareFormat::label)
+            .unwrap_or_default(),
+        )
+      }
+    };
+    let mut label = if detail.is_empty() {
+      kind.to_string()
+    } else {
+      format!("{kind}: {detail}")
+    };
+    if named {
+      if let Some(name) = self.name.as_deref().filter(|n| !n.is_empty()) {
+        label = format!("{label} \u{b7} {name}");
+      }
+    }
+    label
+  }
+}
+
 /// The output line from the most to the least detailed: what qbal hands the
-/// sound system, then what the card runs at (`card_word` is the translated
-/// "Card"). The card part outlives the app part as the width shrinks, because
-/// it is the one that says what the listener actually hears.
+/// sound system, then the device the sound reaches and its format. The device
+/// part outlives the app part as the width shrinks, because it is the one that
+/// says what the listener actually hears.
 pub fn output_candidates(
   output: Option<&OutputFormat>,
-  hardware: Option<&HardwareFormat>,
-  card_word: &str,
+  device: Option<&OutputDevice>,
+  words: &DeviceWords<'_>,
 ) -> Vec<String> {
   let app = output.map(OutputFormat::candidates).unwrap_or_default();
-  let Some(hardware) = hardware else {
+  let Some(device) = device else {
     return app;
   };
-  let card = format!("{card_word}: {}", hardware.label());
-  let mut all: Vec<String> = app
-    .iter()
-    .map(|app| format!("{app} \u{2192} {card}"))
-    .collect();
-  all.push(card);
+  let named = device.label(words, true);
+  let plain = device.label(words, false);
+  let mut all: Vec<String> = Vec::new();
+  // The app part drops its own device name first: on PipeWire it is only the
+  // sound server's ("default", "PipeWire"), while the device part names the
+  // real output.
+  let app_without_device: Vec<&String> = app.iter().skip(usize::from(app.len() > 2)).collect();
+  for app in &app_without_device {
+    all.push(format!("{app} \u{2192} {named}"));
+  }
+  for app in &app_without_device {
+    all.push(format!("{app} \u{2192} {plain}"));
+  }
+  all.push(named);
+  all.push(plain);
+  all.dedup();
   all
 }
 
@@ -233,26 +350,85 @@ mod tests {
     assert_eq!(alsa_bits("IEC958_SUBFRAME_LE"), None);
   }
 
+  const WORDS: DeviceWords<'static> = DeviceWords {
+    speakers: "Speakers",
+    wired: "Wired",
+    usb_dac: "USB DAC",
+    hdmi: "HDMI",
+    bluetooth: "Bluetooth",
+    card: "Card",
+  };
+
+  fn device(kind: DeviceKind, name: Option<&str>) -> OutputDevice {
+    OutputDevice {
+      kind,
+      name: name.map(str::to_string),
+      format: parse_hw_params(HW_PARAMS, None),
+    }
+  }
+
   #[test]
-  fn the_card_format_follows_the_app_output_and_survives_narrowing() {
-    let hw = parse_hw_params(HW_PARAMS, None).unwrap();
-    let all = output_candidates(Some(&output(None)), Some(&hw), "Card");
+  fn each_output_kind_names_itself_with_its_format() {
+    let label = |kind| device(kind, None).label(&WORDS, false);
+    assert_eq!(
+      label(DeviceKind::Speakers),
+      "Speakers: 24-bit \u{b7} 96 kHz"
+    );
+    assert_eq!(label(DeviceKind::Wired), "Wired: 24-bit \u{b7} 96 kHz");
+    assert_eq!(label(DeviceKind::UsbDac), "USB DAC: 24-bit \u{b7} 96 kHz");
+    assert_eq!(label(DeviceKind::Hdmi), "HDMI: 24-bit \u{b7} 96 kHz");
+    assert_eq!(label(DeviceKind::Card), "Card: 24-bit \u{b7} 96 kHz");
+    assert_eq!(
+      label(DeviceKind::Bluetooth {
+        codec: Some("ldac".into())
+      }),
+      "Bluetooth: LDAC \u{b7} 96 kHz",
+      "Bluetooth shows the codec and the rate, not the PCM fed to the encoder"
+    );
+    let bare = OutputDevice {
+      kind: DeviceKind::Bluetooth { codec: None },
+      name: None,
+      format: None,
+    };
+    assert_eq!(bare.label(&WORDS, true), "Bluetooth");
+  }
+
+  #[test]
+  fn bluetooth_codecs_are_spelled_as_their_makers_do() {
+    assert_eq!(bluetooth_codec_name("aptx_hd"), "aptX HD");
+    assert_eq!(bluetooth_codec_name("sbc_xq"), "SBC-XQ");
+    assert_eq!(bluetooth_codec_name("aac"), "AAC");
+    assert_eq!(bluetooth_codec_name("opus_05"), "Opus");
+    assert_eq!(bluetooth_codec_name("newcodec"), "NEWCODEC");
+  }
+
+  #[test]
+  fn the_device_follows_the_app_output_and_survives_narrowing() {
+    let usb = device(DeviceKind::UsbDac, Some("FiiO KA3"));
+    let all = output_candidates(Some(&output(Some("PipeWire"))), Some(&usb), &WORDS);
     assert_eq!(
       all,
       vec![
-        "32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{2192} Card: 24-bit \u{b7} 96 kHz".to_string(),
-        "48 kHz \u{2192} Card: 24-bit \u{b7} 96 kHz".to_string(),
-        "Card: 24-bit \u{b7} 96 kHz".to_string(),
+        "32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{2192} USB DAC: 24-bit \u{b7} 96 kHz \u{b7} FiiO KA3",
+        "48 kHz \u{2192} USB DAC: 24-bit \u{b7} 96 kHz \u{b7} FiiO KA3",
+        "32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{2192} USB DAC: 24-bit \u{b7} 96 kHz",
+        "48 kHz \u{2192} USB DAC: 24-bit \u{b7} 96 kHz",
+        "USB DAC: 24-bit \u{b7} 96 kHz \u{b7} FiiO KA3",
+        "USB DAC: 24-bit \u{b7} 96 kHz",
       ]
     );
     assert_eq!(
-      output_candidates(Some(&output(None)), None, "Card"),
+      output_candidates(Some(&output(None)), None, &WORDS),
       output(None).candidates()
     );
-    assert_eq!(
-      output_candidates(None, Some(&hw), "Card"),
-      vec!["Card: 24-bit \u{b7} 96 kHz".to_string()]
-    );
+  }
+
+  #[test]
+  fn pipewire_format_names_map_to_sample_widths_too() {
+    assert_eq!(alsa_bits("S16LE"), Some((16, false)));
+    assert_eq!(alsa_bits("S24_32LE"), Some((24, false)));
+    assert_eq!(alsa_bits("F32LE"), Some((32, true)));
+    assert_eq!(alsa_bits("F32P"), Some((32, true)));
   }
 
   #[test]

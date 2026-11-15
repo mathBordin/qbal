@@ -17,7 +17,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::core::stream_format::{output_candidates, widest_fitting, HardwareFormat, OutputFormat};
+use crate::core::stream_format::{output_candidates, widest_fitting, OutputDevice, OutputFormat};
 
 use super::util::{display_track_progress, get_color, get_track_progress_percentage};
 
@@ -804,8 +804,8 @@ struct LocalPlaybarView {
   quality: Vec<String>,
   /// The format the output device runs at, on the right of the artists row.
   output: Option<OutputFormat>,
-  /// The format the sound card runs at, after the output format.
-  hardware: Option<HardwareFormat>,
+  /// The device the sound reaches and its format, after the output format.
+  hardware: Option<OutputDevice>,
 }
 
 /// Render the playbar for an active Qobuz playback session; the download
@@ -962,7 +962,11 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
   // The output device's format sits on the right of the artists row.
   if artist_area.height >= 2 {
     let screens = &app.strings().screens;
-    let candidates = output_candidates(view.output.as_ref(), view.hardware.as_ref(), screens.card);
+    let candidates = output_candidates(
+      view.output.as_ref(),
+      view.hardware.as_ref(),
+      &screens.device_words(),
+    );
     if !candidates.is_empty() {
       let prefix = format!("{}: ", screens.output);
       let artists_width = UnicodeWidthStr::width(view.artists.as_str());
@@ -1529,21 +1533,41 @@ mod tests {
   }
 
   #[test]
-  fn the_card_format_follows_the_output_format() {
+  fn the_output_device_follows_the_output_format() {
+    use crate::core::stream_format::{parse_hw_params, DeviceKind, OutputDevice};
     let mut view = view_with(flac_labels(), Some(built_in_output()));
-    view.hardware = crate::core::stream_format::parse_hw_params(
-      "format: S24_3LE\nchannels: 2\nrate: 96000 (96000/1)\n",
-      Some("DAC"),
-    );
+    view.hardware = Some(OutputDevice {
+      kind: DeviceKind::UsbDac,
+      name: Some("FiiO KA3".into()),
+      format: parse_hw_params(
+        "format: S24_3LE\nchannels: 2\nrate: 96000 (96000/1)\n",
+        None,
+      ),
+    });
     let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &view);
     assert!(
-      content.contains("Output: 32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{b7} Built-in Audio \u{2192} Card: 24-bit \u{b7} 96 kHz"),
+      content.contains(
+        "Output: 32-bit float \u{b7} 48 kHz \u{b7} 2 ch \u{2192} USB DAC: 24-bit \u{b7} 96 kHz \u{b7} FiiO KA3"
+      ),
       "{content}"
     );
     let narrow = rendered_text(&App::default(), Rect::new(0, 0, 50, 6), &view);
     assert!(
-      narrow.contains("Card: 24-bit \u{b7} 96 kHz"),
-      "the card format stays: {narrow}"
+      narrow.contains("USB DAC: 24-bit \u{b7} 96 kHz"),
+      "the device stays: {narrow}"
+    );
+
+    view.hardware = Some(OutputDevice {
+      kind: DeviceKind::Bluetooth {
+        codec: Some("ldac".into()),
+      },
+      name: Some("WH-1000XM4".into()),
+      format: parse_hw_params("format: S32_LE\nchannels: 2\nrate: 96000 (96000/1)\n", None),
+    });
+    let content = rendered_text(&App::default(), Rect::new(0, 0, 160, 6), &view);
+    assert!(
+      content.contains("Bluetooth: LDAC \u{b7} 96 kHz \u{b7} WH-1000XM4"),
+      "{content}"
     );
   }
 }

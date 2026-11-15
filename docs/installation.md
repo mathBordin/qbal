@@ -22,6 +22,12 @@ The PipeWire packages and `clang` are only needed for the `audio-viz` feature
 below. If a PipeWire build step complains about `libclang`, also install
 `clang-devel` (Fedora) or `libclang-dev` (Debian/Ubuntu).
 
+To name the output in the playbar (speakers, headphones, a USB DAC, HDMI, or a
+Bluetooth device and its codec), Qbal runs PipeWire's `pw-dump` while it plays.
+Fedora installs it by default; elsewhere it is in `pipewire-utils` (Fedora,
+openSUSE), `pipewire-bin` (Debian/Ubuntu) or `pipewire` (Arch). Without it the
+playbar still shows the sound card's format, labelled "Card".
+
 ## 3. Build
 
 ```bash

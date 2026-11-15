@@ -6,17 +6,17 @@ impl App {
     self.playing_last_tick = playing;
   }
 
-  /// Records the format the sound card runs at.
+  /// Records the device the sound reaches.
   pub(crate) fn set_hardware_output(
     &mut self,
-    format: Option<crate::core::stream_format::HardwareFormat>,
+    device: Option<crate::core::stream_format::OutputDevice>,
   ) {
-    self.hardware_output = format;
+    self.hardware_output = device;
   }
 
-  /// The format the sound card runs at, when one is playing.
+  /// The device the sound reaches and its format, while qbal plays.
   #[cfg_attr(not(feature = "tui"), allow(dead_code))]
-  pub fn hardware_output(&self) -> Option<&crate::core::stream_format::HardwareFormat> {
+  pub fn hardware_output(&self) -> Option<&crate::core::stream_format::OutputDevice> {
     self.hardware_output.as_ref()
   }
 

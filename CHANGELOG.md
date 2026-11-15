@@ -14,9 +14,15 @@ Releases before 0.1.0 are spotatui's; see its repository for that history.
   and average bitrate (`FLAC · 24-bit · 96 kHz · 3104 kbps`) on the title row,
   shortened to fit narrow terminals.
 - **Output format in the playbar**: the format Qbal hands to the sound system,
-  and the format the sound card runs at, read from `/proc/asound`
-  (`Output: 32-bit float · 48 kHz · 2 ch → Card: 24-bit · 96 kHz`). When the two
-  differ, PipeWire or PulseAudio is converting the audio.
+  then the device the sound reaches and its format:
+  - Speakers, the wired jack (`Wired`), HDMI and USB DACs show the format the
+    card runs at, read from `/proc/asound`
+    (`Output: 32-bit float · 48 kHz · 2 ch → USB DAC: 24-bit · 96 kHz · FiiO KA3`).
+    When the two formats differ, PipeWire is converting the audio.
+  - Bluetooth shows the codec PipeWire encodes to and its rate
+    (`Bluetooth: LDAC · 96 kHz · WH-1000XM4`).
+  - The device comes from PipeWire's `pw-dump`, run every two seconds while Qbal
+    plays. Without it, the card's format shows as `Card`.
 - **Lua plugins**: `qbal.play_uri` also takes a `qobuz:album:` uri and plays
   the whole album.
 
